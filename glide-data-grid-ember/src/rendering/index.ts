@@ -20,6 +20,7 @@ export type {
     GridSelection,
     Item,
     Rectangle,
+    Slice,
     InnerGridCell,
     InnerGridColumn,
     CellArray,
@@ -58,6 +59,17 @@ export type { BaseDrawArgs, DrawArgs, PrepResult, GetCellRendererCallback, CellR
 // Theme
 export type { Theme, FullTheme } from "./theme.ts";
 export { getDataEditorTheme, mergeAndRealizeTheme } from "./theme.ts";
+
+// Selection writer (Phase 3a) -- pure GridSelection transform functions, ported from source's
+// `use-selection-behavior.ts` hook.
+export { setCurrentSelection, setSelectedRows, setSelectedColumns } from "./selection-behavior.ts";
+export type {
+    SelectionBlending,
+    RangeSelectMode,
+    SelectionTrigger,
+    SelectionBehaviorOptions,
+    SetCurrentResult,
+} from "./selection-behavior.ts";
 
 // Supporting engine pieces
 export { CellSet } from "./cell-set.ts";

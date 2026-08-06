@@ -273,6 +273,280 @@ browser-verified.
 - Column grouping is still fully off end to end (see `ENABLE_GROUPS` note above) — no args for it
   are exposed on `<GlideDataGrid>` yet either.
 
+## Phase 3 — Interaction layer (research done, implementation not started)
+
+**Baseline**: Ember port currently has zero interaction logic. `grid-host-controller.ts` hardcodes
+an empty `GridSelection` into every draw and has only a bare hover `mousemove` handler — no
+mousedown/up, no keyboard, no hit-testing beyond hover. This is greenfield work, not "extend
+existing behavior." `GridSelection`/`CompactSelection` (the data types) are ALREADY ported
+byte-for-byte correctly in `src/rendering/data-grid-types.ts` — only the mutation/interaction
+logic that writes into them is missing.
+
+Sub-phase plan (split finer per user request, each independently verifiable): **3a** selection
+writer (port `use-selection-behavior.ts`) + mouse click dispatch (cell/row-marker/header/
+select-all/drag-extend/header-menu hit-test — all one cohesive dispatcher in source, port as one
+unit). **3b** keyboard navigation (depends on 3a's selection writer). **3c** copy/paste (depends
+on 3a's selection state). **3d** column resize/reorder + row reorder drag-and-drop (independent of
+3a-3c, separate wrapper layer in source). Run sequentially, update status below as each lands.
+
+Status: **3a is DONE and browser-verified** (Claude did this after the implementing agent's report,
+which was correctly honest that it had only build/typecheck-verified, not browser-tested).
+
+**Real bug found during browser verification, now fixed** — worth internalizing since it's
+invisible to every automated check: clicking a cell updated `GridSelection` state correctly
+internally but drew **no visible selection highlight at all**. Root cause:
+`render/data-grid-render.cells.ts:283` (`if (isSelected && !isFocused && drawFocus) { accentCount
+= 0; }`) — the ported render engine deliberately suppresses the selection ring when the grid
+doesn't have real DOM focus, and Phase 2 had hardcoded `isFocused: false` in
+`grid-host-controller.ts` ("static for now", since no interaction existed yet to focus the grid).
+3a added real selection but didn't touch that hardcoded value, so every selection was invisible
+despite correct underlying state. **Fixed**: `root` is now `tabIndex = 0` + `outline:none` (the
+engine draws its own focus indication), `focus`/`blur` listeners track a real `isFocused` instance
+field feeding `DrawGridArg.isFocused`, and `onMouseDown` calls `this.root.focus()` explicitly.
+Re-verified in browser after the fix: click-to-select, shift-click range extension (correct
+rectangle + highlighted header cells for spanned columns), and header column click (full-column
+select, header itself highlighted) all render correctly.
+
+**Lesson for every remaining interaction-phase (3b/3c/3d and beyond): `tsc`/`pnpm build`/`vite
+build` passing is necessary but not sufficient — always do an actual browser pass clicking through
+the behavior before considering a phase done, especially for anything touching `isFocused`,
+`isSelected`, or other render-gating flags that a partial phase might leave stale.** Not yet
+tested in this browser pass (do this when 3b/3c/3d touch them, or as a follow-up): drag-extend
+(mouse-move-while-down growing a range), ctrl/cmd-click toggle, row-marker click (untestable until
+`rowMarkers`/`rowSelect` are threaded through as `<GlideDataGrid>` args — currently only reachable
+internally, not from the demo), and the header-menu hit-test (same — needs `column.hasMenu: true`
+wired into demo columns to test).
+
+#### 3a deliverables and the exact API 3b/3c/3d build on
+
+- **Selection writer**: `glide-data-grid-ember/src/rendering/selection-behavior.ts` (new, ~190
+  lines), pure functions (no class -- unlike `AnimationQueue`, there's no persistent state to own,
+  every function is `(currentSelection, ...) => nextSelection`). Exported via
+  `src/rendering/index.ts`'s barrel (also added `Slice` to the barrel's type exports, it wasn't
+  there before and the writer's public signatures need it):
+  ```ts
+  export type SelectionBlending = "exclusive" | "mixed" | "additive";
+  export type RangeSelectMode = "none" | "cell" | "rect" | "multi-cell" | "multi-rect";
+  export type SelectionTrigger = "click" | "drag" | "keyboard-nav" | "keyboard-select" | "edit";
+  export interface SelectionBehaviorOptions {
+      rangeBehavior: SelectionBlending; columnBehavior: SelectionBlending; rowBehavior: SelectionBlending;
+      rangeSelect: RangeSelectMode; rangeSelectionColumnSpanning: boolean;
+  }
+  export interface SetCurrentResult { selection: GridSelection; expand: boolean; } // `expand` is a
+  // carry-through of source's `expandSelection`/span-growth flag -- NOT acted on by anything yet
+  // (no span support ported), callers may ignore it safely.
+  export function setCurrentSelection(gridSelection, valueIn, expand, append, trigger, options): SetCurrentResult;
+  export function setSelectedRows(gridSelection, newRowsIn, append, allowMixed, options): GridSelection;
+  export function setSelectedColumns(gridSelection, newColsIn, append, allowMixed, options): GridSelection;
+  ```
+  3b (keyboard nav) will call `setCurrentSelection`/`setSelectedRows`/`setSelectedColumns` directly
+  for arrow-key/Home/End/Ctrl+A movement -- same functions 3a's mouse dispatch uses, no new writer
+  needed.
+
+- **`GridHostController`** (`src/-private/grid-host-controller.ts`, now ~1300 lines, up from 634)
+  gained: internal mutable `private selection: GridSelection` (uncontrolled -- no controlled-mode
+  support yet, see below), `public getSelection(): GridSelection`, native `mousedown` (on `root`)
+  and `mouseup` (on `window`, so a drag ending outside the grid still clears state) listeners, and
+  the full click-dispatch/drag-extend/header-menu-hit-test logic described in the "Mouse dispatch"
+  section above. Every selection mutation routes through one private `applySelection(newSelection)`
+  choke point that calls `onSelectionChanged` then `scheduleFullRedraw()` (full redraw chosen over
+  damage-based for simplicity, per the task's own "either is fine" guidance -- revisit if it's a
+  real perf problem later).
+
+  New `GridHostArgs` fields (all optional, all consumed by `resolveArgs()`'s existing
+  default-filling pattern):
+  ```ts
+  rowMarkers?: "none" | "checkbox" | "checkbox-visible" | "number" | "clickable-number" | "both"; // default "none"
+  rowMarkerWidth?: number;                    // default auto-sized from `rows`, matches source
+  rowSelect?: "none" | "single" | "multi";    // default "multi"
+  columnSelect?: "none" | "single" | "multi"; // default "multi"
+  rangeSelect?: "none" | "cell" | "rect" | "multi-cell" | "multi-rect"; // default "rect"
+  rangeSelectionColumnSpanning?: boolean;     // default true
+  onSelectionChanged?: (selection: GridSelection) => void;
+  onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
+  ```
+  Deliberately NOT added as args yet (hardcoded internally as `DEFAULT_SELECTION_OPTIONS`/
+  `DEFAULT_ROW_SELECTION_MODE`/`DEFAULT_COLUMN_SELECTION_MODE` constants in
+  `grid-host-controller.ts`, all matching source's own defaults): `rangeSelectionBlending`/
+  `columnSelectionBlending`/`rowSelectionBlending` (all `"exclusive"`), `rowSelectionMode`/
+  `columnSelectionMode` (both `"auto"`). The writer functions themselves are fully parameterized
+  over these, so exposing them later is just plumbing new `GridHostArgs` fields through
+  `resolveArgs()`/`selectionOptions()` -- no writer changes needed.
+
+- **Row-marker column mangling**: when `rowMarkers !== "none"`, `GridHostController` now prepends a
+  synthetic sticky column (mirrors source's `mangledCols`/`getMangledCellContent`,
+  `data-editor.tsx:1141-1169,1309-1382`, collapsed here into `mangledColumns()`/
+  `mangledFreezeColumns()`/`mangledGetCellContent()`/`computeMangledLayout()` private methods) --
+  every coordinate-math call site (`runDraw`, `rebuildScrollContent`, `onScroll`, `onMouseMove`,
+  `resolveMouseHit`, `hitTestHeaderMenu`) now goes through `computeMangledLayout()` instead of the
+  old direct `mapColumns(normalizeColumns(args.columns), args.freezeColumns)` call. When
+  `rowMarkers === "none"` (the default) every one of these is an identity transform, so 2a/2b's
+  established default-path behavior is unchanged -- verified by the full vite build still
+  succeeding and module count only growing by the one new file.
+  **Known gap**: only the marker column's *header* cell (the select-all checkbox) actually renders
+  today, because header-marker drawing was already Phase-1-ported (`render/
+  data-grid-render.header.ts:433-455`, driven by `InnerGridColumn.rowMarker`/`rowMarkerChecked`).
+  The marker column's *body* cells (per-row checkboxes) have no cell renderer -- source's
+  `cells/marker-cell.tsx` is Phase 4 (cell-type registry) territory -- so they currently draw as
+  empty. The selection *logic* for clicking/dragging in the marker column is fully implemented and
+  correct regardless (it only depends on coordinate math, not on what's drawn).
+
+- **Gap for whoever does the `<GlideDataGrid>` wiring**: per this task's explicit scope, `src/
+  components/glide-data-grid.gts` was NOT touched in 3a -- none of the new `GridHostArgs` fields
+  (`rowMarkers`, `rowSelect`, `columnSelect`, `rangeSelect`, `rangeSelectionColumnSpanning`,
+  `onSelectionChanged`, `onHeaderMenuClick`) are exposed as `<GlideDataGrid>` `@args` yet. Ordinary
+  cell click / shift-click / ctrl-click / drag-select (rect) / header-column click all work
+  out-of-the-box through the existing demo already (they only rely on `resolveArgs()`'s internal
+  defaults, which are all live with no `.gts` changes needed) -- **but the select-all checkbox
+  specifically cannot be browser-tested until `rowMarkers`/`rowSelect` are threaded through
+  `glide-data-grid.gts`'s `buildGridHostArgs()`**, same mechanical pattern as the existing
+  `freezeColumns` passthrough. This is a small, explicitly-deferred follow-up, not a bug.
+
+- **Controlled-selection mode**: not built. `GridHostController.selection` is always
+  internally-owned; there's no `GridHostArgs.selection` prop to accept an externally-managed value.
+  Source's default (uncontrolled) behavior is what's replicated. A future increment could add an
+  optional `selection?: GridSelection` arg that, when present, makes `applySelection` skip mutating
+  `this.selection` and rely on the caller re-supplying it via `getArgs()` instead (mirrors source's
+  `gridSelectionOuter`/`onGridSelectionChange` controlled-prop pattern in `data-editor.tsx`).
+
+- **Other known simplifications** (all called out inline in `grid-host-controller.ts` where
+  relevant): `expandSelection` (span/merged-cell selection growth on the `expand` flag) is not
+  ported -- no consumer uses `GridCell.span` yet. Cell-renderer `onSelect`/`onClick` mid-dispatch
+  interception hooks (source calls these inside `handleSelect`) are not wired -- no renderer in this
+  port implements them yet (Phase 4). `isMaybeScrollbar`'s scrollbar-width detection uses
+  `offsetWidth - clientWidth` rather than porting source's `getScrollBarWidth()`. No DPI/CSS-scale
+  correction (`rect.width / width`) in click coordinate math, kept consistent with the pre-existing
+  `onMouseMove` hover code which also omits it.
+
+### Selection model
+
+`GridSelection` (source `data-grid-types.ts:24-32`, already ported identically):
+`{ current?: { cell: Item, range: Rectangle, rangeStack: readonly Rectangle[] }, columns:
+CompactSelection, rows: CompactSelection }`. Empty selection: `{ current: undefined, rows:
+CompactSelection.empty(), columns: CompactSelection.empty() }` — exactly what
+`grid-host-controller.ts` already hardcodes as its permanent value; 3a replaces that hardcoding
+with real mutable state.
+
+`CompactSelection` (source `data-grid-types.ts:589-723`, already ported) is an immutable,
+sorted/merged sparse range set (`readonly [start,end)[]` slices). Key API: `.empty()`,
+`.fromSingleSelection(number|Slice)`, `.fromArray()`, `.add()`, `.remove()`, `.hasIndex()`,
+`.length`, iterable.
+
+**The selection *writer* is a separate, not-yet-ported piece**: source
+`packages/core/src/internal/data-grid/use-selection-behavior.ts` (152 lines, a React hook, NOT
+yet in the Ember port). Returns `[setCurrent, setSelectedRows, setSelectedColumns]`. Port its
+logic as a plain class/functions (same de-hooking pattern as `AnimationQueue`
+in Phase 2). Key behavior: `SelectionBlending` (`"exclusive"|"mixed"|"additive"`, one each for
+range/column/row, source defaults all `"exclusive"`) governs whether selecting rows wipes
+cell/column selection and vice versa — default is mutually exclusive. `setCurrent(value, expand,
+append, trigger)`: `append && rangeSelect∈{"multi-cell","multi-rect"}` pushes onto `rangeStack`
+(multi-range select); `trigger==="drag"` preserves `rangeStack` from the previous selection so a
+drag can grow an existing multi-range.
+
+**Mouse dispatch** — source's `handleSelect` (`data-editor.tsx:1838-2087`) is THE single function
+handling both cell and header clicks; port as one dispatcher, not separate cell/header handlers.
+Branches: row-marker column (col 0) click → select/deselect/extend row (shift extends contiguous
+range from a remembered anchor row; ctrl/cmd or touch or `rowSelectionMode==="multi"` toggles;
+plain click replaces whole row selection with just that row, deselects if it was the sole
+selection); ordinary cell click → shift extends range from previous `current.cell`, plain click
+sets fresh 1×1 selection; header click (non-marker column) → mirrors row logic for columns;
+out-of-bounds click clears everything. `isMultiKey = macOS ? metaKey : ctrlKey`. **Plain ctrl/cmd
+click alone does NOT multi-select** — multi-rect selection requires drag-while-modifier, not a
+bare click (only affects `append`'s interaction with `rangeStack` during drag).
+
+Drag-extend: `mouseState` set on mousedown (`{previousSelection, fillHandle}`), grown via the
+existing hover pipeline calling `setCurrent(..., trigger:"drag")` on every cell the mouse enters
+while a button is held; torn down on mouseup.
+
+**Keyboard nav** — source `data-editor/data-editor-keybindings.ts` (defaults) +
+`data-editor.tsx:onKeyDown`/`handleFixedKeybindings` (the dispatch switch) +
+`updateSelectedCell`/`adjustSelection` (the actual mutation). Defaults: arrows move active cell
+(alt+arrow = "free move", doesn't collapse range); shift+arrow grows range (only when
+`rangeSelect∈{"rect","multi-rect"}`); Home/End/Ctrl(Cmd)+arrows jump to edges; Tab/Shift+Tab alias
+onto right/left nav (no "tab leaves the grid" concept); Ctrl(Cmd)+A selects all; Space toggles row
+selection of current row, Ctrl+Space toggles column. **Copy/cut/paste are NOT part of this
+keybinding matcher** — see next section, they're native browser clipboard events instead.
+
+**Row markers / select-all** — `handleSelect`'s row-marker branch
+(`data-editor.tsx:1853-1911,1997-2007`). Guard: no-op if trailing blank row, `rowMarkers==="number"`
+(non-clickable), or `rowSelect==="none"`. Header checkbox click
+(`col===0`, guarded by `!headerRowMarkerDisabled && rowSelect==="multi"`) is a **binary toggle**,
+not a real tri-state cycle: `selectedRows.length !== rows` → select all `[0,rows)` via
+`CompactSelection.fromSingleSelection([0, rows])`; else → clear to empty. The tri-state
+checked/unchecked/**indeterminate** visual (already Phase-1-ported header draw logic consumes this)
+is purely derived: `numSelectedRows===0 ? false : numSelectedRows===rows ? true : undefined
+(indeterminate)` — computed fresh each render, not stored state. Indeterminate + click → select
+all (since count≠rows). Single-row-marker click without modifier **replaces** the whole row
+selection with just that row (does not add).
+
+**Header menu click (NOT sorting)** — source `data-grid.tsx`'s `isOverHeaderElement` (hit-tests a
+`menuBounds` rect, requires `column.hasMenu===true`) feeding `onClickImpl`'s
+`onHeaderMenuClick?.(col, bounds)` firing. This is a **separate, precise hit-test** distinct from
+a general header click (`onHeaderClicked`) — menu-icon glyph must specifically be hovered/clicked,
+not the whole header cell. Bounds are canvas-space, meant for positioning a floating menu.
+**Critical scope finding: sorting is 100% consumer responsibility.** The grid has no `onSort`,
+sort state, or row-reordering-by-value anywhere — `onHeaderMenuClick` only fires an event with
+`{col, bounds}`; the source's own example (`docs/examples/header-menus.stories.tsx`) builds the
+actual dropdown menu as a plain consumer-owned component (via the third-party `react-laag`
+positioning lib) with no sort example even present. **For this Ember port: Phase 3's job is only
+the hit-test + `onHeaderMenuClick` callback plumbing (menu glyph drawing is already a Phase-1
+render concern). Building an actual sort-menu UI + sort logic is Phase 7 (demo app) work**, not
+grid-engine work — don't try to bake sorting into the addon itself.
+
+### Copy/paste
+
+Source `packages/core/src/data-editor/copy-paste.ts` (not yet ported). Clipboard payload is
+**both** plain-text TSV-ish AND an HTML `<table>` (for cross-app fidelity — Excel/Sheets paste
+correctly), written simultaneously. Plain text: tab-joins cells/newline-joins rows, `url`-format
+cells emit the raw href not display text, `string-array` cells comma-join, everything else
+quote-escaped if it contains tab/newline/quote. HTML: real `<table>`, each `<td>` carries a custom
+`gdg-format`/`gdg-raw-value` attribute pair (glide-data-grid's own paste-fidelity round-trip
+mechanism, not a web standard) so paste can recover exact per-cell type/value, with an MSO-specific
+inline `<style>` for correct Excel line-break rendering.
+
+Trigger: **native browser `copy`/`cut`/`paste` events** on `window`, not a keydown listener — the
+"copy"/"cut"/"paste" keybinding booleans (default `true`) merely gate whether the native-event
+handler acts, they don't independently listen for Ctrl+C etc. Each handler checks
+`document.activeElement` is within the grid's canvas/scroll container before acting (focus-gated).
+
+Clipboard API usage prefers, in order: (1) synchronous `ClipboardEvent.clipboardData.setData(...)`
+when a live native event is available, (2) async `navigator.clipboard.write([ClipboardItem])`,
+(3) async `navigator.clipboard.writeText()` plain-text-only fallback. **Source has no explicit
+try/catch around the async Clipboard API calls** — a rejected permission prompt propagates as an
+unhandled rejection. Flagged as worth doing better in the Ember port (add real error handling),
+not something to blindly replicate.
+
+Paste target: `gridSelection.current.range.{x,y}` anchor (or sole selected column/row). Pasted
+cells are written row-major via a batched multi-cell edit + single damage-based redraw at the end
+(reuses the `updateCells`-style damage mechanism already built in Phase 2, not a full redraw per
+cell).
+
+### Column resize / reorder (drag-and-drop)
+
+Source `packages/core/src/internal/data-grid-dnd/data-grid-dnd.tsx` (not yet ported) — a wrapper
+layer around the base grid, **no native HTML5 Drag-and-Drop API**, pure custom mousedown/mousemove
+(raw native listener, not the synthetic per-cell mouse-args pipeline)/mouseup tracking.
+
+Resize: mousedown on a header's right edge (edge-hit region, ~a few px) starts it, fires
+`onColumnResizeStart`. Every mousemove tick while resizing fires `onColumnResize` **continuously**
+(not just at drag-end) with the live width (canvas devicePixelRatio-corrected). Mouseup fires
+`onColumnResizeEnd`. If multiple columns are co-selected, resize proportionally replicates across
+all of them. **Consumer owns all column-width state** — the grid/DnD wrapper never mutates
+`columns` itself, callbacks are purely notifications; resize is "enabled" merely by the presence of
+any one of the three callback props.
+
+Reorder: mousedown on a header body (not its edge) when a reorder callback is configured starts
+tracking; a 20px movement dead-zone before the drag visually "activates" (`dragColActive`); live
+hover tracking via the normal per-cell hover pipeline updates the drop target; an optional
+"propose move" callback can veto a specific drop position live during the drag (no visual
+drag-offset computed if vetoed); mouseup fires the actual move callback. **Consumer owns column
+order** — must reorder its own `columns` array in response.
+
+Row reorder is the same mechanism, gated on being in the row-marker column (col 0) specifically
+(distinct from row-marker *selection* clicks, which live in `handleSelect`/3a, not here) — includes
+a live preview during drag (remaps row indices so the dragged row visually appears at the drop
+target before the move is committed) and auto-scroll near grid edges while dragging.
+
 ## Process note for whoever picks this up next
 
 Two 2a attempts before this note existed wasted significant time/tokens: two died to
