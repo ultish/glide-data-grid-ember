@@ -26,12 +26,18 @@ importers:
       '@embroider/addon-shim':
         specifier: ^1.8.9
         version: 1.10.3
+      '@glimmer/component':
+        specifier: ^2.1.1
+        version: 2.1.1
       canvas-hypertxt:
         specifier: ^1.0.3
         version: 1.0.3
       decorator-transforms:
         specifier: ^2.2.2
         version: 2.4.0(@babel/core@7.29.7)
+      ember-modifier:
+        specifier: ^4.3.0
+        version: 4.3.0(@babel/core@7.29.7)
       lodash:
         specifier: ^4.17.19
         version: 4.18.1

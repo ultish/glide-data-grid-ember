@@ -1,15 +1,20 @@
 import Route from 'ember-route-template';
 import { pageTitle } from 'ember-page-title';
-import { WelcomePage } from 'ember-welcome-page';
+import GlideDataGrid from 'glide-data-grid-ember/components/glide-data-grid';
+import { demoColumns, demoGetCellContent, DEMO_ROW_COUNT } from 'test-app/utils/demo-data';
 
 export default Route(
   <template>
-    {{pageTitle "TestApp"}}
-    
-    {{outlet}}
+    {{pageTitle "GlideDataGrid Demo"}}
 
-    {{! The following component displays Ember's default welcome message. }}
-    <WelcomePage />
-    {{! Feel free to remove this! }}
+    <div style="width: 100vw; height: 100vh; box-sizing: border-box; padding: 8px;">
+      <GlideDataGrid
+        @columns={{demoColumns}}
+        @getCellContent={{demoGetCellContent}}
+        @rows={{DEMO_ROW_COUNT}}
+      />
+    </div>
+
+    {{outlet}}
   </template>
 );

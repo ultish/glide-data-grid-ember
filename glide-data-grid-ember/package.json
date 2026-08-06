@@ -48,8 +48,10 @@
   },
   "dependencies": {
     "@embroider/addon-shim": "^1.8.9",
+    "@glimmer/component": "^2.1.1",
     "canvas-hypertxt": "^1.0.3",
     "decorator-transforms": "^2.2.2",
+    "ember-modifier": "^4.3.0",
     "lodash": "^4.17.19"
   },
   "devDependencies": {
@@ -90,6 +92,8 @@
     "version": 2,
     "type": "addon",
     "main": "addon-main.cjs",
-    "app-js": {}
+    "app-js": {
+      "./components/glide-data-grid.js": "./dist/_app_/components/glide-data-grid.js"
+    }
   }
 }
