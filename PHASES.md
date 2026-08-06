@@ -76,7 +76,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 0 | Scaffold pnpm workspace (v2 addon + Vite test-app, TS/.gts) | **Done, committed** |
 | 1 | Port framework-agnostic rendering engine | **Done, committed** |
 | 2 | Ember canvas host layer | **Done, browser-verified, committed** |
-| 3 | Interaction layer (selection, copy/paste, sort menu, DnD resize/reorder, hover anim) | Pending |
+| 3 | Interaction layer (selection, copy/paste, sort menu, DnD resize/reorder, hover anim) | **In progress** — split into 3a (selection+clicks, done+committed) / 3b (keyboard nav, running) / 3c (copy/paste) / 3d (resize/reorder DnD) |
 | 4 | Core cell types + overlay editors | Pending |
 | 5 | Extra cell types incl. sparklines | Pending |
 | 6 | Theming system | Pending |

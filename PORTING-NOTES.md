@@ -273,7 +273,7 @@ browser-verified.
 - Column grouping is still fully off end to end (see `ENABLE_GROUPS` note above) — no args for it
   are exposed on `<GlideDataGrid>` yet either.
 
-## Phase 3 — Interaction layer (research done, implementation not started)
+## Phase 3 — Interaction layer (in progress: 3a done+browser-verified, 3b done+build-verified/not yet browser-tested, 3c/3d not started)
 
 **Baseline**: Ember port currently has zero interaction logic. `grid-host-controller.ts` hardcodes
 an empty `GridSelection` into every draw and has only a bare hover `mousemove` handler — no
@@ -291,6 +291,12 @@ on 3a's selection state). **3d** column resize/reorder + row reorder drag-and-dr
 
 Status: **3a is DONE and browser-verified** (Claude did this after the implementing agent's report,
 which was correctly honest that it had only build/typecheck-verified, not browser-tested).
+
+**3b (keyboard nav) is DONE, build/typecheck-verified only, NOT browser-tested by the implementing
+agent** (per this phase's own instructions — browser-testing was explicitly left to Claude/the
+orchestrator to do afterward, the same "lesson" called out below applies: don't consider it
+actually done until someone clicks a cell and tries arrows/shift+arrows/Ctrl+A/Home/End in a real
+browser).
 
 **Real bug found during browser verification, now fixed** — worth internalizing since it's
 invisible to every automated check: clicking a cell updated `GridSelection` state correctly
@@ -417,6 +423,93 @@ wired into demo columns to test).
   `offsetWidth - clientWidth` rather than porting source's `getScrollBarWidth()`. No DPI/CSS-scale
   correction (`rect.width / width`) in click coordinate math, kept consistent with the pre-existing
   `onMouseMove` hover code which also omits it.
+
+#### 3b deliverables and what 3c should know
+
+- **Everything landed in `grid-host-controller.ts`** (no new files) — a native `keydown` listener
+  on `root` (`private readonly onKeyDown`, registered/removed alongside the other mouse/focus
+  listeners) plus four private helpers: `moveActiveCell(args, col, row): boolean`,
+  `adjustSelection(args, dx, dy): void`, `selectAll(args): void`,
+  `scrollCellIntoView(args, col, row): void`. Controller grew from 1340 to 1620 lines (+280).
+  `getStickyWidth` was added to the existing `data-grid-lib.ts` import (needed by
+  `scrollCellIntoView` to know the frozen-column width for the horizontal-visibility check).
+- **Implemented** (mapped to the phase brief's numbered list):
+  1. Arrow-key movement — `moveActiveCell`, clamps to `[rowMarkerOffset, mappedColumns.length-1]`
+     × `[0, rows-1]`, no-ops (no `setCurrentSelection` call, no redraw, no scroll) when the clamped
+     target equals the current cell, i.e. already at an edge — matches source's
+     `updateSelectedCell` clamp-then-compare-equal pattern.
+  2. Shift+Arrow — `adjustSelection`, ports source's `adjustSelection`'s four "motion up/down/
+     left/right" cases (grow far edge / shrink near edge past the anchor) verbatim; the `2`/`-2`
+     ("jump to end/start", source's primary+shift+Home/End/Arrow) cases and the span-skipping
+     (`disallowed`/`getCellsForSelection`) logic are NOT ported (out of scope per the brief — no
+     span support exists anywhere in this port). Gated on `rangeSelect ∈ {"rect","multi-rect"}`,
+     matching source's `else if (rangeSelect === "rect" || rangeSelect === "multi-rect")` guard
+     around the `selectGrow*`/`selectToFirst/LastRow/Column` branch.
+  3. Home/End (first/last column in row), Ctrl(Cmd)+Home/End (first/last cell in grid),
+     Ctrl(Cmd)+Arrow (first/last row for Up/Down, first/last column for Left/Right) — all via
+     `moveActiveCell` with computed target col/row, `primary = browserIsOSX.value ? metaKey :
+     ctrlKey`.
+  4. Ctrl(Cmd)+A — `selectAll`, ported directly from source's `keys.selectAll` branch (bypasses the
+     `setCurrentSelection` writer, exactly like source bypasses `setCurrent` here too): `columns`/
+     `rows` CompactSelections stay **empty**, "select all" is expressed purely via `current.range =
+     {x: rowMarkerOffset, y: 0, width: args.columns.length, height: args.rows}` — note
+     `args.columns.length` is the caller's *un-mangled* column count (real columns only), so
+     select-all deliberately excludes the row-marker column, matching source's `columnsIn.length`
+     exactly. Verified against source at `data-editor.tsx`'s `isHotkey(keys.selectAll, ...)`
+     branch, not assumed.
+  5. Scroll-into-view — `scrollCellIntoView`, computes the target cell's `computeBounds(...)` (same
+     helper hover/click hit-testing already uses) and nudges `scrollerEl.scrollLeft`/`scrollTop` by
+     just enough to bring it fully inside the non-frozen/non-header viewport if it's currently
+     outside. Deliberately simplified vs source's `scrollTo` (see PORTING-NOTES.md's existing
+     Copy/paste-adjacent "Keyboard nav" research section) — no easing/`options.hAlign`/`vAlign`,
+     no frozen-trailing-rows accounting (there are none in this port), no DPI/CSS-scale correction
+     (consistent with the rest of this controller's mouse-coordinate math, which also omits it).
+     Called from both `moveActiveCell` (scrolls the new active cell) and `adjustSelection` (scrolls
+     whichever edge — far or near — actually moved, not the anchor).
+- **Deliberately NOT implemented** (all explicitly out-of-scope per the brief, or genuinely
+  optional and skipped for time): Tab/Shift+Tab nav aliasing; alt+Arrow "free move"/retain-selection
+  (source's `go*CellRetainSelection`, meaningless without span/editor support); cell activation
+  (Enter/Space/printable-char, Phase 4 — no cell editors exist yet); copy/cut/paste (Phase 3c,
+  native clipboard events not keydown anyway); row/column Space/Ctrl+Space select-row/select-column
+  shortcuts; primary+shift+Arrow/Home/End "jump and extend selection to an edge" (source's
+  `selectToFirst/LastRow/Column/Cell` keybinds — only bare shift+Arrow grow/shrink was requested).
+  Also not ported: source's generic string-based `keybindings`/`ConfigurableKeybinds`
+  remapping DSL (`common/is-hotkey.ts`) — this handler matches the *default* keybindings directly
+  via `ev.key`/`ev.ctrlKey`/`ev.metaKey`/`ev.shiftKey`/`ev.altKey` checks rather than reimplementing
+  the whole hotkey-string matcher, since nothing in this port exposes remappable keybindings yet.
+- **One deliberate behavioral deviation from source, documented inline in the code**: source's
+  `handleFixedKeybindings` has a `cancelOnlyOnMove`/`moved` gate that, read closely, means
+  shift+Arrow (`selectGrowUp`/etc.) calls in source's own code **never actually
+  `preventDefault()`s** — the final `moved = updateSelectedCell(col, row, ...)` call re-checks the
+  *anchor* cell (which `adjustSelection` never changes), so `moved` is always `false` for that
+  branch regardless of whether the range actually grew, and `trapFocus` defaults to `false`. This
+  reads as a source quirk/oversight rather than intentional behavior. This port always calls
+  `preventDefault()`/`stopPropagation()` when `adjustSelection` actually runs (i.e. whenever the
+  shift+Arrow + `rangeSelect` gate passes) — simpler, and avoids letting the browser's default
+  shift+Arrow behavior (which can vary) fight with the grid's own state change. Plain
+  arrow/Home/End/Ctrl+Arrow movement DOES faithfully replicate source's real "only preventDefault if
+  the cell actually moved" behavior (`moveActiveCell` returns `false` at an edge, and `onKeyDown`
+  only calls `preventDefault()` when it returns `true`) — this is the one place the nuance was
+  actually worth keeping since it's real navigable-vs-not-navigable state, not a code-path quirk.
+- **Verification performed**: `npx tsc --noEmit -p tsconfig.json` clean, `pnpm build` (rollup)
+  succeeds, `pnpm --filter test-app exec vite build` succeeds (405 modules, no new errors/warnings
+  beyond the pre-existing ones already noted in Phase 2's verification section). **Browser-verified
+  by Claude after this report** (the agent correctly declined to claim this itself): arrow-key
+  movement, shift+arrow range growth in both dimensions (confirmed an actual 2×2 rectangle, not
+  just one axis), Cmd+A select-all (confirmed full-grid highlight), and Cmd+End jump-to-last-cell
+  with correct auto-scroll (jumped to R199999C49, both axes scrolled into view) all work correctly.
+  No `isFocused`-style rendering gap this time — reused the focus machinery from the 3a fix. One
+  non-bug encountered during testing worth remembering: **this whole project's dev machine is
+  macOS**, so `browserIsOSX.value` is true and "primary" is `metaKey` (Cmd), not `ctrlKey` — a
+  literal Ctrl+A keypress correctly does nothing (matches source's own Mac/non-Mac branching), only
+  Cmd+A triggers select-all. Don't mistake that for a bug when testing on this machine.
+- **What 3c (copy/paste) should know**: keyboard nav didn't touch clipboard events at all (correctly
+  out of scope — see the "Copy/paste" section below, it's native `copy`/`cut`/`paste` events on
+  `window`, not a keydown concern). 3c's focus-gating should reuse the same `this.isFocused` field
+  this phase gates on (`document.activeElement` checks in source map onto it). The
+  `selection`/`this.selection.current`/`.rows`/`.columns` shape 3c needs to read from is unchanged
+  by this phase — it only ever *writes* through the same `setCurrentSelection`/`setSelectedRows`/
+  `setSelectedColumns` writer 3a already established, no new selection-shape concerns introduced.
 
 ### Selection model
 

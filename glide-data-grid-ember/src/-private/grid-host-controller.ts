@@ -64,6 +64,7 @@ import {
     getColumnIndexForX,
     getEffectiveColumns,
     getRowIndexForY,
+    getStickyWidth,
     itemsAreEqual,
     type MappedGridColumn,
 } from "../rendering/render/data-grid-lib.ts";
@@ -472,6 +473,11 @@ export class GridHostController {
         this.root.addEventListener("mousedown", this.onMouseDown);
         this.root.addEventListener("focus", this.onFocus);
         this.root.addEventListener("blur", this.onBlur);
+        // Keyboard nav (Phase 3b) lives on `root`, consistent with the mouse listeners above.
+        // Gated on `this.isFocused` inside the handler itself (real DOM focus already limits which
+        // element keydown targets, but this is a belt-and-suspenders guard matching the brief and
+        // makes the gating explicit rather than implicit in DOM focus semantics alone).
+        this.root.addEventListener("keydown", this.onKeyDown);
         // Mouseup listens on `window`, not `root` -- a drag-extend can end with the pointer outside
         // the grid (mirrors source's `onPointerUp` listening on `windowEventTarget`,
         // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderMenuClick`
@@ -661,6 +667,7 @@ export class GridHostController {
         this.root.removeEventListener("mousedown", this.onMouseDown);
         this.root.removeEventListener("focus", this.onFocus);
         this.root.removeEventListener("blur", this.onBlur);
+        this.root.removeEventListener("keydown", this.onKeyDown);
         window.removeEventListener("mouseup", this.onMouseUp);
         this.resizeObserver.disconnect();
 
@@ -1336,5 +1343,278 @@ export class GridHostController {
             );
             this.applySelection(result.selection);
         }
+    }
+
+    // --- keyboard nav (Phase 3b) -----------------------------------------------------------------
+    // Port of the relevant subset of source's `handleFixedKeybindings`/`updateSelectedCell`/
+    // `adjustSelection` (`data-editor.tsx`, see PORTING-NOTES.md for exact line references). Not
+    // ported: source's generic `keybindings` DSL (`is-hotkey.ts`)/`ConfigurableKeybinds` -- this
+    // handler matches the *default* keybindings directly rather than reimplementing the whole
+    // string-based hotkey matcher, since no consumer of this port has a need to remap keys yet.
+    // Also not ported: Tab/Shift+Tab nav aliasing, alt+arrow "free move" (retains a multi-cell
+    // selection while moving the anchor -- meaningless without span/editor support), cell
+    // activation (Enter/Space/printable-char -- Phase 4, no cell editors exist), copy/cut/paste
+    // (Phase 3c, native clipboard events not keydown), row/column space/ctrl+space select
+    // shortcuts, primary+shift+Arrow/Home/End "jump and extend" (source's own
+    // `selectToFirst/LastRow/Column/Cell` keybinds) -- only bare shift+Arrow grow/shrink (item 2 of
+    // the phase brief) is ported.
+    private readonly onKeyDown = (ev: KeyboardEvent): void => {
+        if (this.destroyed || !this.isFocused) return;
+
+        const primary = browserIsOSX.value ? ev.metaKey : ev.ctrlKey;
+
+        // Ctrl(Cmd)+A: select all. Works even with no `selection.current` yet (mirrors source,
+        // which computes `gridSelection.current?.cell ?? [rowMarkerOffset, 0]`), so this check runs
+        // before the "no current cell -> no-op" guard below that gates every other key.
+        if (primary && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "a") {
+            this.selectAll(this.resolveArgs());
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+        }
+
+        const isArrow =
+            ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight";
+        const isHome = ev.key === "Home";
+        const isEnd = ev.key === "End";
+        if (!isArrow && !isHome && !isEnd) return;
+        // alt+Arrow ("retain selection" free move, source's `go*CellRetainSelection`) is not
+        // ported -- meaningless without span/editor support in this port yet -- so let the browser
+        // default run rather than half-implement it.
+        if (ev.altKey) return;
+        // Mirrors source's `if (gridSelection.current === undefined) return false;` early-out --
+        // every nav key below is a no-op with nothing selected yet.
+        if (this.selection.current === undefined) return;
+
+        const args = this.resolveArgs();
+        const [col, row] = this.selection.current.cell;
+
+        if (primary && ev.shiftKey) {
+            // primary+shift+Arrow/Home/End ("jump and extend selection to an edge") not ported --
+            // out of scope per the phase brief, which only asks for bare shift+Arrow grow/shrink.
+            return;
+        }
+
+        if (ev.shiftKey) {
+            if (!isArrow) return; // shift+Home/End "extend to edge" not ported
+            if (args.rangeSelect !== "rect" && args.rangeSelect !== "multi-rect") return;
+            const dx: -1 | 0 | 1 = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : 0;
+            const dy: -1 | 0 | 1 = ev.key === "ArrowUp" ? -1 : ev.key === "ArrowDown" ? 1 : 0;
+            this.adjustSelection(args, dx, dy);
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+        }
+
+        let targetCol = col;
+        let targetRow = row;
+        if (primary) {
+            // Ctrl(Cmd)+Home/End: jump to first/last cell in the whole grid. Ctrl(Cmd)+Arrow: jump
+            // to first/last row (up/down) or column (left/right) only.
+            if (isHome) {
+                targetCol = args.rowMarkerOffset;
+                targetRow = 0;
+            } else if (isEnd) {
+                targetCol = Number.MAX_SAFE_INTEGER;
+                targetRow = args.rows - 1;
+            } else if (ev.key === "ArrowUp") {
+                targetRow = 0;
+            } else if (ev.key === "ArrowDown") {
+                targetRow = args.rows - 1;
+            } else if (ev.key === "ArrowLeft") {
+                targetCol = args.rowMarkerOffset;
+            } else if (ev.key === "ArrowRight") {
+                targetCol = Number.MAX_SAFE_INTEGER;
+            }
+        } else if (isHome) {
+            targetCol = args.rowMarkerOffset;
+        } else if (isEnd) {
+            targetCol = Number.MAX_SAFE_INTEGER;
+        } else if (ev.key === "ArrowUp") {
+            targetRow = row - 1;
+        } else if (ev.key === "ArrowDown") {
+            targetRow = row + 1;
+        } else if (ev.key === "ArrowLeft") {
+            targetCol = col - 1;
+        } else if (ev.key === "ArrowRight") {
+            targetCol = col + 1;
+        }
+
+        const moved = this.moveActiveCell(args, targetCol, targetRow);
+        // Mirrors source's `moved || !cancelOnlyOnMove || trapFocus` gate (`trapFocus` defaults to
+        // `false` and isn't exposed by this port yet) -- an already-at-the-edge nav key is left
+        // alone (not prevented) rather than swallowed, matching source exactly.
+        if (moved) {
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+    };
+
+    // Port of `updateSelectedCell`'s core (clamp + no-op-if-unchanged + `setCurrent(..., "keyboard-nav")`
+    // + scroll-into-view), minus the `freeMove`/trailing-blank-row/`lastSent` concerns that don't
+    // apply to this port yet. Returns whether the active cell actually moved (false when the
+    // clamped target equals the current cell -- i.e. the move was into a wall).
+    private moveActiveCell(args: ResolvedGridHostArgs, colIn: number, rowIn: number): boolean {
+        const { mappedColumns } = this.computeMangledLayout(args);
+        const minCol = args.rowMarkerOffset;
+        const maxCol = mappedColumns.length - 1;
+        const col = Math.min(Math.max(colIn, minCol), maxCol);
+        const row = Math.min(Math.max(rowIn, 0), args.rows - 1);
+
+        const current = this.selection.current;
+        if (current !== undefined && current.cell[0] === col && current.cell[1] === row) return false;
+
+        const result = setCurrentSelection(
+            this.selection,
+            { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 } },
+            true,
+            false,
+            "keyboard-nav",
+            this.selectionOptions(args)
+        );
+        this.applySelection(result.selection);
+        this.scrollCellIntoView(args, col, row);
+        return true;
+    }
+
+    // Port of `adjustSelection`'s core motion logic (the `y !== 0`/`x !== 0` "motion up/down/left/right"
+    // cases only -- case `2`/`-2`, "jump to end/start", is source's primary+shift+Home/End/Arrow,
+    // deliberately not ported, see `onKeyDown` above) and the span-skipping (`disallowed`/
+    // `getCellsForSelection`) logic, which has no meaning without span support (not ported anywhere
+    // in this port yet). Grows/shrinks the range on the edge opposite the anchor cell
+    // (`selection.current.cell`); shrinks back in on the near edge once the far edge has retreated
+    // past the anchor. Exactly one of `dx`/`dy` is non-zero per call (a single arrow keypress).
+    private adjustSelection(args: ResolvedGridHostArgs, dx: -1 | 0 | 1, dy: -1 | 0 | 1): void {
+        const current = this.selection.current;
+        if (current === undefined) return;
+        const [col, row] = current.cell;
+        const old = current.range;
+        let left = old.x;
+        let right = old.x + old.width;
+        let top = old.y;
+        let bottom = old.y + old.height;
+
+        const { mappedColumns } = this.computeMangledLayout(args);
+        const minCol = args.rowMarkerOffset;
+        const maxColExclusive = mappedColumns.length;
+        const maxRowExclusive = args.rows;
+
+        if (dy === 1) {
+            // motion down
+            if (top < row) {
+                top++;
+            } else {
+                bottom = Math.min(maxRowExclusive, bottom + 1);
+            }
+        } else if (dy === -1) {
+            // motion up
+            if (bottom > row + 1) {
+                bottom--;
+            } else {
+                top = Math.max(0, top - 1);
+            }
+        }
+
+        if (dx === 1) {
+            // motion right
+            if (left < col) {
+                left++;
+            } else {
+                right = Math.min(maxColExclusive, right + 1);
+            }
+        } else if (dx === -1) {
+            // motion left
+            if (right > col + 1) {
+                right--;
+            } else {
+                left = Math.max(minCol, left - 1);
+            }
+        }
+
+        const result = setCurrentSelection(
+            this.selection,
+            { cell: current.cell, range: { x: left, y: top, width: right - left, height: bottom - top } },
+            true,
+            false,
+            "keyboard-select",
+            this.selectionOptions(args)
+        );
+        this.applySelection(result.selection);
+
+        // Scroll the edge that actually moved into view (mirrors source's per-branch `scrollTo`
+        // calls in `adjustSelection`), not the anchor cell.
+        const edgeCol = dx === 1 ? right - 1 : dx === -1 ? left : col;
+        const edgeRow = dy === 1 ? bottom - 1 : dy === -1 ? top : row;
+        this.scrollCellIntoView(args, edgeCol, edgeRow);
+    }
+
+    // Port of `handleFixedKeybindings`'s `selectAll` branch (`data-editor.tsx`). Note this
+    // deliberately does NOT go through the `setCurrentSelection` writer (source calls
+    // `setGridSelection` directly here too) -- and the range's `width` is `args.columns.length`,
+    // the caller's *un-mangled* column count, not `mappedColumns.length` -- select-all spans every
+    // real column starting right after the row-marker column (if any), never the marker column
+    // itself. `rows`/`columns` CompactSelections stay empty; "select all" is expressed purely via
+    // `current.range` covering the whole grid, matching source exactly (verified against
+    // `data-editor.tsx`'s `keys.selectAll` branch).
+    private selectAll(args: ResolvedGridHostArgs): void {
+        const current = this.selection.current;
+        const newSelection: GridSelection = {
+            columns: CompactSelection.empty(),
+            rows: CompactSelection.empty(),
+            current: {
+                cell: current?.cell ?? [args.rowMarkerOffset, 0],
+                range: { x: args.rowMarkerOffset, y: 0, width: args.columns.length, height: args.rows },
+                rangeStack: [],
+            },
+        };
+        this.applySelection(newSelection);
+    }
+
+    // Simplified stand-in for source's `scrollTo` (see PORTING-NOTES.md -- easing/behavior options,
+    // frozen-trailing-rows, and DPI/CSS-scale correction are all not ported). Scrolls just enough
+    // that the given cell's bounds (computed the same way hover/click hit-testing does) become
+    // fully visible within the non-frozen/non-header viewport, doing nothing if it already is.
+    private scrollCellIntoView(args: ResolvedGridHostArgs, col: number, row: number): void {
+        const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        if (col < 0 || col >= mappedColumns.length || row < 0 || row >= args.rows) return;
+
+        const bounds = computeBounds(
+            col,
+            row,
+            this.width,
+            this.height,
+            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+            args.headerHeight,
+            this.cellXOffset,
+            this.cellYOffset,
+            this.translateX,
+            this.translateY,
+            args.rows,
+            freezeColumns,
+            0,
+            mappedColumns,
+            args.rowHeight
+        );
+
+        let deltaX = 0;
+        if (col >= freezeColumns) {
+            const frozenWidth = getStickyWidth(mappedColumns);
+            if (bounds.x < frozenWidth) {
+                deltaX = bounds.x - frozenWidth;
+            } else if (bounds.x + bounds.width > this.width) {
+                deltaX = bounds.x + bounds.width - this.width;
+            }
+        }
+
+        let deltaY = 0;
+        const totalHeaderHeight = args.headerHeight; // ENABLE_GROUPS is always false in this phase
+        if (bounds.y < totalHeaderHeight) {
+            deltaY = bounds.y - totalHeaderHeight;
+        } else if (bounds.y + bounds.height > this.height) {
+            deltaY = bounds.y + bounds.height - this.height;
+        }
+
+        if (deltaX !== 0) this.scrollerEl.scrollLeft += deltaX;
+        if (deltaY !== 0) this.scrollerEl.scrollTop += deltaY;
     }
 }
