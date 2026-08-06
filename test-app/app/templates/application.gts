@@ -1,9 +1,15 @@
-import pageTitle from 'ember-page-title/helpers/page-title';
+import Route from 'ember-route-template';
+import { pageTitle } from 'ember-page-title';
+import { WelcomePage } from 'ember-welcome-page';
 
-<template>
-  {{pageTitle "TestApp"}}
+export default Route(
+  <template>
+    {{pageTitle "TestApp"}}
+    
+    {{outlet}}
 
-  <h2 id="title">Welcome to Ember</h2>
-
-  {{outlet}}
-</template>
+    {{! The following component displays Ember's default welcome message. }}
+    <WelcomePage />
+    {{! Feel free to remove this! }}
+  </template>
+);

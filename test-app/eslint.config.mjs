@@ -12,8 +12,6 @@
  *     npx eslint --inspect-config
  *
  */
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
 import globals from 'globals';
 import js from '@eslint/js';
 
@@ -32,19 +30,10 @@ const parserOptions = {
     js: {
       ecmaFeatures: { modules: true },
       ecmaVersion: 'latest',
-      requireConfigFile: false,
-      babelOptions: {
-        plugins: [
-          [
-            '@babel/plugin-proposal-decorators',
-            { decoratorsBeforeExport: true },
-          ],
-        ],
-      },
     },
     ts: {
       projectService: true,
-      tsconfigRootDir: dirname(fileURLToPath(import.meta.url)),
+      tsconfigRootDir: import.meta.dirname,
     },
   },
 };
@@ -94,7 +83,6 @@ export default ts.config(
     extends: [...ts.configs.recommendedTypeChecked, ember.configs.gts],
   },
   {
-    ...qunit.configs.recommended,
     files: ['tests/**/*-test.{js,gjs,ts,gts}'],
     plugins: {
       qunit,
@@ -104,14 +92,11 @@ export default ts.config(
    * CJS node files
    */
   {
-    ...n.configs['flat/recommended-script'],
     files: [
       '**/*.cjs',
       'config/**/*.js',
-      'tests/dummy/config/**/*.js',
       'testem.js',
       'testem*.js',
-      'index.js',
       '.prettierrc.js',
       '.stylelintrc.js',
       '.template-lintrc.js',
@@ -133,7 +118,6 @@ export default ts.config(
    * ESM node files
    */
   {
-    ...n.configs['flat/recommended-module'],
     files: ['**/*.mjs'],
     plugins: {
       n,
