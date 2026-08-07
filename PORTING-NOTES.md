@@ -2259,3 +2259,477 @@ every cell is `allowOverlay: false` so the grid's own overlay editor cannot fire
 damage path. Nothing changes identity anywhere. Browser-verified: editing the form and submitting
 repainted all five columns (text/number/boolean) for the mutated row, and a second form-free
 mutation path (a "toggle active" button) did too.
+
+## Phase 7a — Column sort (`src/data-source/`), the first piece of the data-source layer
+
+**Delivered**: `glide-data-grid-ember/src/data-source/column-sort.ts` (port of source's
+`packages/source/src/use-column-sort.ts`) and `glide-data-grid-ember/src/data-source/index.ts`
+(the directory's barrel). No existing file was modified — `src/index.ts` is a 0-byte file and is
+**not** this project's barrel convention; consumers import per-directory, e.g.
+`import { withColumnSort } from "glide-data-grid-ember/data-source/index"` (same shape as the
+existing `glide-data-grid-ember/rendering/index` imports in `test-app`). Rollup's
+`publicEntrypoints(['**/*.js', ...])` already covers the new directory with no config change.
+
+### Final exported API (Phase 8's `recordsSource` and Phase 7c's demo can consume this without re-reading the code)
+
+```ts
+// glide-data-grid-ember/data-source/index
+export type ColumnSort = {
+    column: GridColumn;                            // matched by identity, then by `id`
+    mode?: "default" | "raw" | "smart";            // default => String.localeCompare
+    direction?: "asc" | "desc";                    // default "asc"
+};
+export interface ColumnSortProps {
+    readonly columns: readonly GridColumn[];
+    readonly rows: number;
+    readonly getCellContent: (cell: Item) => GridCell;
+    readonly sort?: ColumnSort | readonly ColumnSort[];   // single or multi-column
+}
+export interface ColumnSortResult {
+    readonly getCellContent: (cell: Item) => GridCell;    // row-remapping wrapper
+    readonly getOriginalIndex: (index: number) => number; // displayed row -> caller's row index
+}
+export function withColumnSort(p: ColumnSortProps): ColumnSortResult;
+export function compareSmart(a: string | number, b: string | number): number;
+export function compareRaw(a: string | number, b: string | number): number;
+```
+
+Name choice: **`withColumnSort`** (matches the `withColumnSort(...)` sketch already in PHASES.md's
+Phase 8 scope section), replacing source's hook-shaped `useColumnSort`. `ColumnSort`/`compareSmart`/
+`compareRaw` keep source's names. `Props`/`Result` were promoted to exported
+`ColumnSortProps`/`ColumnSortResult` (source keeps them private, but a consumer here needs to be able
+to type an intermediate variable).
+
+Composition shape — note it takes **one props object**, not `(source, sort)`:
+
+```ts
+@cached get gridArgs() {
+    const src = recordsSource({ records: this.people, columns: this.columns });  // Phase 8
+    return { ...src, ...withColumnSort({ ...src, sort: this.sort }) };
+}
+```
+
+**Implication for Phase 8**: for that spread to work, `recordsSource`'s return value should include
+`columns`, `rows` and `getCellContent` under exactly those names.
+
+### Identity-stability design (the load-bearing decision — read standing lesson #1 first)
+
+`getCellContent` is one of the ~18 `DrawGridArg` fields `computeCanBlit` compares **by identity**, so
+a decorator that returns a fresh closure per call silently kills the scroll blit fast path. This
+module therefore **memoizes internally** (the "correct by construction" option) rather than relying on
+a documented "wrap me in `@cached`" rule:
+
+- Module-scope `WeakMap<getCellContent, { rows, sortKey, result }>` — single entry per incoming
+  `getCellContent` identity. WeakMap so multiple grids on a page don't collide and entries die with
+  their closures.
+- **`sortKey` is a structural digest, not the `sort` argument's identity**: `"<resolvedColIdx>:<mode>:<direction>|"`
+  per active sort. This is the non-obvious part and it matters — a consumer writing
+  `get sort() { return { column: this.columns[0], direction: "asc" }; }` allocates a fresh object on
+  every read, and an identity-keyed cache would rebuild the whole O(rows) sort map every call, on the
+  paint path. Resolving column indices costs O(sorts × columns) per call (a few hundred `===` at
+  worst), which is free next to the sweep it protects. `columns` identity is deliberately *not* in the
+  key for the same reason: only the resolved index affects the result.
+- **No-sort case returns the caller's original `getCellContent` reference unchanged** (source does
+  this too) — not a pass-through wrapper, which would be a fresh identity on the common path.
+  `getOriginalIndex` is then a module-scope `identityIndex` constant, also stable.
+- Known, accepted limitation: two different grids sharing one `getCellContent` function but different
+  `rows`/`sort` will thrash the single cache entry. That degrades to source's own per-render behaviour
+  rather than breaking anything; not worth a multi-entry cache.
+
+**Staleness contract, same as source's `useMemo`**: the sort map is keyed on `getCellContent`
+*identity*, so mutating data behind an identity-stable `getCellContent` does **not** re-sort. Consumers
+on this port's lazy-closure + `updateCells()` pattern must hand over a new `getCellContent` identity
+when values change if they want the ordering to follow. Worth restating in DATA.md when Phase 7c/8
+wires sorting into a demo.
+
+### Deviations from source
+
+- `lodash/range` dropped for a plain loop (no new dependency, and `lodash` wasn't needed at all here).
+- `noUncheckedIndexedAccess` forced two safe guards source doesn't have: the wrapper does
+  `getCellContentIn([col, sortMap[row] ?? row])` and `getOriginalIndex` does `sortMap[index] ?? index`
+  (source indexes unguarded). Both are pure passthrough for an out-of-range row.
+- `cellToSortData` has a `default: return ""` arm. Checked against this port's real
+  `GridCellKind` enum (`src/rendering/data-grid-types.ts:87-100`) rather than assuming parity — it is
+  in fact identical to source's 12 kinds, and `GridCell` excludes the inner-only `NewRowCell`/
+  `MarkerCell`, so all 12 arms are exhaustive and the default is unreachable defensive code.
+  `GridCellKind.Custom` sorts on `cell.copyData`, per source — so every Phase 5 extra cell type sorts
+  correctly for free, since they are all `CustomCell`s with a `copyData`.
+- `compareSmart`'s `a == b` loose equality is verbatim from source and deliberate (catches `1 == "1"`);
+  it now carries an inline comment saying so, so nobody "fixes" it to `===`.
+
+### Verification actually performed
+
+- `cd glide-data-grid-ember && npx tsc --noEmit -p tsconfig.json` — clean, exit 0.
+- `pnpm --filter glide-data-grid-ember build` — rollup + `glint --declaration` succeed;
+  `dist/data-source/{column-sort,index}.js` and `declarations/data-source/*.d.ts` produced. (The
+  "Generated empty chunks: index, …" warning is pre-existing, caused by the empty `src/index.ts`.)
+- **Behaviour smoke-tested against the built `dist/`** with a small Node ESM script (not just
+  type-checked): single-column asc/desc, `mode: "smart"` vs the default `localeCompare` on numeric
+  strings (`[10,2,33,4]` string-sorted vs `[33,10,4,2]` smart-desc — confirms `mode` is actually
+  wired), multi-column sort tie-breaking, `getOriginalIndex` round-trip, unresolvable-column
+  passthrough, and the three identity properties: no-sort returns the same reference, two calls with
+  *freshly allocated* equivalent `sort` objects return the identical result object **and** perform
+  zero extra `getCellContent` sweeps, and a direction change does produce a new closure.
+- **Not done** (out of scope for 7a, no UI exists yet): no browser test, no test-app wiring, no sort
+  menu. Phase 7c owns those. Nothing in `grid-host-controller.ts` or `glide-data-grid.gts` was
+  touched (the orchestrator was editing both concurrently for column group headers).
+
+## Phase 7c — grid.glideapps.com demo replica + consumer-built sort menu (test-app only)
+
+**Scope was explicitly narrowed by the user**: the *grid only*. The marketing page's hero banner,
+nav and six feature cards were deliberately **not** built, even though PHASES.md still lists the
+feature cards as a Phase 7 requirement. The one non-grid piece of UI here is the column sort menu,
+which is grid interaction, not page chrome.
+
+### Delivered (all in `test-app`, nothing in the addon was modified)
+
+- **`test-app/app/utils/glide-demo-data.ts`** — a second, independent dataset (the 50-column ×
+  200k-row `demo-data.ts` is untouched; it is still the Phase 3-6 verification surface). 3,000
+  records built eagerly at module scope from a seeded **mulberry32** PRNG (5 lines, no dependency —
+  the demo must be byte-identical across reloads or "did the sort actually reorder anything?" is
+  unanswerable). `makeGlideDemoGetCellContent(columns)` returns an O(1) closure bound to a column
+  order (it is called once per painted cell inside the draw loop).
+- **`test-app/app/components/glide-demo.gts`** — the demo component + the sort menu.
+- **`test-app/app/styles/app.css`** — the sort menu's styles (first real content in that file).
+- **`test-app/app/components/demo-switcher.gts`** — gained a third tab, "Glide demo grid". Its
+  `@tracked showTracking` boolean became a `@tracked tab: "full-grid" | "tracking" | "glide"`.
+
+### Column / data layout (matches the live site's grid, observed directly)
+
+| Group | Column | Cell kind | `icon` |
+|---|---|---|---|
+| ID | Email | Text | HeaderEmail |
+| Name | First name / Last name | Text | HeaderString |
+| Info | Photo | Image | HeaderImage |
+| Info | Opt-In | Boolean | HeaderBoolean |
+| Info | Title | Text | HeaderString |
+| Info | More Info | Uri (`hoverEffect`, no `onClickUri`) | HeaderUri |
+| Info | Performance | Custom → Phase 5a **sparkline** (`graphKind: "area"`) | HeaderArray |
+| Employment Data | Manager | Drilldown (1 chip, avatar `img`) | HeaderReference |
+| Employment Data | Hired | Text (`Date.toDateString()`, e.g. `Sun Jun 21 2026`) | HeaderDate |
+| Employment Data | Level | Number (1–12) | HeaderNumber |
+
+Every column carries `hasMenu: true` — that flag is what gates `hitTestHeaderMenu`, not just the
+glyph drawing. Grouping needs no flag: the addon derives `enableGroups` from
+`columns.some(c => c.group !== undefined)` (Phase 7b), so setting `group` is the whole opt-in.
+`@groupHeaderHeight={{28}}` / `@headerHeight={{34}}`.
+
+**Images are generated, not shipped as base64.** `makeCanvasDataUrl()` paints an offscreen
+`<canvas>` and calls `toDataURL("image/png")`: a 12-colour palette of head-and-shoulders "photo"
+glyphs, plus per-manager round initials avatars. Memoized, built lazily on first `getCellContent`
+call (needs a DOM; the module is imported but not executed at build time), with the same tiny static
+PNG `demo-data.ts` uses as a no-DOM fallback. Zero network requests, and thumbnails are genuinely
+distinct per row rather than N copies of one swatch.
+
+### How sorting is wired
+
+Sort state is `@tracked sortColumnId: string | undefined` + `@tracked sortDirection` — **ids, not a
+`ColumnSort` object**, so it survives a column reorder. Three `@cached` getters chain:
+
+```
+displayColumns  ->  (columns + a " ↑"/" ↓" suffix on the sorted column's title)
+baseGetCellContent -> makeGlideDemoGetCellContent(this.columns)     // keyed on column order only
+getCellContent  ->  withColumnSort({ columns: displayColumns, rows, getCellContent: base, sort }).getCellContent
+```
+
+`mode: "smart"` is used for every column so the numeric **Level** column sorts 2 < 10 instead of
+lexicographically; for plain text columns `"smart"` is identical to the default `localeCompare`.
+**Known limitation, deliberate**: `Hired` is a `Text` cell holding `"Sun Jun 21 2026"`, so it sorts
+alphabetically, not chronologically. The live site's column is text too; making it sort by date
+would need a separate sortable representation, not a change to `withColumnSort`.
+
+Reactivity chain, all of it load-bearing: `sortColumnId` changes → `@cached get getCellContent`
+invalidates → the template's `@getCellContent` reference changes → `<GlideDataGrid>`'s modifier
+re-runs inside its tracking frame → `scheduleFullRedraw()`. This is "pattern 2" from the
+"Autotracking → canvas" section above. Nothing is allocated inline in the template;
+`getCellRenderer` (`createCombinedCellRenderer(defaultGetCellRenderer, allExtraCells)`) is built
+once at module scope, per standing lesson #1.
+
+Menu UI: `@onHeaderMenuClick(col, bounds)` stores `{col, bounds}` in tracked state; the menu is an
+absolutely-positioned `<div>` inside a `position: relative` wrapper that contains only the grid, so
+`bounds` (grid-root-relative) is directly usable. **`col` is in the grid's *mangled* column space**
+— it includes the row-marker column — so the demo subtracts `ROW_MARKER_OFFSET = 1`. Closes on a
+fixed full-viewport backdrop `mousedown`, on Escape (a capture-phase `document` keydown listener
+registered in the constructor + `registerDestructor`), and after choosing an item. The active sort
+is shown twice: a ✓ on the chosen menu item and an arrow appended to the canvas header title.
+
+### Verification actually performed
+
+- `npx tsc --noEmit -p tsconfig.json` clean; `pnpm --filter glide-data-grid-ember build` clean;
+  `pnpm --filter test-app exec vite build` clean (450 modules); `npx glint` in `test-app` clean.
+- **Browser-verified** on a dedicated dev server (:4344 — :4200 and :4210 were other agents').
+  All 11 columns render real content; the 4 group headers render and span correctly; sparklines draw
+  as real, per-row-distinct area charts; photos and manager avatars render; horizontal + vertical
+  scroll both work with the group header and column header staying pinned (`scrollHeight` was
+  exactly `102,062 = 28 + 34 + 3000×34`, confirming the padder math accounts for the group header).
+  Sorting was confirmed by **reading actual cell text before and after**: Last name ascending turned
+  `Ritchie/Lamarr/Torvalds/Borg/Hopper` into five `Allen`s, descending into `Wirth`; Level ascending
+  put all `1`s at the top and descending all `12`s (which is what proves `mode: "smart"` is live —
+  a `localeCompare` sort would have led with `1, 10, 11, 12`). Menu opens, positions at `bounds`,
+  shows exactly the two items, marks the active sort, and closes on choose/Escape/backdrop. No
+  console errors at any point.
+
+### Four addon defects found here. **None were fixed** (out of Phase 7c's scope); all four are real
+
+Every one of them is invisible without row markers, frozen columns or column grouping — which is
+exactly why nothing before Phase 7c hit them. `<DemoGrid>` uses none of the three.
+
+1. **`computeBounds` is called with `args.headerHeight` where the parameter is `totalHeaderHeight`**
+   — `grid-host-controller.ts` lines **1491** (`hitTestHeaderMenu`), **1538**
+   (`hitTestColumnResizeEdge`), **2026** (`computeCellRect`) and **2626** (`scrollCellIntoView`).
+   `computeBounds` derives `headerHeight = totalHeaderHeight - groupHeaderHeight` internally, so with
+   `groupHeaderHeight: 28, headerHeight: 34` it computes a header row **6 px** tall instead of 34.
+   Net effect with grouping on: the header-menu hit strip is 6 px tall, the resize edge is
+   mis-placed, and overlay editors open at the wrong y. The neighbouring `onMouseMove` call site
+   (line ~1338) does it correctly via `this.totalHeaderHeight(args)` — these four just weren't
+   updated when Phase 7b introduced that helper.
+2. **`private cellXOffset = 0` (line ~498) should initialise to `freezeColumns`.** `computeXOffset`
+   correctly starts its walk at `freezeColumns`, but that only runs on the first `scroll` event.
+   Until then `computeBounds`'s `col >= freezeColumns` branch adds `getStickyWidth(...)` *and* walks
+   the sticky columns again, so every computed rect is off by the sticky width. Concretely: on a
+   fresh page load with `rowMarkers` on, **the header menu cannot be opened at all** — the computed
+   menu rect sits 44 px to the right of the column the cursor is actually over, so the two can never
+   intersect. One scroll event of any size fixes it for the rest of the session. This was diagnosed
+   by probing synthetic mousedowns across the header and finding zero hits before a scroll and a
+   clean 30 px-wide hit band after one.
+3. **The header menu chevron never draws, and headers never show their hover highlight.**
+   `drawHeader` gates both on `hRow === -1 && hCol === c.sourceIndex`, read off
+   `DrawGridArg.hoverInfo`. `GridHostController.onMouseMove`'s `item[1] < 0` branch sets
+   `this.hoverInfo = undefined` and returns **without scheduling a redraw**, so `hoverInfo` is never
+   populated for a header. Source's `data-grid.tsx` does populate it. The hit-test itself does not
+   depend on the glyph being drawn, so the menu is still reachable — it is just invisible, which on
+   the live site is the entire affordance.
+4. **Row-marker body cells render nothing** — no row numbers, no per-row checkbox, and the sticky
+   marker column doesn't even paint its background (scrolled cell content from the next column shows
+   through it). `mangledGetCellContent` emits `InnerGridCellKind.Marker` cells, but
+   `src/rendering/cells/index.ts`'s `getCellRenderer` has no `Marker` case — source's
+   `cells/marker-cell.tsx` was never ported. Phase 3a recorded this as a known gap; Phase 4's
+   research then concluded it was already handled "as bespoke code directly in
+   `GridHostController`", which is true only of the **header** select-all checkbox, not the body
+   cells. So the target site's numbered row markers cannot be delivered today. (The header select-all
+   checkbox does work but is hover-gated: source only draws it unconditionally when
+   `headerRowMarkerAlwaysVisible` is set, and this port never sets it — source derives it from
+   `rowMarkers === "both" | "checkbox-visible"`.)
+
+Also missing, and the reason **no column header icon draws** even though `column.icon` is set on all
+11 columns: `grid-host-controller.ts:655` does `new SpriteManager(undefined, ...)`. Source merges the
+built-in glyph set in at its outermost wrapper — `data-editor-all.tsx:14`, `{ ...sprites,
+...p.headerIcons }`. This port's `src/rendering/sprites.ts` (ported in Phase 1, 28 glyphs) is
+therefore **dead code**: it is not imported anywhere, not exported from `rendering/index.ts`, and
+`<GlideDataGrid>` has no `headerIcons` arg — so there is **no consumer-side workaround**. The layout
+space for the icon *is* reserved (`computeHeaderLayout` shifts the title right by
+`ceil(headerIconSize * 1.3)`), it just paints nothing.
+
+The demo is deliberately left configured as if all of the above worked (`@rowMarkers="both"`,
+`icon` on every column) so it lights up for free once they are fixed.
+## Phase 7b — Column group headers (COMPLETE, browser-verified, 2026-08-07)
+
+Done directly by the orchestrator (not a subagent) because it touches row hit-testing at ~10 call
+sites in `grid-host-controller.ts` and the recipe was already fully written down in this file's
+Phase 2a section — the risky part was verification, not implementation.
+
+### What changed
+
+Column grouping was hardcoded off project-wide since Phase 2a (`const ENABLE_GROUPS = false`).
+**It is now derived per-args, exactly as source does it** (`data-editor.tsx:1131-1133`):
+
+```ts
+private enableGroups(args)      // = args.columns.some(c => c.group !== undefined), memoized on `args.columns` identity
+private groupHeaderHeight(args) // = enableGroups ? args.groupHeaderHeight : 0   (source's `enableGroups ? groupHeaderHeight : 0`)
+private totalHeaderHeight(args) // = args.headerHeight + groupHeaderHeight(args) (source's :1135)
+```
+
+There is **no new opt-in flag and no new arg** — grouping turns itself on purely because a consumer
+set `group` on a column, which is source's own behavior. `groupHeaderHeight` was already an optional
+`GridHostArgs`/`<GlideDataGrid>` arg (defaulting to `headerHeight`) since Phase 2, so nothing new
+had to be threaded through `glide-data-grid.gts`.
+
+**Consequence worth knowing: when no column carries a `group`, every one of these returns
+false/0 and behavior is byte-identical to the pre-7b hardcoded path.** Verified in the browser —
+the pre-existing demo renders with a single header row exactly as before. So grouping landing is a
+no-op for every existing consumer.
+
+### The two real bugs this surfaced (both were latent, both would have broken hit-testing)
+
+The mechanical `ENABLE_GROUPS ? args.groupHeaderHeight : 0` sites (10 of them) were already written
+correctly by earlier phases and just needed the constant replaced. But **two sites had the group
+height hardcoded away entirely** with the comment `// ENABLE_GROUPS is always false in this phase`:
+
+- `onMouseMove`'s `const totalHeaderHeight = args.headerHeight;` — hover hit-testing.
+- `scrollCellIntoView`'s `const totalHeaderHeight = args.headerHeight;` — the "is this cell above the
+  viewport" check.
+
+Both now call `this.totalHeaderHeight(args)`. Left alone they would have produced a one-group-header-
+row (~36px) offset in hover and in keyboard-nav scroll-into-view, i.e. hovering/scrolling would have
+been off by roughly one row *only when grouping is on* — precisely the kind of defect that passes
+every build and looks like a rendering glitch. Also fixed while there: `rebuildScrollContent`'s
+padder total height and the header canvas's CSS height both now use `totalHeaderHeight(args)`, so
+the scrollable extent and the header canvas grow by the group row rather than clipping it.
+
+**This is the trap Phase 2a warned about, and it was real**: `getRowIndexForY` computes
+`totalHeaderHeight = headerHeight + groupHeaderHeight` *unconditionally* — it is NOT gated by its own
+`hasGroups` parameter. So passing a real `groupHeaderHeight` alongside `enableGroups: false` silently
+reserves dead header space and breaks row hit-testing. Every coordinate-math call site must use the
+*effective* height (`groupHeaderHeight(args)`), never `args.groupHeaderHeight` raw.
+
+### Identity stability (the `computeCanBlit` rule)
+
+`getGroupDetails` was an inline `name => ({ name })` closure in `runDraw`'s `DrawGridArg` literal.
+It is **not** one of `computeCanBlit`'s ~18 identity-compared fields, so it was not actually breaking
+the blit path — but it is exactly the shape that did break it in Phase 6, so it was hoisted to a
+module-scope `DEFAULT_GROUP_DETAILS` constant anyway. Keeping every `DrawGridArg` value
+reference-stable by default is cheaper than re-deriving the compared-field list each time someone
+touches this object. `enableGroups`/`groupHeaderHeight` are likewise not compared, which is safe:
+they only change via `scheduleFullRedraw()`, which sets `lastFullDrawArg = undefined`.
+
+### Deliberately NOT done
+
+Source's richer `GroupDetails` (`icon`/`overrideTheme`/`actions`) and `onGroupHeaderRenamed` are not
+exposed — `DEFAULT_GROUP_DETAILS` returns `{ name }` only. This is why `themeForCell` still omits
+source's `groupTheme` from its merge chain: that theme comes from `getGroupDetails(group)
+?.overrideTheme`, and there is never one to merge. If a future phase exposes a real `getGroupDetails`
+arg, `themeForCell` is where the group theme has to be added.
+
+### Verification
+
+`npx tsc --noEmit` clean, `pnpm --filter glide-data-grid-ember build` and
+`pnpm --filter test-app exec vite build` both succeed. **Browser-verified** (dev server on :4210,
+temporarily grouping the existing demo's columns 4-at-a-time, then reverting):
+- group header row renders above the column header row with correctly-spanned group names
+- **row hit-testing is exact** — clicking at a known y landed the selection ring on precisely the
+  expected row/column, no off-by-one (this is the check that would have caught the two hardcoded
+  sites above)
+- both header rows stay pinned through vertical scroll, and zebra `getRowThemeOverride` striping
+  keeps alternating correctly
+- no console errors
+- with the temporary grouping reverted, the existing demo renders single-header-row exactly as before
+
+
+## Phase 7e — Five addon defects surfaced by the Phase 7c demo (COMPLETE, browser-verified, 2026-08-08)
+
+Phase 7c's demo was the **first thing in this project to turn on row markers, column groups and
+header icons at once**, and it immediately surfaced five defects. The 7c agent correctly reported
+them and did *not* fix them (it was scoped to the test-app), which is exactly the outcome the
+"report, don't paper over" instruction is for -- all five were fixed here by the orchestrator.
+
+**Why none of them were caught earlier: every one is invisible unless you enable a feature no
+previous phase's demo used.** This is the same lesson as Phase 6's blit finding, generalized: a
+port can be "fully browser-verified" phase after phase and still have whole features that have
+never once executed. When a phase enables a dormant feature, budget for the fact that everything
+downstream of it is effectively unverified code.
+
+### 1. `computeBounds` given `headerHeight` where it wants `totalHeaderHeight` (regression from 7b)
+
+Four call sites -- `hitTestHeaderMenu`, `hitTestColumnResizeEdge`, `computeCellRect`,
+`scrollCellIntoView` -- passed `args.headerHeight` as `computeBounds`'s 6th parameter, which is
+`totalHeaderHeight` (group row + header row). `computeBounds` derives the header row's height as
+`totalHeaderHeight - groupHeaderHeight`, so with `groupHeaderHeight: 28, headerHeight: 34` it
+computed a **6px** header row: the menu hit strip, the resize edge and the overlay-editor anchor
+were all wrong whenever grouping was on.
+
+These were *correct* before Phase 7b (with grouping hardcoded off, `totalHeaderHeight ===
+headerHeight` identically) and 7b missed them because it searched for the old `ENABLE_GROUPS`
+constant, which these sites never mentioned. **Lesson: when you turn a globally-disabled feature on,
+grep for the call sites that were silently relying on the disabled value being zero, not just for
+the flag's own name.** Fixed to `this.totalHeaderHeight(args)`.
+
+### 2. `cellXOffset` initialised to 0 instead of `freezeColumns`
+
+`cellXOffset` is the index of the first **non-frozen** visible column, so its resting value at
+`scrollLeft === 0` is `freezeColumns` -- which is `>= 1` whenever `rowMarkers !== "none"`, because
+the synthetic marker column is sticky. The field was initialised to `0` and only corrected by the
+first `scroll` event, so until the user scrolled, `computeBounds` double-counted the sticky width.
+
+Symptom: **on a fresh load with row markers, the header menu could not be opened at all** -- the
+computed menu rect sat one marker-column-width right of the column under the cursor, so they never
+intersected. Any scroll silently "fixed" it for the session, which is exactly the kind of bug that
+looks like flakiness. Fixed by extracting `syncScrollOffsets(args)` out of `onScroll` and also
+calling it from `scheduleFullRedraw()` (right after `rebuildScrollContent`/`sizeCanvases`), so the
+offsets are re-derived from the live scroll position at first paint and after any arg change that
+moves where a scroll position lands (column widths, `freezeColumns`, marker column).
+
+### 3. Header hover state was unreachable, so the menu chevron never drew
+
+`onMouseMove`'s `item[1] < 0` branch (pointer over a header/group-header row) set `hoverInfo =
+undefined` and returned **without a redraw**. But `drawHeader` derives `isHovered` from `hoverInfo`'s
+row being `-1`/`-2` (`data-grid-render.header.ts:81,187`), and the menu chevron is gated on exactly
+that (`:464`). Net effect: no column ever showed a header hover highlight, and **the chevron never
+rendered at all** -- while the menu *hit-test* worked fine, leaving a completely invisible
+affordance. On the real grid.glideapps.com, the chevron appearing on hover *is* the affordance.
+
+Fixed: the header branch now populates `hoverInfo` via the existing `updateHoverInfo` (`computeBounds`
+already handles rows `-1`/`-2` natively, including widening a group header's rect across its whole
+span) and repaints via a new `redrawHeaderHover`. The "same item" early-return also refreshes the
+in-cell position for header rows, because the chevron only highlights while the pointer is directly
+inside its own `menuBounds`. `animationManager.setHovered(undefined)` is still called, since no
+*cell* is hovered.
+
+There is no damage-based path for headers (`damage` is a `CellSet` of body cells), so this is a
+plain full draw -- one ordinary frame, only while the pointer is inside the header strip, which is
+also how source behaves.
+
+### 4. Row-marker body cells drew nothing -- `marker-cell.tsx` had never been ported
+
+`mangledGetCellContent` has emitted a well-formed `InnerGridCellKind.Marker` cell since Phase 3a,
+but `cells/index.ts` had no `Marker` case, so `getCellRenderer` returned `undefined` and the marker
+column painted **nothing**: no row numbers, no checkboxes, and no background fill (so a sticky
+marker column showed the next column's text bleeding through). Silent, because an unmatched cell
+kind is not an error anywhere in the draw loop.
+
+**This is a direct correction to this file's own Phase 4 research note**, which recorded that row
+markers were "already implemented as bespoke code directly in `GridHostController`, no need to
+refactor to match source's registry structure". That was only ever true of the **header** select-all
+cell. The body cells always went through the registry. Ported as
+`src/rendering/cells/marker-cell.ts` (near-verbatim; `drawCheckbox`, `getMiddleCenterBias` and the
+`MarkerCell` type were all already ported and needed no changes) and registered. Its `onClick` is
+ported for fidelity but is currently unreachable -- `isInnerOnlyCellKind` keeps inner-only cells out
+of renderer `onClick` dispatch, and Phase 3a's bespoke row-marker click handling owns that gesture.
+
+### 5. No column header icon ever drew -- `sprites.ts` was dead code
+
+`GridHostController` constructed `new SpriteManager(undefined, ...)`, and `SpriteManager` does
+`this.headerIcons = headerIcons ?? {}`. Source merges the built-in glyph set in at
+`data-editor-all.tsx:14` (`{...sprites, ...p.headerIcons}`). So `column.icon` reserved its layout
+space and painted nothing, and **`src/rendering/sprites.ts` -- 28 glyphs ported back in Phase 1 --
+was never imported by anything**, not even the barrel. There was no consumer-side workaround.
+
+Fixed: the manager is now built with `{ ...sprites, ...this.getArgsFn().headerIcons }`, `sprites`
+and `HeaderIconMap` are exported from the `rendering/index` barrel, and a new optional
+`headerIcons?: SpriteMap` arg is plumbed through `GridHostArgs` **and** `<GlideDataGrid>` (per the
+standing Phase 3d rule that those are two hand-maintained parallel lists). Note it is read **once**,
+when the `SpriteManager` is constructed -- changing it later has no effect.
+
+### Verification
+
+`tsc` clean, addon rollup build and `vite build` both clean. **Browser-verified** on :4210 after the
+full kill / `rm -rf .vite` / restart / fresh-`?cb=` loop:
+- row-marker numbers draw; header icons draw on all 11 columns; group headers span correctly
+- **the chevron appears on header hover**, and the menu opens **on a fresh load with no prior
+  scroll** (the exact state defect 2 made impossible)
+- "Sort ascending"/"Sort descending" reorder for real -- verified by reading cell text *and* the
+  scattered original row indices visible in the More Info column, not just "something changed"
+- select-all via the header checkbox checks every marker cell and highlights every row (exercises
+  the new marker renderer's checked state, not just its number state)
+- **regression**: the pre-existing ungrouped demo still renders a single header row, click-selects
+  the correct row, and keeps its zebra/column/cell theme overrides
+- no console errors at any point
+
+**Blit fast path re-verified with the sort decorator live** (this was the one thing Phase 7a
+explicitly flagged as unproven, since it could only demonstrate closure identity in isolation).
+Re-used Phase 6's technique: temporarily instrument `computeCanBlit` to record the differing field
+names onto a `document.documentElement` attribute (the DOM is the only reliable bridge out of
+`javascript_tool`'s isolated world), then drive **real `computer` scroll actions** (a JS
+`scrollTop` assignment does not reliably drive the redraw path). Result with sorting active, groups
+on and row markers on: **5 of 5 `computeCanBlit` calls had zero differing fields** across both
+vertical and horizontal scroll -- i.e. `getCellContent` stayed identity-stable through
+`withColumnSort`, and Phase 6's blit fix survives Phase 7. Instrumentation removed afterwards;
+`git status` confirms `src/rendering/render/**` is unmodified.
+
+### Testing-environment note (adds to the existing browser-quirks list)
+
+The `computer` tool's **`hover` action did not fire a page `mousemove`** in this environment -- the
+header chevron stayed invisible after hovering, and only appeared once a `mousemove` was dispatched
+directly on the grid root via `javascript_tool`. Same class as the already-documented
+"`.focus()` doesn't fire a `focus` event" quirk. **When testing a hover-gated affordance here,
+dispatch the `mousemove` yourself on `root`; don't conclude from a `hover` action alone that the
+feature is broken.** (Real `computer` *clicks* remain reliable, as previously documented.)

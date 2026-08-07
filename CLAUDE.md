@@ -46,19 +46,27 @@ Both files are kept current after every phase. If anything below conflicts with 
 
 ## Current status (see PHASES.md for the authoritative table)
 
-Phases 0–6 complete, all browser-verified and committed: workspace scaffold, framework-agnostic
+Phases 0–7 complete, all browser-verified and committed: workspace scaffold, framework-agnostic
 rendering-engine port, Ember canvas host layer (sticky header, native scroll, virtualization), the
 full interaction layer (selection, keyboard nav, copy/paste, column resize/reorder), all core cell
 types + the overlay-editor framework (Phase 4), all 13 `packages/cells` extra cell types including
-sparklines (Phase 5), and the theming system (Phase 6). The Phase-2 placeholder renderer
+sparklines (Phase 5), the theming system (Phase 6), and the grid.glideapps.com demo replica with
+**column sort** and **column group headers** (Phase 7). The Phase-2 placeholder renderer
 (`src/rendering/-temp-text-cell-renderer.ts`) was deleted in Phase 4a — the real registry is
 `src/rendering/cells/index.ts` (`getCellRenderer`), combined with extras via
 `createCombinedCellRenderer` from `src/rendering/extra-cells/index.ts`.
 
-**Next up: Phase 7** (replicate grid.glideapps.com's demo grid + 6 feature cards — this is where
-**column sort** must finally land; it was an explicit original requirement and is the single biggest
-gap between what was asked for and what exists), then **Phase 8** (async/streaming + the
-`recordsSource` data-source layer). Phase 9 is a deliberately non-auto-scheduled backlog.
+Phase 7 landed: `withColumnSort` (`src/data-source/`, the first piece of Phase 8's decorator layer),
+column grouping (auto-enabled by `column.group`, as source does it), the demo replica in
+`test-app/app/components/glide-demo.gts` with its consumer-built "Sort ascending / Sort descending"
+menu, and fixes for **five addon defects the demo surfaced** — see PORTING-NOTES.md's Phase 7e
+section. **Per explicit user instruction the demo is the data grid and nothing else** — the 6
+feature cards from the original requirements were dropped deliberately; don't "restore" them.
+
+**Next up: Phase 8** (async/streaming + the `recordsSource` data-source layer — note `withColumnSort`
+already established the composable-decorator shape and the `src/data-source/` directory it belongs
+in; `recordsSource` should return `columns`/`rows`/`getCellContent` under exactly those names so the
+two compose). Phase 9 is a deliberately non-auto-scheduled backlog.
 
 Consumer-facing docs now exist and are the spec for future work — keep them in sync rather than
 letting them go stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and
@@ -66,8 +74,12 @@ letting them go stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and
 implement DATA.md's documented pattern**, and DATA.md's "Status of this recommendation" section
 records which half is measured vs merely reasoned).
 
-Two things a cold session should know before touching `DrawGridArg` or the draw path, both written
-up in full in `PORTING-NOTES.md`: `computeCanBlit` identity-compares ~18 fields, so a freshly
-allocated value silently disables the scroll blit fast path with **no** visible symptom (this went
-undetected from Phase 2 to Phase 6); and autotracking only records reads made *during* the tracking
-frame, so a `getCellContent` closure that reads tracked state lazily never registers a dependency.
+Three things a cold session should know, all written up in full in `PORTING-NOTES.md`:
+`computeCanBlit` identity-compares ~18 `DrawGridArg` fields, so a freshly allocated value silently
+disables the scroll blit fast path with **no** visible symptom (this went undetected from Phase 2 to
+Phase 6); autotracking only records reads made *during* the tracking frame, so a `getCellContent`
+closure that reads tracked state lazily never registers a dependency; and — the Phase 7e lesson —
+**a feature no demo has ever switched on is effectively unverified code, however many phases have
+been "browser-verified"**. Turning on row markers, column groups and header icons for the first time
+in Phase 7 surfaced five latent defects at once, including 28 header-icon glyphs ported in Phase 1
+that nothing had ever imported. When a phase enables something dormant, budget for that.

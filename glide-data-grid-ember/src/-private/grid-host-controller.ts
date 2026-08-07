@@ -29,6 +29,7 @@ import {
     CellSet,
     AnimationManager,
     SpriteManager,
+    sprites,
     ImageWindowLoaderImpl,
     RenderStateProvider,
     getDataEditorTheme,
@@ -66,6 +67,7 @@ import type {
     Rectangle,
     Slice,
     GetCellRendererCallback,
+    SpriteMap,
     Theme,
     FullTheme,
     GetRowThemeCallback,
@@ -116,6 +118,14 @@ export interface GridHostArgs {
     readonly theme?: Partial<Theme>;
     readonly freezeColumns?: number;
     readonly getCellRenderer: GetCellRendererCallback;
+    /**
+     * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
+     * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
+     * built-ins are always present, so this is only needed to add custom glyphs or restyle one of
+     * the stock ones. Read once, when the `SpriteManager` is constructed -- changing it later has
+     * no effect.
+     */
+    readonly headerIcons?: SpriteMap;
 
     // --- Phase 3a: selection / interaction config -----------------------------------------------
     // Mirrors a subset of `DataEditorProps`. Selection *blending* (`rangeSelectionBlending` /
@@ -327,13 +337,14 @@ const PRINTABLE_CHAR_RE = /[\p{L}\p{M}\p{N}\p{S}\p{P}]/u;
 // disabled the scroll blit fast path entirely. Found in Phase 6, see PORTING-NOTES.md.
 const ALWAYS_VERTICAL_BORDER = (): boolean => true;
 
-// Column grouping isn't wired up yet in this phase -- no group-header args are exposed on
-// `GridHostArgs`. Fixed to `false` throughout, and (mirroring `data-editor.tsx`'s
-// `groupHeaderHeight={enableGroups ? groupHeaderHeight : 0}`) the *effective* group header height
-// fed to the render engine and all coordinate math is always 0, regardless of what a caller passes
-// for `groupHeaderHeight` -- that field is retained on `GridHostArgs` purely so a later phase that
-// turns grouping on doesn't need to change the args shape.
-const ENABLE_GROUPS = false;
+// `DrawGridArg.getGroupDetails` -- resolves a group name to its render details. This port doesn't
+// expose source's richer `GroupDetails` (icon/overrideTheme/actions) or its `onGroupHeaderRenamed`
+// plumbing, so the default identity mapping is the whole implementation. Hoisted to module scope
+// for the same identity-stability reason as `ALWAYS_VERTICAL_BORDER` above -- `getGroupDetails`
+// happens not to be one of `computeCanBlit`'s identity-compared fields today, but an inline
+// closure in `runDraw` is exactly the shape that silently broke the blit path in Phase 6, so this
+// port keeps every `DrawGridArg` value reference-stable by default rather than by case analysis.
+const DEFAULT_GROUP_DETAILS = (name: string): { name: string } => ({ name });
 
 // Phase 3d: column resize/reorder. Resize-edge hit region width (px) at a header cell's right
 // border; source doesn't expose an exact named constant for this in the parts of `data-grid.tsx`
@@ -651,7 +662,16 @@ export class GridHostController {
         this.bufferBCtx = this.getContext2d(this.bufferBEl);
 
         // --- engine pieces -----------------------------------------------------------------------
-        this.spriteManager = new SpriteManager(undefined, () => this.scheduleFullRedraw());
+        // The built-in header-icon glyph set (`rendering/sprites.ts`, ported in Phase 1) must be
+        // merged in here, exactly as source does at `data-editor-all.tsx:14`
+        // (`{...sprites, ...p.headerIcons}`). Passing `undefined` leaves `SpriteManager` with an
+        // empty icon map, so `column.icon` reserves its layout space and then paints nothing --
+        // silently, with no error. That was the state from Phase 1 until Phase 7c: `sprites.ts` was
+        // never imported anywhere, i.e. 28 ported glyphs were dead code.
+        this.spriteManager = new SpriteManager(
+            { ...sprites, ...this.getArgsFn().headerIcons },
+            () => this.scheduleFullRedraw()
+        );
         this.renderStateProvider = new RenderStateProvider();
         this.imageLoader = new ImageWindowLoaderImpl();
         this.imageLoader.setCallback(locations => this.drawWithDamage(locations));
@@ -766,6 +786,44 @@ export class GridHostController {
     // the scroll blit fast path entirely. Source avoids this because its `mergedTheme` is a
     // `React.useMemo(..., [theme])`; this cache is the direct equivalent, keyed on the consumer's
     // `@theme` object identity exactly like source's dependency array.
+    // Phase 7b: column grouping. Derived exactly as source does it -- `enableGroups =
+    // columns.some(c => c.group !== undefined)` (`data-editor.tsx:1131-1133`), i.e. grouping turns
+    // itself on purely by a consumer setting `group` on any column; there is no separate opt-in
+    // flag in source and this port doesn't invent one. Memoized on `args.columns` identity to
+    // mirror source's `React.useMemo([columns])`, since this is consulted from ~10 call sites per
+    // frame (draw, scroll, hover, hit-test, scroll-into-view).
+    //
+    // Consequence worth knowing: when NO column carries a `group`, this returns `false` and the
+    // effective group header height is 0 everywhere -- byte-identical to the pre-Phase-7b hardcoded
+    // behavior, so every existing consumer/demo is unaffected by grouping landing.
+    private enableGroupsCache: { readonly columns: readonly GridColumn[]; readonly value: boolean } | undefined;
+
+    private enableGroups(args: ResolvedGridHostArgs): boolean {
+        const cached = this.enableGroupsCache;
+        if (cached !== undefined && cached.columns === args.columns) return cached.value;
+        const value = args.columns.some(c => c.group !== undefined);
+        this.enableGroupsCache = { columns: args.columns, value };
+        return value;
+    }
+
+    // The *effective* group header height, mirroring source's
+    // `groupHeaderHeight={enableGroups ? groupHeaderHeight : 0}` (`data-editor.tsx:4276`).
+    //
+    // This must be used at EVERY coordinate-math call site, not just `DrawGridArg`. The reason is a
+    // real trap documented since Phase 2a: `getRowIndexForY` computes `totalHeaderHeight =
+    // headerHeight + groupHeaderHeight` unconditionally -- it is NOT gated by the `hasGroups`
+    // parameter -- so passing a real `groupHeaderHeight` alongside `enableGroups: false` would
+    // silently reserve dead header space and break row hit-testing.
+    private groupHeaderHeight(args: ResolvedGridHostArgs): number {
+        return this.enableGroups(args) ? args.groupHeaderHeight : 0;
+    }
+
+    // Total header height (group header row + column header row). Source keeps the same derived
+    // value (`data-editor.tsx:1135`).
+    private totalHeaderHeight(args: ResolvedGridHostArgs): number {
+        return args.headerHeight + this.groupHeaderHeight(args);
+    }
+
     private mergedThemeCache: { readonly src: Partial<Theme> | undefined; readonly value: FullTheme } | undefined;
 
     private mergedTheme(args: ResolvedGridHostArgs): FullTheme {
@@ -780,8 +838,11 @@ export class GridHostController {
     // (`render/data-grid-render.cells.ts:160-163,264-272`): global -> column -> row -> cell.
     // Source does the same for its overlay editor (`data-editor.tsx`'s `setOverlaySimple`, which
     // merges `mergedTheme, groupTheme, colTheme, rowTheme, content.themeOverride`) and for
-    // `themeForCell` (`:1821-1830`). Group themes are omitted here only because column grouping is
-    // hardcoded off project-wide (`ENABLE_GROUPS`), matching every other group-shaped omission.
+    // `themeForCell` (`:1821-1830`). Group themes stay omitted even now that column grouping is
+    // live (Phase 7b): source's `groupTheme` comes from `getGroupDetails(group)?.overrideTheme`,
+    // and this port's `DEFAULT_GROUP_DETAILS` returns `{ name }` with no `overrideTheme`, so there
+    // is never a group theme to merge. If a future phase exposes a real `getGroupDetails` arg with
+    // theme overrides, this merge chain is where it has to be added.
     //
     // `mangledCol` is in the render engine's column space (i.e. includes the row-marker column when
     // one exists), matching `computeCellRect`/`computeMangledLayout`.
@@ -989,6 +1050,11 @@ export class GridHostController {
         const args = this.resolveArgs();
         this.rebuildScrollContent(args);
         this.sizeCanvases(args);
+        // Keep the scroll offsets consistent with the layout that was just rebuilt. Load-bearing on
+        // the very first draw (see `syncScrollOffsets` -- `cellXOffset` rests at `freezeColumns`,
+        // not 0) and after any arg change that alters column widths, `freezeColumns` or the
+        // row-marker column, all of which move where a given scroll position lands.
+        this.syncScrollOffsets(args);
         // Force a real repaint rather than allowing the blit fast path to short-circuit it.
         //
         // `drawGrid` early-returns and paints *nothing* when `computeCanBlit(current, last)` is
@@ -1090,12 +1156,12 @@ export class GridHostController {
             translateX: Math.round(this.translateX),
             translateY: Math.round(this.translateY),
             mappedColumns,
-            enableGroups: ENABLE_GROUPS,
+            enableGroups: this.enableGroups(args),
             freezeColumns,
             dragAndDropState: this.currentDragAndDropState(),
             theme,
             headerHeight: args.headerHeight,
-            groupHeaderHeight: ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+            groupHeaderHeight: this.groupHeaderHeight(args),
             disabledRows: CompactSelection.empty(),
             rowHeight: args.rowHeight,
             // Module-scope constant, NOT an inline arrow: `computeCanBlit` compares
@@ -1117,7 +1183,7 @@ export class GridHostController {
                 this.cursorOverride = cursor;
                 this.scrollerEl.style.cursor = cursor ?? "";
             },
-            getGroupDetails: name => ({ name }),
+            getGroupDetails: DEFAULT_GROUP_DETAILS,
             getRowThemeOverride: args.getRowThemeOverride,
             drawHeaderCallback: undefined,
             drawCellCallback: undefined,
@@ -1154,7 +1220,7 @@ export class GridHostController {
         this.canvasEl.style.width = `${this.width}px`;
         this.canvasEl.style.height = `${this.height}px`;
 
-        const headerCanvasHeight = (ENABLE_GROUPS ? args.groupHeaderHeight : 0) + args.headerHeight + 1;
+        const headerCanvasHeight = this.totalHeaderHeight(args) + 1;
         this.headerCanvasEl.style.width = "100%";
         this.headerCanvasEl.style.height = `${headerCanvasHeight}px`;
     }
@@ -1162,8 +1228,8 @@ export class GridHostController {
     private rebuildScrollContent(args: ResolvedGridHostArgs): void {
         const { mappedColumns } = this.computeMangledLayout(args);
         const totalWidth = mappedColumns.reduce((sum, c) => sum + c.width, 0);
-        const totalHeaderHeight = args.headerHeight + (ENABLE_GROUPS ? args.groupHeaderHeight : 0);
-        const totalHeight = totalHeaderHeight + totalRowsHeight(this.effectiveRows(args), args.rowHeight);
+        const totalHeight =
+            this.totalHeaderHeight(args) + totalRowsHeight(this.effectiveRows(args), args.rowHeight);
 
         this.stackEl.replaceChildren();
 
@@ -1186,18 +1252,44 @@ export class GridHostController {
 
     // --- scroll handling ---------------------------------------------------------------------------
 
-    private readonly onScroll = (): void => {
-        if (this.destroyed) return;
-        const args = this.resolveArgs();
+    // Re-derives the four scroll-offset fields from the scroller's live scroll position.
+    //
+    // **`cellXOffset`'s resting value is `freezeColumns`, not 0** -- it is the index of the first
+    // *non-frozen* visible column, so with any sticky column (which includes the synthetic
+    // row-marker column whenever `rowMarkers !== "none"`) it starts at 1 even at `scrollLeft === 0`.
+    // The fields therefore cannot simply be initialised to 0 and left until the first scroll event:
+    // `computeBounds` would double-count the sticky width for every hit-test until the user
+    // happened to scroll. The concrete symptom that surfaced this (Phase 7c): on a freshly loaded
+    // grid with row markers, the header menu could not be opened at all, because the computed menu
+    // rect sat one marker-column-width to the right of the column actually under the cursor, so
+    // they could never intersect -- and any scroll silently "fixed" it for the rest of the session.
+    private syncScrollOffsets(args: ResolvedGridHostArgs): void {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
-
         const { cellXOffset, translateX } = computeXOffset(this.scrollerEl.scrollLeft, mappedColumns, freezeColumns);
-        const { cellYOffset, translateY } = computeYOffset(this.scrollerEl.scrollTop, this.effectiveRows(args), args.rowHeight);
-
+        const { cellYOffset, translateY } = computeYOffset(
+            this.scrollerEl.scrollTop,
+            this.effectiveRows(args),
+            args.rowHeight
+        );
         this.cellXOffset = cellXOffset;
         this.translateX = translateX;
         this.cellYOffset = cellYOffset;
         this.translateY = translateY;
+    }
+
+    // Repaint after a header-hover change. There is no damage-based path for headers -- `damage` is
+    // a `CellSet` of body cells and `drawGrid` repaints the whole header canvas on any real draw --
+    // so this is a plain full draw. That is the same cost as one ordinary frame and only happens
+    // while the pointer is inside the header strip, which is also how source behaves (its hover
+    // state change re-renders).
+    private redrawHeaderHover(args: ResolvedGridHostArgs): void {
+        this.runDraw(args, undefined);
+    }
+
+    private readonly onScroll = (): void => {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+        this.syncScrollOffsets(args);
 
         // Synchronous, no rAF/debounce -- this is intentional. The ported `drawGrid`'s blit fast
         // path (in `render/data-grid-render.blit.ts`) detects "only scroll offsets changed" and
@@ -1221,9 +1313,9 @@ export class GridHostController {
         const row = getRowIndexForY(
             y,
             this.height,
-            ENABLE_GROUPS,
+            this.enableGroups(args),
             args.headerHeight,
-            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+            this.groupHeaderHeight(args),
             this.effectiveRows(args),
             args.rowHeight,
             this.cellYOffset,
@@ -1284,7 +1376,7 @@ export class GridHostController {
         }
 
         const item: Item | undefined = col === -1 || row === undefined ? undefined : [col, row];
-        const totalHeaderHeight = args.headerHeight; // ENABLE_GROUPS is always false in this phase
+        const totalHeaderHeight = this.totalHeaderHeight(args);
 
         const updateHoverInfo = (target: Item) => {
             const cellRect = computeBounds(
@@ -1292,7 +1384,7 @@ export class GridHostController {
                 target[1],
                 this.width,
                 this.height,
-                ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+                this.groupHeaderHeight(args),
                 totalHeaderHeight,
                 this.cellXOffset,
                 this.cellYOffset,
@@ -1314,18 +1406,47 @@ export class GridHostController {
             if (item !== undefined && item[1] >= 0) {
                 updateHoverInfo(item);
                 this.drawWithDamage(new CellSet([item]));
+            } else if (item !== undefined) {
+                // Still inside the same header cell. The position within it must keep updating,
+                // because the menu chevron highlights only while the pointer is directly over its
+                // own `menuBounds` (`data-grid-render.header.ts:561`, which tests
+                // `pointInRect(menuBounds, posX + x, posY + y)`).
+                updateHoverInfo(item);
+                this.redrawHeaderHover(args);
             }
             return;
         }
 
         this.hoveredItem = item;
 
-        if (item === undefined || item[1] < 0) {
-            // Off-grid or over a header/group-header row: no per-cell `needsHover` renderer check
-            // applies (mirrors `data-grid.tsx`'s `hoveredItem[1] < 0` early-out), but the animation
-            // manager still needs to know the hover left so its leave-animation can play.
+        if (item === undefined) {
+            // Off-grid entirely: clear hover and let the animation manager play its leave animation.
             this.hoverInfo = undefined;
             this.animationManager.setHovered(item);
+            return;
+        }
+
+        if (item[1] < 0) {
+            // Over a header (`-1`) or group-header (`-2`) row. No per-cell `needsHover` renderer
+            // check applies (mirrors `data-grid.tsx`'s `hoveredItem[1] < 0` early-out) and the
+            // animation manager must be told the *cell* hover left -- but `hoverInfo` itself must
+            // still be populated and the header repainted.
+            //
+            // This used to `hoverInfo = undefined; return;` instead, which meant the header
+            // renderer's hover state was permanently unreachable: `drawHeader` derives
+            // `isHovered` from `hoverInfo`'s row being `-1`/`-2`
+            // (`data-grid-render.header.ts:81,187`), and the menu chevron is gated on exactly that
+            // (`:464`, `hasMenu === true && (isHovered || ...)`). So **no column ever showed a
+            // hover highlight and the menu chevron never drew at all** -- while the menu's
+            // *hit-test* worked fine, leaving an invisible affordance. On the real
+            // grid.glideapps.com the chevron appearing on hover *is* the affordance.
+            //
+            // `computeBounds` handles rows `-1`/`-2` natively (`data-grid-lib.ts:800-813`,
+            // including growing a group header's rect across its whole span), so `updateHoverInfo`
+            // needs no special-casing here.
+            updateHoverInfo(item);
+            this.animationManager.setHovered(undefined);
+            this.redrawHeaderHover(args);
             return;
         }
 
@@ -1365,9 +1486,9 @@ export class GridHostController {
         const row = getRowIndexForY(
             y,
             this.height,
-            ENABLE_GROUPS,
+            this.enableGroups(args),
             args.headerHeight,
-            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+            this.groupHeaderHeight(args),
             this.effectiveRows(args),
             args.rowHeight,
             this.cellYOffset,
@@ -1446,8 +1567,8 @@ export class GridHostController {
             -1,
             this.width,
             this.height,
-            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
-            args.headerHeight,
+            this.groupHeaderHeight(args),
+            this.totalHeaderHeight(args),
             this.cellXOffset,
             this.cellYOffset,
             this.translateX,
@@ -1493,8 +1614,8 @@ export class GridHostController {
             -1,
             this.width,
             this.height,
-            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
-            args.headerHeight,
+            this.groupHeaderHeight(args),
+            this.totalHeaderHeight(args),
             this.cellXOffset,
             this.cellYOffset,
             this.translateX,
@@ -1981,8 +2102,8 @@ export class GridHostController {
             row,
             this.width,
             this.height,
-            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
-            args.headerHeight,
+            this.groupHeaderHeight(args),
+            this.totalHeaderHeight(args),
             this.cellXOffset,
             this.cellYOffset,
             this.translateX,
@@ -2581,8 +2702,8 @@ export class GridHostController {
             row,
             this.width,
             this.height,
-            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
-            args.headerHeight,
+            this.groupHeaderHeight(args),
+            this.totalHeaderHeight(args),
             this.cellXOffset,
             this.cellYOffset,
             this.translateX,
@@ -2605,7 +2726,7 @@ export class GridHostController {
         }
 
         let deltaY = 0;
-        const totalHeaderHeight = args.headerHeight; // ENABLE_GROUPS is always false in this phase
+        const totalHeaderHeight = this.totalHeaderHeight(args);
         if (bounds.y < totalHeaderHeight) {
             deltaY = bounds.y - totalHeaderHeight;
         } else if (bounds.y + bounds.height > this.height) {

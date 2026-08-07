@@ -21,6 +21,7 @@ import type {
     Theme,
     GetCellRendererCallback,
     GetRowThemeCallback,
+    SpriteMap,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -44,6 +45,12 @@ export interface GlideDataGridSignature {
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
         // (`../rendering/cells/index.ts`, text/number/boolean/loading/protected/row-id).
         getCellRenderer?: GetCellRendererCallback;
+        /**
+         * Extra/override header-icon glyphs (`column.icon`), merged over the built-in set. The
+         * built-ins are always available, so this is only for adding custom glyphs. Read once when
+         * the grid is created.
+         */
+        headerIcons?: SpriteMap;
         onReady?: (api: GlideDataGridApi) => void;
 
         // Selection / interaction config + callbacks (Phase 3a/3c/3d) -- forwarded straight
@@ -100,6 +107,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         theme: this.args.theme,
         freezeColumns: this.args.freezeColumns,
         getCellRenderer: this.args.getCellRenderer ?? defaultGetCellRenderer,
+        headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,
         rowMarkerWidth: this.args.rowMarkerWidth,
         rowSelect: this.args.rowSelect,

@@ -126,6 +126,10 @@ export { CellSet } from "./cell-set.ts";
 export { AnimationManager } from "./animation-manager.ts";
 export type { HoverValues } from "./animation-manager.ts";
 export { SpriteManager } from "./data-grid-sprites.ts";
+// The built-in header-icon glyph set. `GridHostController` merges this into its `SpriteManager` by
+// default, so a consumer only needs this to build a custom `headerIcons` map on top of it.
+export { sprites } from "./sprites.ts";
+export type { HeaderIconMap } from "./sprites.ts";
 export type { HeaderIcon, Sprite, SpriteMap, SpriteVariant } from "./data-grid-sprites.ts";
 export type { ImageWindowLoader } from "./image-window-loader-interface.ts";
 export { default as ImageWindowLoaderImpl } from "./common/image-window-loader.ts";

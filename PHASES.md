@@ -80,7 +80,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 4 | Core cell types + overlay editors | **Done, browser-verified, committed** (4a text/number/boolean/loading/protected/row-id + overlay editor framework; 4b uri/markdown, `marked` dependency added; 4c bubble/drilldown, both confirmed display-only; 4d image cell + trailing blank row/"add row" affordance, including a real `activateCell` overlay-gating bugfix surfaced by image-cell) |
 | 5 | Extra cell types incl. sparklines | **Done, browser-verified, committed** (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator; 5b tags/dropdown/multi-select/links; 5c date-picker/button/tree-view/user-profile/article, incl. a shared `pasteValueIntoCell` fix so paste dispatches to `CustomRenderer.onPaste` for all 13 extra cells — see PORTING-NOTES.md for full per-cell detail) |
 | 6 | Theming system | **Done, browser-verified, committed** — `getDataEditorDarkTheme()`, `makeCSSStyle`/`--gdg-*` on the grid root + overlay containers, `@getRowThemeOverride` plumbed end to end, per-column/per-cell overrides verified, a real overlay-editor theme-merge bugfix, `glide-data-grid-ember/THEMING.md` + README section, and demo wiring (light/dark toggle + zebra rows + a themed column/cell). Also fixed a **major pre-existing perf defect found along the way**: three `DrawGridArg` fields were allocated fresh every draw, so `computeCanBlit`'s identity checks always failed and the scroll blit fast path had never engaged — see PORTING-NOTES.md's Phase 6 section, it applies to every future phase touching `DrawGridArg`. |
-| 7 | Demo app matching glideapps.com + browser verification | Pending |
+| 7 | Demo app matching glideapps.com + browser verification | **Done, browser-verified, committed** (7a column-sort decorator `src/data-source/withColumnSort`; 7b column group headers enabled; 7c the demo-grid replica + consumer-built sort menu; 7e five addon defects the demo surfaced — see below) |
 | 8 | Async/streaming data + real-time updates demo | Pending |
 | 9 | Backlog — deferred features (**not auto-scheduled**, see detail below) | Not scheduled |
 
@@ -141,12 +141,28 @@ including the overlay-editor theme bug and the `computeCanBlit` identity finding
 PORTING-NOTES.md's Phase 6 section.
 
 **Phase 7 — Demo app + browser verification.** Replicate https://grid.glideapps.com/'s fancy
-example grid AND the 6 feature cards (Scale to millions of rows / Blazingly fast scrolling / Fully
-free & open source / Real-time updates / Inline charts / Asynchronous data) in `test-app`. This is
-the main acceptance-test surface — use Chrome/Playwright to actually verify: sticky header holds
-under scroll, horizontal+vertical scroll both work, copy/paste works, sort menu opens on header
-click, row selection/select-all works, sparklines render, scroll performance is smooth with a
-large dataset. Don't claim "done" on this phase without actually driving it in a browser.
+example grid in `test-app`. This is the main acceptance-test surface — use Chrome/Playwright to
+actually verify: sticky header holds under scroll, horizontal+vertical scroll both work, copy/paste
+works, sort menu opens on header click, row selection/select-all works, sparklines render, scroll
+performance is smooth with a large dataset. Don't claim "done" on this phase without actually
+driving it in a browser.
+
+**SCOPE NARROWED BY THE USER (2026-08-07): the demo is the data grid and nothing else.** The
+original requirement list (and this file's own "Original request" section above) called for the 6
+feature cards — Scale to millions of rows / Blazingly fast scrolling / Fully free & open source /
+Real-time updates / Inline charts / Asynchronous data — alongside the grid. The user explicitly
+dropped them mid-phase ("i only need the datagrid in the demo, nothing else"): no feature cards, no
+hero banner, no nav, no marketing chrome. **This is a deliberate decision, not an unfinished
+requirement — do not "restore" the cards in a later phase.** The features those cards advertise are
+still genuinely exercised, just by the grid itself rather than by marketing copy about it.
+
+*The demo target, as observed directly in a browser on 2026-08-07 (don't re-derive):* four column
+groups — `ID` (Email) / `Name` (First name, Last name) / `Info` (Photo, Opt-In, Title, More Info,
+Performance sparkline) / `Employment Data` (Manager drilldown chip w/ avatar, Hired, Level) —
+numbered row markers, a per-column header icon glyph, and `hasMenu` on every column. Clicking a
+header selects the column and reveals a chevron; clicking the chevron opens a menu containing
+**exactly two items, "Sort ascending" and "Sort descending"**, which really do re-sort the grid.
+That two-item menu is the entire header-menu UI on the live site.
 
 **Phase 8 — Async/streaming data + the data-source layer.** Port `packages/source`'s helpers (or
 build an Ember-idiomatic equivalent) and build a demo exercising `GridHostController.updateCells()`
@@ -263,8 +279,9 @@ Work on any of these only when explicitly asked. Audited against `PORTING-NOTES.
   selection, row/column space-bar select shortcuts.
 
 *Rendering:*
-- **Column/row grouping** — `ENABLE_GROUPS` is hardcoded `false` throughout; group headers don't
-  render even though `groupHeaderHeight` is accepted as a prop.
+- ~~**Column/row grouping**~~ — **DONE in Phase 7b.** Column grouping now derives itself exactly as
+  source does (`columns.some(c => c.group !== undefined)`); no opt-in flag. Grids with no `group`
+  on any column behave byte-identically to before. *Row* grouping is still not ported.
 - **Real column auto-sizing** — auto-width columns get a fixed fallback width
   (`DEFAULT_AUTO_COLUMN_WIDTH`), not source's actual text-measurement-based auto-sizing.
 - **`mappedColumns` identity churn (perf)** — `computeMangledLayout` rebuilds the mapped-column
@@ -293,10 +310,14 @@ Work on any of these only when explicitly asked. Audited against `PORTING-NOTES.
   — computing such a value inline in `buildGridHostArgs()` would reintroduce the identity churn from
   the consumer side.
 
-*Sort* — still just `onHeaderMenuClick`'s hit-test + callback (Phase 3). No menu UI, no sort state,
-no sort logic anywhere. This was in the **original explicit requirements list** and is currently the
-single biggest gap between "what was asked for" and "what exists" — Phase 7 is where this is
-supposed to land (building the demo's header-click menu), don't let it slip further.
+*Sort* — **DONE in Phase 7a/7c.** The addon ships `withColumnSort` (`src/data-source/column-sort.ts`,
+a composable `getCellContent` decorator, identity-stable so it doesn't break the scroll blit path),
+and the test-app demo builds the "Sort ascending / Sort descending" header menu on top of
+`onHeaderMenuClick` — matching the live site exactly, and matching source's own division of labour
+(the grid ships the hit-test + event; the menu UI is consumer code). Multi-column sort and the
+`raw`/`smart`/default comparators are all supported. Not done: sorting is not wired to any
+persistence, and a date column sorts lexicographically unless the consumer supplies a comparator-
+friendly value (true of the live site too).
 
 *Architecture / extensibility:*
 - **`renderComponent`-based cell editors** — editors are currently hand-built DOM factories
