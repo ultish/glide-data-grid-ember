@@ -989,6 +989,29 @@ export class GridHostController {
         const args = this.resolveArgs();
         this.rebuildScrollContent(args);
         this.sizeCanvases(args);
+        // Force a real repaint rather than allowing the blit fast path to short-circuit it.
+        //
+        // `drawGrid` early-returns and paints *nothing* when `computeCanBlit(current, last)` is
+        // `true` and the scroll offsets are unchanged (`render/data-grid-render.ts:214-222`).
+        // `computeCanBlit` decides that by identity-comparing a fixed list of ~18 `DrawGridArg`
+        // fields -- which means "nothing changed" is only as trustworthy as that list is
+        // exhaustive. Several real `GridHostArgs` inputs map to no compared field at all
+        // (`getCellRenderer` is the clearest), so an arg change that genuinely needs a repaint
+        // could otherwise be silently swallowed here.
+        //
+        // Calling this method *is* the caller asserting "an input you can't see changed", so the
+        // safe reading is always to repaint. Dropping `lastFullDrawArg` makes `computeCanBlit`
+        // return `false` on its own `last === undefined` guard, without touching the blit logic.
+        //
+        // **This does not cost the scroll blit optimization** -- `onScroll` calls `runDraw`
+        // directly and never routes through here, so scrolling (the only path where blitting
+        // actually matters for performance) keeps its previous-frame reference intact. Arg-change
+        // redraws are comparatively rare and semantically want a full repaint anyway.
+        //
+        // Phase 6; see PORTING-NOTES.md's Phase 6 section for how the blit path came to be live in
+        // the first place (it had never engaged before that phase, which is why this hazard could
+        // not previously arise).
+        this.lastFullDrawArg = undefined;
         this.runDraw(args, undefined);
     }
 

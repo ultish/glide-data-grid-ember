@@ -187,6 +187,25 @@ Work on any of these only when explicitly asked. Audited against `PORTING-NOTES.
   fixed the three other identity-instability sources (see PORTING-NOTES.md's Phase 6 section); this
   one is left because it's row-marker/trailing-row mangling infra, not theming. Memoize
   `computeMangledLayout` on `columns`/`freezeColumns`/marker-state identity to close it.
+- **Replace the hand-rolled memo caches with `memoize-one`** — Phase 6 added three hand-written
+  identity caches in `grid-host-controller.ts` (`mergedThemeCache`, `mangledCellContentCache`, and
+  the module-scope `ALWAYS_VERTICAL_BORDER` constant) to restore reference stability for
+  `computeCanBlit`. `memoize-one` (single-entry cache + custom comparator) is the direct
+  framework-agnostic equivalent of React's `useMemo` and would express these more compactly. The
+  substantive argument for it is not tidiness: passing the cache inputs as real *parameters* means
+  the returned closure captures the parameters rather than a captured `args` object, which makes
+  "cache key drifts from what the closure captures" structurally impossible to express rather than
+  merely absent today (that class of bug had to be hand-audited during Phase 6 verification).
+  Deferred because it churns freshly-verified code and adds a runtime dependency to a v2 addon.
+  **Ember-native options were evaluated and rejected** — `@cached` is getter-only (can't take
+  parameters, so `themeForCell` is impossible), and both `@cached` and the lower-level
+  `createCache`/`getValue` primitive invalidate on *tracked* consumption, while `GridHostController`
+  deliberately holds untracked state; a cache consuming no tracked state is frozen permanently
+  (`isConst` exists precisely to detect this), turning a perf optimization into a stale-data
+  correctness bug. `@cached` on a **component getter** in `glide-data-grid.gts` remains the right
+  tool for any future *derived* arg (e.g. a combined cell renderer built from an `@extraCells` arg)
+  — computing such a value inline in `buildGridHostArgs()` would reintroduce the identity churn from
+  the consumer side.
 
 *Sort* — still just `onHeaderMenuClick`'s hit-test + callback (Phase 3). No menu UI, no sort state,
 no sort logic anywhere. This was in the **original explicit requirements list** and is currently the

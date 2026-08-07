@@ -2185,3 +2185,72 @@ obvious where the orchestrator's own verification pass had to go (first-time bli
 real scroll). An agent that had rounded those caveats up to "fully verified" would have been far more
 expensive, not less — the gap would still exist, just unmarked. Prompt for this explicitly and treat
 it as a positive signal, not a shortfall.
+
+## Autotracking → canvas: how a consumer actually gets reactive cell updates (Phase 6 follow-up)
+
+**This is the single most important thing for a consumer of this addon to understand, and it is not
+obvious.** Added after the user asked, correctly, whether Phase 6's memoization could stop Ember's
+native tracking from updating a cell. It cannot — but the surrounding model has a real sharp edge
+that predates Phase 6 and would otherwise be discovered the hard way.
+
+### The rule
+
+**Autotracking only records reads that happen *during* a tracked computation.** `<GlideDataGrid>`'s
+modifier establishes its dependencies by calling `buildGridHostArgs()`, which does
+`getCellContent: this.args.getCellContent` — it reads the **function reference**. It never calls it.
+So any `@tracked` property the `getCellContent` closure touches later, when the render engine invokes
+it at draw time, is read **outside** the tracking frame and is never registered as a dependency.
+
+Consequence, stated plainly: **mutating tracked state behind an identity-stable `getCellContent`
+does not repaint anything, and never did.** It doesn't even re-run the modifier. `<DemoGrid>` looks
+like a counterexample but isn't — its edits appear only because `commitCellEdit` performs its own
+internal damage redraw, not because of tracking.
+
+### The two working patterns
+
+1. **Lazy `getCellContent` + imperative `updateCells()`** — what `<DemoGrid>` does. Correct for large
+   virtualized datasets (200k rows); never project those eagerly. This is the "(b)" half of the
+   dual-path model in `PHASES.md`.
+2. **Getter `getCellContent` that eagerly reads the tracked fields** — what
+   `test-app/app/components/tracking-demo.gts` does:
+   ```ts
+   get getCellContent() {
+       const snapshot = this.store.all.map(p => ({ name: p.name, age: p.age /* ... */ }));  // read NOW
+       return ([col, row]: Item): GridCell => cellFor(snapshot[row], col);
+   }
+   ```
+   Reading the getter inside the tracking frame consumes every `@tracked` field, so an in-place
+   mutation invalidates the modifier → it re-runs → new closure identity → `computeCanBlit` returns
+   `false` → real repaint. **Every link in that chain is load-bearing.** Suits bounded, form-backed
+   tables; the eager projection is the cost.
+
+### The `scheduleFullRedraw()` hardening that makes pattern 2 safe
+
+`drawGrid` early-returns and paints **nothing** when `computeCanBlit` is `true` and the scroll
+offsets are unchanged (`render/data-grid-render.ts:214-222`). Before Phase 6 that was unreachable
+(`canBlit` was permanently `false`); afterwards it is live, and "nothing changed" is only as
+trustworthy as `computeCanBlit`'s fixed ~18-field identity list is exhaustive. Several real
+`GridHostArgs` inputs map to **no** compared field (`getCellRenderer` is the clearest), so an arg
+change needing a repaint could be silently swallowed.
+
+Fixed by having `scheduleFullRedraw()` set `this.lastFullDrawArg = undefined` before drawing —
+calling that method *is* the caller asserting "an input you can't see changed", so the safe reading
+is always to repaint. `computeCanBlit` then returns `false` on its own `last === undefined` guard,
+with no change to the blit logic itself. **This costs nothing on scroll**: `onScroll` calls `runDraw`
+directly and never routes through `scheduleFullRedraw`, so the blit fast path — the only place
+blitting matters for performance — keeps its previous-frame reference. Damage draws were already
+immune (`drawGrid(current, undefined)`, so `computeCanBlit` short-circuits on the same guard), which
+is why `updateCells()` was never at risk.
+
+### Demo
+
+`test-app/app/utils/model-store.ts` + `app/components/tracking-demo.gts`, reachable via the new
+`<DemoSwitcher>` tab in `application.gts` (`Route(<template>)` is classless and can't hold the
+tracked tab state, hence the wrapper component — same reason `<DemoGrid>` exists). The store models
+an Apollo-cache-style normalized layer: long-lived object references with `@tracked` fields mutated
+in place, **no** ember-data (the blueprint's `app/services/store.ts` is WarpDrive and is left unused
+and untouched). The proof is deliberately airtight — no `updateCells()`, no `onCellsEdited`, and
+every cell is `allowOverlay: false` so the grid's own overlay editor cannot fire and repaint via the
+damage path. Nothing changes identity anywhere. Browser-verified: editing the form and submitting
+repainted all five columns (text/number/boolean) for the mutated row, and a second form-free
+mutation path (a "toggle active" button) did too.
