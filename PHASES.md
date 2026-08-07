@@ -148,10 +148,61 @@ under scroll, horizontal+vertical scroll both work, copy/paste works, sort menu 
 click, row selection/select-all works, sparklines render, scroll performance is smooth with a
 large dataset. Don't claim "done" on this phase without actually driving it in a browser.
 
-**Phase 8 — Async/streaming data.** Port `packages/source`'s async data source helpers (or build
-an Ember-idiomatic equivalent) and build a demo exercising `GridHostController.updateCells()` at
-high frequency, matching the source's "hundreds of thousands of updates per second" claim and its
+**Phase 8 — Async/streaming data + the data-source layer.** Port `packages/source`'s helpers (or
+build an Ember-idiomatic equivalent) and build a demo exercising `GridHostController.updateCells()`
+at high frequency, matching the source's "hundreds of thousands of updates per second" claim and its
 `docs/04-streaming-data.stories.tsx`/`rapid-updates.stories.tsx` examples.
+
+*Scope researched 2026-08-07 (prompted by a user question about feeding GQL query results into the
+grid — do not re-derive):*
+
+`packages/source/src/` is 5 files: `use-async-data-source.ts`, `use-column-sort.ts`,
+`use-movable-columns.ts`, `use-collapsing-groups.ts`, `use-undo-redo.ts`. **`packages/core`'s
+`DataEditor` has no records/rows-of-objects API at all** — it takes `columns`/`rows`/
+`getCellContent`, exactly like this port's `<GlideDataGrid>`. So the port is not missing a
+higher-level intake API relative to source; source puts it in this separate package.
+
+**The architecturally important finding: these hooks are composable *decorators over
+`getCellContent`*, not wrapper components.** `useAsyncDataSource` returns
+`Pick<DataEditorProps, "getCellContent" | "onVisibleRegionChanged" | "onCellEdited" |
+"getCellsForSelection">`; `useColumnSort` takes `{sort, rows, columns, getCellContent}` and returns
+a wrapped `getCellContent`. They stack. **Port them as plain composable functions over plain
+objects, NOT as a monolithic `<GridForRecords>`-style component** — column sort (needed by Phase 7)
+is itself a `getCellContent` decorator, and a monolithic records component would have nowhere to
+put it. Intended Ember shape:
+```ts
+@cached get gridArgs() {
+    let a = recordsSource({ records: this.people, columns: this.columns });
+    a = withColumnSort(a, this.sort);
+    return a;   // spread onto <GlideDataGrid @columns= @getCellContent= ... />
+}
+```
+
+**Row-accessor contract — match source exactly, and note what it deliberately does NOT do:**
+```ts
+type RowCallback<T> = (range: Range) => Promise<readonly T[]>;
+type RowToCell<T> = (row: T, col: number) => GridCell;
+type RowEditedCallback<T> = (cell: Item, newVal: EditableGridCell, rowData: T) => T | undefined;
+```
+`toCell` is a **plain accessor function generic over the row type** — there is no path-string
+syntax (`"pets.name"`) and no object-traversal dependency anywhere in source. **Keep it that way:
+do not add `object-scan`/`lodash.get`/`dot-prop` to this addon.** How a consumer digs a value out
+of a nested GQL result is their concern; an accessor function covers every such library without the
+addon depending on any of them. (The user's own apps use `object-scan` with
+`useArraySelector: false` for this and it stays on their side of the boundary — the test-app may
+demo that pattern, but the addon's `package.json` must not gain the dependency.)
+
+**One genuinely new piece vs source:** a *synchronous* `recordsSource` (an in-memory array of
+records → `getCellContent`). Source only ships the async paged variant
+(`pageSize`/`maxConcurrency`, `Promise`-per-range); its consumers hand-write `getCellContent` for
+the simple bounded case. Building the sync one is worthwhile here because it is the natural place to
+encode the two reactivity rules that are otherwise easy to get wrong (both now written up in
+PORTING-NOTES.md's "Autotracking → canvas" section): the projection must be read **eagerly inside
+the tracking frame**, and per-row projections should be memoized with a per-row `@cached` view model
+whose array is rebuilt only on records-array identity change — so editing one field in a 1,000-row
+table recomputes one row, not all of them, instead of the naive whole-table rescan. Keep
+`getCellContent` an O(1) lookup regardless: it is called per painted cell inside the draw loop
+(`render/data-grid-render.cells.ts:220`), so any real work there lands on the paint path.
 
 **Phase 9 — Backlog (deferred features, NOT part of the auto-continue sequence).** Unlike Phases
 0–8, this is not something to pick up automatically when the prior phase finishes — it exists so
