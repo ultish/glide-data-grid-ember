@@ -215,6 +215,37 @@ with `updateCells` reserved for data that genuinely cannot be held in memory. **
 package exactly that pattern** — if the implementation diverges, DATA.md is the spec and needs
 updating in the same change, not left stale.
 
+### Phase 8 — START HERE (written at Phase 7 completion, 2026-08-08)
+
+What Phase 7 already built that Phase 8 must build **on top of**, not duplicate:
+
+- **`glide-data-grid-ember/src/data-source/` already exists**, created by Phase 7a. It is the
+  directory `recordsSource` belongs in. Its barrel is `data-source/index.ts`; consumers import
+  `glide-data-grid-ember/data-source/index` (this project uses per-directory barrels — the root
+  `src/index.ts` is an empty file and is *not* the convention). Rollup already publishes it; no
+  build-config change is needed.
+- **`withColumnSort` is the shape to match.** It takes a single **props object**
+  `{ columns, rows, getCellContent, sort }` and returns `{ getCellContent, getOriginalIndex }`.
+  **`recordsSource` must therefore return `columns` / `rows` / `getCellContent` under exactly those
+  names**, so the two compose by spreading:
+  ```ts
+  @cached get gridArgs() {
+      const src = recordsSource({ records: this.people, columns: this.columns });
+      return { ...src, ...withColumnSort({ ...src, sort: this.sort }) };
+  }
+  ```
+  Read PORTING-NOTES.md's Phase 7a section for the full API and — importantly — its
+  identity-stability design, which `recordsSource` should mirror rather than reinvent.
+- **Identity stability is a hard requirement, not a nicety.** `getCellContent` is one of
+  `computeCanBlit`'s ~18 identity-compared fields; a `recordsSource` that returns a fresh closure
+  per call silently disables the scroll blit fast path with no error and no visual difference.
+  Phase 7 confirmed in-browser that the blit path *does* engage through `withColumnSort` (5/5 calls,
+  zero differing fields, both axes) — don't be the phase that breaks it again. `withColumnSort`
+  memoizes internally on a structural key precisely so a consumer getter allocating a fresh `sort`
+  object doesn't thrash it; `recordsSource` faces the identical problem with its `records` array.
+- Column grouping is live now (Phase 7b) and row markers/header icons actually render (Phase 7e), so
+  a Phase 8 demo can use them freely.
+
 **One genuinely new piece vs source:** a *synchronous* `recordsSource` (an in-memory array of
 records → `getCellContent`). Source only ships the async paged variant
 (`pageSize`/`maxConcurrency`, `Promise`-per-range); its consumers hand-write `getCellContent` for

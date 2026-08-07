@@ -2712,6 +2712,11 @@ full kill / `rm -rf .vite` / restart / fresh-`?cb=` loop:
   the new marker renderer's checked state, not just its number state)
 - **regression**: the pre-existing ungrouped demo still renders a single header row, click-selects
   the correct row, and keeps its zebra/column/cell theme overrides
+- **column resize and reorder confirmed working in the new grouped demo by the user** (2026-08-08),
+  which is the check defect 1 most directly threatened — `hitTestColumnResizeEdge` was one of the
+  four bad `computeBounds` call sites, so a grouped grid's resize edge was mis-located before that
+  fix. Not exercised by the orchestrator's own automated pass; recorded here because it closes that
+  specific risk.
 - no console errors at any point
 
 **Blit fast path re-verified with the sort decorator live** (this was the one thing Phase 7a
