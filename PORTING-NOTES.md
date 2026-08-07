@@ -1062,3 +1062,52 @@ descendant the textarea bubbles through but a `root`-targeted dispatch never rea
 Remaining Phase 4 sub-phases (4b: uri/markdown, 4c: bubble/drilldown, 4d: image/new-row) all build
 on the overlay host and editor contract delivered here -- see the "Suggested sub-phase split"
 above, still accurate.
+
+## Phase 4c — Bubble/drilldown chip cells (COMPLETE, browser-verified, 2026-08-07)
+
+**Delivered**: `src/rendering/cells/bubble-cell.ts` and `src/rendering/cells/drilldown-cell.ts`,
+both ported near-verbatim from `packages/core/src/cells/{bubble-cell,drilldown-cell}.tsx`, reusing
+already-ported Phase 1 primitives (`roundedRect`/`measureTextCached`/`getMiddleCenterBias`/
+`getEmHeight` from `render/data-grid-lib.ts`) with zero new drawing helpers needed. Both added as
+`case` branches in `src/rendering/cells/index.ts`'s `getCellRenderer` and exported from both that
+file and the top-level `src/rendering/index.ts` barrel (which also gained `BubbleCell`/
+`DrilldownCell`/`DrilldownCellData` type exports -- they existed in `data-grid-types.ts` since
+Phase 1 but weren't re-exported yet). Also added `makeAccessibilityStringForArray` to
+`src/rendering/common/utils.ts` (ported from source's `common/utils.tsx`, wasn't needed by any
+earlier phase) -- used by both renderers' `getAccessibilityString`.
+
+**Correction to this file's own earlier research note** (the "Complexity tiers" section above said
+bubble/drilldown have "no `provideEditor` at all" in source -- re-verified directly against source
+during 4c and this is not quite right, worth fixing for the record): both `bubble-cell.tsx` and
+`drilldown-cell.tsx` **do** have a `provideEditor`, rendering `BubblesOverlayEditor`/
+`DrilldownOverlayEditor` (`internal/data-grid-overlay-editor/private/*.tsx`). But both of those
+components are **purely a static re-display of the full chip list** -- neither wires up
+`onChange`/`onFinishedEditing` to anything (the overlay-editor contract's commit path is never
+invoked), and each renderer's `onPaste` unconditionally returns `undefined`. `BubblesOverlayEditor`
+additionally renders a decorative, permanently-invisible `<textarea autoFocus>` (likely just to
+satisfy the overlay framework's "needs a focusable element" assumption, not for actual text entry).
+**Net effect: functionally read-only end to end**, which is what actually matters for this port's
+scope decision -- so per the original plan, **no overlay editor was built for either cell type
+here**, only `draw`/`measure`/`getAccessibilityString`/`onPaste` (no-op). If a future phase ever
+wants the "click to see the full untruncated chip list in an overlay" affordance, note it would be
+a real *new* feature relative to what source's own editor does (source's version doesn't let you
+edit the chips either, it just shows them uncropped) -- not a straightforward "port the existing
+editor" job.
+
+**Demo wiring** (`test-app/app/utils/demo-data.ts`): column 6 = bubble cell, 2-4 sample tags per row
+cycling through an 8-tag pool (`urgent`/`bug`/`feature`/`design`/`backend`/`frontend`/`ops`/`docs`).
+Column 7 = drilldown cell, 2-3 chips per row (`Item {row}-{i}`), first chip in each row carries an
+`img` pointing at a tiny inlined 8x8 data-URI PNG (avoids any external network dependency in the
+demo/tests). Both use columns 6/7 specifically to stay clear of Phase 4b's uri/markdown columns
+(prompted to use 4/5) per this phase's own scoping instructions -- confirmed no collision by
+reading the file's current state (only cols 0-2 were in use) immediately before editing.
+
+**Verification**: `npx tsc --noEmit -p tsconfig.json` clean (from the nested
+`glide-data-grid-ember/glide-data-grid-ember/` addon dir), `pnpm --filter glide-data-grid-ember
+build` (rollup) succeeds, `pnpm --filter test-app exec vite build` succeeds (421 modules, no new
+errors). **Browser-verified**: reused the already-running dev server on :4200 (don't start a
+second one -- check `lsof -i :4200` first) rather than spawning a duplicate, rebuilt the addon
+first per the "consumed via built dist" gotcha, reloaded, and confirmed both columns render real
+styled chip pills (rounded gray backgrounds for bubble tags, bordered chips with a small icon
+square + text for drilldown), not raw/unstyled text -- zoomed screenshot confirmed chip rounding,
+tag text, and the drilldown icon all rendered correctly. No console errors.

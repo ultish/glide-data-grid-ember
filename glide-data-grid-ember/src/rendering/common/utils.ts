@@ -65,3 +65,21 @@ const rtl = new RegExp("^[^" + ltrRange + "]*[" + rtlRange + "]");
 export function direction(value: string): "rtl" | "not-rtl" {
     return rtl.test(value) ? "rtl" : "not-rtl";
 }
+
+// Ported from source's common/utils.tsx for Phase 4c (bubble-cell.ts/drilldown-cell.ts's
+// getAccessibilityString). Basically `.join(", ")` but capped so it never allocates a string large
+// enough to be a real perf/crash risk on a cell with a huge chip array.
+export function makeAccessibilityStringForArray(arr: readonly string[]): string {
+    if (arr.length === 0) {
+        return "";
+    }
+
+    let index = 0;
+    let count = 0;
+    for (const str of arr) {
+        count += str.length;
+        if (count > 10_000) break;
+        index++;
+    }
+    return arr.slice(0, index).join(", ");
+}
