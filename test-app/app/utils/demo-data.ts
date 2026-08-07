@@ -16,13 +16,42 @@ export const demoColumns: readonly GridColumn[] = Array.from({ length: DEMO_COLU
     width: 90 + ((i * 37) % 220),
 }));
 
+// Phase 4a: varies cell kind by column so text/number/boolean/row-id editing can all be exercised
+// in the browser -- col 0 is a row-id (readonly), col 1 a number, col 2 a boolean, everything else
+// plain editable text.
 export function demoGetCellContent(item: Item): GridCell {
     const [col, row] = item;
+
+    if (col === 0) {
+        return {
+            kind: GridCellKind.RowID,
+            data: `row-${row}`,
+            allowOverlay: false,
+        };
+    }
+
+    if (col === 1) {
+        return {
+            kind: GridCellKind.Number,
+            data: row,
+            displayData: String(row),
+            allowOverlay: true,
+        };
+    }
+
+    if (col === 2) {
+        return {
+            kind: GridCellKind.Boolean,
+            data: row % 2 === 0,
+            allowOverlay: false,
+        };
+    }
+
     const text = `R${row}C${col}`;
     return {
         kind: GridCellKind.Text,
         data: text,
         displayData: text,
-        allowOverlay: false,
+        allowOverlay: true,
     };
 }

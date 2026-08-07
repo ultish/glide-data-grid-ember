@@ -47,6 +47,9 @@ import {
     unquote,
     BooleanEmpty,
     BooleanIndeterminate,
+    isObjectEditorCallbackResult,
+    booleanCellIsEditable,
+    toggleBoolean,
 } from "../rendering/index.ts";
 import type {
     DrawGridArg,
@@ -69,6 +72,9 @@ import type {
     CopyBuffer,
     CustomCell,
     CustomRenderer,
+    BooleanCell,
+    ProvideEditorCallbackResult,
+    CellEditorHandle,
 } from "../rendering/index.ts";
 import {
     computeBounds,
@@ -255,6 +261,17 @@ function rowMarkerWidthDefault(rows: number): number {
     return rows > 10_000 ? 48 : rows > 1000 ? 44 : rows > 100 ? 36 : 32;
 }
 
+// Phase 4a: marker/new-row cells are `InnerGridCell`s with no `GridCell` counterpart (mirrors
+// source's `isInnerOnlyCell`, `data-grid-types.ts`) -- never routed through the overlay-editor /
+// renderer-onClick machinery below, which only deals in real `GridCell`s.
+function isInnerOnlyCellKind(kind: InnerGridCell["kind"]): boolean {
+    return kind === InnerGridCellKind.Marker || kind === InnerGridCellKind.NewRow;
+}
+
+// Phase 4a: single printable character, no modifiers -- mirrors source's `editOnType` regex
+// (`data-editor.tsx:3510`, `/[\p{L}\p{M}\p{N}\p{S}\p{P}]/u`) exactly.
+const PRINTABLE_CHAR_RE = /[\p{L}\p{M}\p{N}\p{S}\p{P}]/u;
+
 // Column grouping isn't wired up yet in this phase -- no group-header args are exposed on
 // `GridHostArgs`. Fixed to `false` throughout, and (mirroring `data-editor.tsx`'s
 // `groupHeaderHeight={enableGroups ? groupHeaderHeight : 0}`) the *effective* group header height
@@ -343,6 +360,28 @@ interface MouseHit {
     // selection (mirrors `data-grid.tsx`'s `isMaybeScrollbar`); only meaningful when `kind ===
     // "out-of-bounds"`.
     readonly isMaybeScrollbar: boolean;
+}
+
+// Overlay editor open state (Phase 4a). Mirrors source's single `overlay: {...} | undefined`
+// state field (`data-editor.tsx:776-784`) -- a plain instance field here rather than `@tracked`,
+// matching this port's existing imperative-controller pattern (same treatment as `selection`/
+// `hoverInfo`/drag state above). `realLocation`/`mangledLocation` are the same cell in the two
+// coordinate spaces this controller juggles throughout (see the row-marker-mangling comments
+// elsewhere in this file) -- `realLocation` is what `getCellContent`/`onCellsEdited` use,
+// `mangledLocation` is what `computeBounds`/damage `CellSet`s use.
+interface OverlayState {
+    readonly realLocation: Item;
+    readonly mangledLocation: Item;
+    readonly container: HTMLDivElement;
+    // Not `readonly`: `openOverlay` constructs this object before the editor factory (which needs
+    // `onFinishedEditing`/`onChange` closures referencing `state`) has run, so `handle` starts as a
+    // placeholder and is assigned its real value immediately after -- see `openOverlay`.
+    handle: CellEditorHandle;
+    /** Live in-progress value, updated by the editor's `onChange` -- read back on commit. */
+    currentCell: GridCell;
+    /** Set once `finish()` has run, to make it idempotent against being called twice (e.g. both
+     * the editor's own Enter keydown AND a subsequent click-outside on the same tick). */
+    finished: boolean;
 }
 
 function computeYOffset(
@@ -461,6 +500,9 @@ export class GridHostController {
     private dragColState:
         | { srcCol: number; startClientX: number; active: boolean; dropCol: number; vetoed: boolean }
         | undefined = undefined;
+
+    // Overlay editor state (Phase 4a) -- see `OverlayState` above. `undefined` = no editor open.
+    private overlayState: OverlayState | undefined = undefined;
 
     constructor(options: GridHostControllerOptions) {
         this.root = options.root;
@@ -776,6 +818,13 @@ export class GridHostController {
     public destroy(): void {
         if (this.destroyed) return;
         this.destroyed = true;
+
+        if (this.overlayState !== undefined) {
+            window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
+            this.overlayState.handle.destroy();
+            this.overlayState.container.remove();
+            this.overlayState = undefined;
+        }
 
         this.scrollerEl.removeEventListener("scroll", this.onScroll);
         this.root.removeEventListener("mousemove", this.onMouseMove);
@@ -1440,7 +1489,53 @@ export class GridHostController {
         const current = this.selection.current;
         const cellCol = current?.cell[0];
         const cellRow = current?.cell[1];
-        if (cellCol === col && cellRow === row) return; // matches source's `if (cellCol !== col || cellRow !== row)` guard
+
+        // Renderer-level click hook (Phase 4a) -- e.g. boolean-cell's checkbox-glyph hit-test.
+        // Fires on every valid click on the cell regardless of prior selection state, mirrors
+        // source's `handleMaybeClick` calling `r.onClick` before its activation-behavior switch
+        // (`data-editor.tsx:2377-2394`). If it returns a new cell, that's a direct edit+redraw and
+        // this click is fully consumed -- it neither re-selects nor activates the overlay editor
+        // (matches boolean-cell's own `onSelect` calling `preventDefault()` over the same region,
+        // which source uses to suppress the normal activation path for the exact same click).
+        const cellContent = this.mangledGetCellContent(args)(hit.location);
+        const renderer = args.getCellRenderer(cellContent);
+        if (renderer?.onClick !== undefined && !isInnerOnlyCellKind(cellContent.kind)) {
+            const cellRect = this.computeCellRect(args, col, row);
+            const theme = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+            const clickArgs = {
+                cell: cellContent as never,
+                posX: hit.localX - cellRect.x,
+                posY: hit.localY - cellRect.y,
+                bounds: cellRect,
+                location: hit.location,
+                theme,
+                preventDefault: () => {},
+                shiftKey: hit.shiftKey,
+                ctrlKey: hit.ctrlKey,
+                metaKey: hit.metaKey,
+                isTouch: false,
+                isEdge: false,
+                button: 0,
+                buttons: 1,
+                scrollEdge: [0, 0] as const,
+            };
+            const newVal = renderer.onClick(clickArgs);
+            if (newVal !== undefined) {
+                this.commitCellEdit(args, hit.location, newVal as GridCell);
+                return;
+            }
+        }
+
+        if (cellCol === col && cellRow === row) {
+            // Click landed on the already-selected cell -- activate it (Phase 4a). This port only
+            // supports source's `cellActivationBehavior: "second-click"` (the default, see
+            // PORTING-NOTES.md's Phase 4a section for why the other two modes aren't ported): ANY
+            // click on an already-selected cell activates, no double-click timing needed -- a
+            // double-click's second mousedown already satisfies "click on the already-selected
+            // cell" on its own, so it's covered by this same branch without extra bookkeeping.
+            this.activateCell(args, hit.location, cellContent, { highlight: true });
+            return;
+        }
 
         if (hit.shiftKey && cellCol !== undefined && cellRow !== undefined && current !== undefined) {
             const left = Math.min(col, cellCol);
@@ -1615,6 +1710,286 @@ export class GridHostController {
         }
     }
 
+    // --- overlay editor (Phase 4a) ------------------------------------------------------------------
+    // Port of source's `data-grid-overlay-editor.tsx` + the activation-trigger logic spread across
+    // `data-editor.tsx`'s `reselect`/`handleMaybeClick`/`handleFixedKeybindings`/`onKeyDown` (exact
+    // line references + full architecture research in PORTING-NOTES.md's Phase 4 section). Unlike
+    // source (a React portal into a `#portal` DOM node), this overlay is a plain absolutely-
+    // positioned `<div>` appended directly into `this.root` -- no portal/mounting step exists
+    // anywhere else in this imperative controller, so there's nothing to reuse for one.
+
+    /** Cell-rect in the same root-relative pixel space `resolveMouseHit`/hover hit-testing use. */
+    private computeCellRect(args: ResolvedGridHostArgs, mangledCol: number, row: number): Rectangle {
+        const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        return computeBounds(
+            mangledCol,
+            row,
+            this.width,
+            this.height,
+            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+            args.headerHeight,
+            this.cellXOffset,
+            this.cellYOffset,
+            this.translateX,
+            this.translateY,
+            args.rows,
+            freezeColumns,
+            0,
+            mappedColumns,
+            args.rowHeight
+        );
+    }
+
+    /** Writes an edited cell back via `onCellsEdited` + a damage-only redraw of just that cell.
+     *  `mangledLocation` is in row-marker-space (what selection/hit-testing use throughout this
+     *  file); converted to real column space only at the `onCellsEdited` callback boundary, same
+     *  convention as every other edit path in this file (paste/cut). */
+    private commitCellEdit(args: ResolvedGridHostArgs, mangledLocation: Item, newValue: GridCell): void {
+        const [mCol, mRow] = mangledLocation;
+        const realCol = mCol - args.rowMarkerOffset;
+        args.onCellsEdited?.([{ location: [realCol, mRow], value: newValue }]);
+        this.drawWithDamage(new CellSet([mangledLocation]));
+    }
+
+    // Port of source's `reselect()` (`data-editor.tsx:1444-1493`) -- the single entry point every
+    // activation trigger (click-on-selected, Enter, type-to-overwrite) below funnels through.
+    // `cellContent` is mangled-space `InnerGridCell` (as returned by `mangledGetCellContent`);
+    // marker/new-row cells are filtered out by callers before reaching here (they're never
+    // reachable via a real column click/selection anyway).
+    private activateCell(
+        args: ResolvedGridHostArgs,
+        mangledLocation: Item,
+        cellContent: InnerGridCell,
+        opts: { readonly highlight: boolean; readonly initialValue?: string }
+    ): void {
+        if (isInnerOnlyCellKind(cellContent.kind)) return;
+        const cell = cellContent as GridCell;
+
+        // Boolean cells never open the overlay -- toggled directly, matches source's `reselect()`
+        // `c.kind === GridCellKind.Boolean` branch exactly (bypasses `setOverlaySimple` entirely).
+        if (cell.kind === GridCellKind.Boolean) {
+            if (!booleanCellIsEditable(cell)) return;
+            this.commitCellEdit(args, mangledLocation, { ...cell, data: toggleBoolean(cell.data) });
+            return;
+        }
+
+        if (!isReadWriteCell(cell) || cell.allowOverlay !== true) return;
+
+        let content: GridCell = cell;
+        if (opts.initialValue !== undefined) {
+            // Per-kind type-to-overwrite seeding, mirrors source's `reselect()` initialValue switch
+            // (`data-editor.tsx:1450-1467`): Number parses as float (`"-"` -> `-0`, NaN -> `0`),
+            // Text/Markdown/Uri use the raw character as the new `data` verbatim. **Deviation from
+            // source**: also sets `displayData` (Text) here, not just `data` -- source's own
+            // `reselect()` leaves `displayData` stale too, but this port's `text-cell.ts` draws
+            // `cell.displayData` (not `.data`), so committing without ever typing a second
+            // character (e.g. type-to-overwrite immediately followed by Tab/Enter) would silently
+            // commit the OLD displayed text while `data` held the new value -- a real, reproducible
+            // bug found via browser testing, not something to blindly replicate from source.
+            switch (content.kind) {
+                case GridCellKind.Number: {
+                    const parsed = opts.initialValue === "-" ? -0 : Number.parseFloat(opts.initialValue);
+                    const n = Number.isNaN(parsed) ? 0 : parsed;
+                    content = { ...content, data: n, displayData: opts.initialValue };
+                    break;
+                }
+                case GridCellKind.Text:
+                    content = { ...content, data: opts.initialValue, displayData: opts.initialValue };
+                    break;
+                case GridCellKind.Markdown:
+                case GridCellKind.Uri:
+                    content = { ...content, data: opts.initialValue } as GridCell;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        this.openOverlay(args, mangledLocation, content, opts.highlight);
+    }
+
+    private openOverlay(args: ResolvedGridHostArgs, mangledLocation: Item, cell: GridCell, highlight: boolean): void {
+        if (this.overlayState !== undefined) {
+            this.finishOverlay(args, this.overlayState.currentCell, [0, 0]);
+        }
+
+        const renderer = args.getCellRenderer(cell);
+        const editorResult = renderer?.provideEditor?.({ ...cell, location: mangledLocation } as never);
+        if (editorResult === undefined) return;
+        const isObj = isObjectEditorCallbackResult(editorResult);
+        const editorFn = isObj ? editorResult.editor : editorResult;
+        const disablePadding = editorResult.disablePadding === true;
+
+        const [mCol, mRow] = mangledLocation;
+        const cellRect = this.computeCellRect(args, mCol, mRow);
+        const theme = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+
+        const container = document.createElement("div");
+        Object.assign(container.style, {
+            position: "absolute",
+            left: `${cellRect.x}px`,
+            top: `${cellRect.y}px`,
+            width: `${cellRect.width}px`,
+            height: `${cellRect.height}px`,
+            minHeight: `${cellRect.height}px`,
+            boxSizing: "border-box",
+            background: theme.bgCell,
+            border: `2px solid ${theme.accentColor}`,
+            zIndex: "20",
+            overflow: "visible",
+            padding: disablePadding ? "0" : `${theme.cellVerticalPadding}px ${theme.cellHorizontalPadding}px`,
+        } satisfies Partial<CSSStyleDeclaration>);
+
+        const state: OverlayState = {
+            realLocation: [mCol - args.rowMarkerOffset, mRow],
+            mangledLocation,
+            container,
+            // `handle` is assigned immediately below -- `editorFn` is called synchronously and
+            // never reads `state.handle` itself, only `onFinishedEditing`/`onChange` do, and those
+            // can't fire before `editorFn` returns. Cast avoids a chicken-and-egg `undefined` slot.
+            handle: undefined as unknown as CellEditorHandle,
+            currentCell: cell,
+            finished: false,
+        };
+
+        const handle = editorFn({
+            value: cell as never,
+            isHighlighted: highlight,
+            theme,
+            validatedSelection: undefined,
+            onChange: newValue => {
+                state.currentCell = newValue as GridCell;
+            },
+            onFinishedEditing: (newValue, movement) => {
+                this.finishOverlay(args, newValue as GridCell | undefined, movement ?? [0, 0]);
+            },
+        });
+        state.handle = handle;
+        this.overlayState = state;
+
+        container.addEventListener("keydown", (ev: KeyboardEvent) => {
+            // Mirrors source's overlay-internal `onKeyDown` (`data-grid-overlay-editor.tsx:141-165`):
+            // Escape cancels, Enter (no shift -- shift+Enter is reserved for multi-line text
+            // insertion by `GrowingEntry`'s `altNewline`) commits + moves down, Tab/Shift+Tab commits
+            // + moves right/left. Every other key (ordinary typing, arrow keys for caret movement
+            // inside the editor) is left alone to bubble normally within the editor.
+            if (ev.key === "Escape") {
+                ev.stopPropagation();
+                ev.preventDefault();
+                this.finishOverlay(args, undefined, [0, 0]);
+            } else if (ev.key === "Enter" && !ev.shiftKey) {
+                ev.stopPropagation();
+                ev.preventDefault();
+                this.finishOverlay(args, state.currentCell, [0, 1]);
+            } else if (ev.key === "Tab") {
+                ev.stopPropagation();
+                ev.preventDefault();
+                this.finishOverlay(args, state.currentCell, [ev.shiftKey ? -1 : 1, 0]);
+            }
+        });
+
+        container.appendChild(handle.element);
+        this.root.appendChild(container);
+
+        // Deferred, not called synchronously here (Phase 4a bug found via browser testing): this
+        // whole method runs inside a native `mousedown` handler, and the activating click's
+        // `mouseup`/`click` haven't been dispatched yet -- Chrome delivers them to whatever element
+        // now sits under the pointer, which after `appendChild` above is this editor's freshly-
+        // focused textarea, and its default caret-placement-from-click-point handling on that
+        // `mouseup` was observed to silently collapse the `setSelectionRange(0, length)`
+        // select-all this call performs, right after it ran. Source doesn't hit this: React defers
+        // the equivalent `useEffect`-based focus/selection past the triggering event's full native
+        // dispatch (mousedown+mouseup+click all complete before React's commit phase runs its
+        // effects), which this imperative port has no equivalent scheduling point for -- deferring
+        // via `setTimeout` reproduces the same "after this gesture's native events are done" timing.
+        window.setTimeout(() => {
+            if (this.overlayState === state) handle.focus();
+        }, 0);
+
+        // Click-outside commits (mirrors source's `ClickOutsideContainer` -> `onClickOutside` ->
+        // save, not cancel). Registered on the next tick rather than synchronously: this method is
+        // itself always called from within a `mousedown` dispatch (an activation click or a
+        // type-to-overwrite keydown that started life as a click's Enter-equivalent), and adding a
+        // capture-phase `window` listener mid-dispatch must not risk catching that same event.
+        window.setTimeout(() => {
+            if (this.overlayState === state) {
+                window.addEventListener("mousedown", this.onOverlayOutsideClick, true);
+            }
+        }, 0);
+    }
+
+    private readonly onOverlayOutsideClick = (ev: MouseEvent): void => {
+        const state = this.overlayState;
+        if (state === undefined) return;
+        if (ev.target instanceof Node && state.container.contains(ev.target)) return;
+        this.finishOverlay(this.resolveArgs(), state.currentCell, [0, 0]);
+    };
+
+    /** Closes the overlay, optionally committing `newValue` first, then moves the active cell by
+     *  `movement` if non-zero. Idempotent via `state.finished` -- source's overlay can reach this
+     *  point twice for one logical close (e.g. an Enter keydown finishing the editor and a
+     *  subsequent synthetic/blur-driven click-outside on the same tick), see `OverlayState.finished`'s
+     *  doc comment above. */
+    private finishOverlay(
+        args: ResolvedGridHostArgs,
+        newValue: GridCell | undefined,
+        movement: readonly [-1 | 0 | 1, -1 | 0 | 1]
+    ): void {
+        const state = this.overlayState;
+        if (state === undefined || state.finished) return;
+        state.finished = true;
+        this.overlayState = undefined;
+
+        window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
+        state.handle.destroy();
+        state.container.remove();
+
+        if (newValue !== undefined) {
+            this.commitCellEdit(args, state.mangledLocation, newValue);
+        } else {
+            this.scheduleFullRedraw();
+        }
+
+        this.root.focus();
+        if (movement[0] !== 0 || movement[1] !== 0) {
+            const [mCol, mRow] = state.mangledLocation;
+            this.moveActiveCell(args, mCol + movement[0], mRow + movement[1]);
+        }
+    }
+
+    // Delete/Backspace: clears every read-write cell in the current selection. Prefers each cell's
+    // own renderer `onDelete` (richer/kind-specific, e.g. boolean-cell's `onDelete` sets `data:
+    // false` rather than `BooleanEmpty`) over the generic `clearedCellValue` fallback used by
+    // `onCut` -- mirrors source routing deletion through the renderer registry
+    // (`data-editor-fns.ts`), which `onCut`'s simpler port (Phase 3c, predates real cell renderers
+    // existing) couldn't do yet.
+    private deleteSelection(args: ResolvedGridHostArgs): void {
+        const region = this.selectedRegion(args);
+        if (region === undefined) return;
+        const colStart = Math.max(region.colStart, args.rowMarkerOffset);
+        if (colStart >= region.colEnd || region.rowStart >= region.rowEnd) return;
+
+        const edits: { location: Item; value: GridCell }[] = [];
+        const damaged: Item[] = [];
+        for (let row = region.rowStart; row < region.rowEnd; row++) {
+            for (let col = colStart; col < region.colEnd; col++) {
+                const realCol = col - args.rowMarkerOffset;
+                const cell = args.getCellContent([realCol, row]);
+                if (!isReadWriteCell(cell)) continue;
+                const renderer = args.getCellRenderer(cell);
+                const cleared = renderer?.onDelete?.(cell as never) ?? this.clearedCellValue(cell);
+                if (cleared !== undefined) {
+                    edits.push({ location: [realCol, row], value: cleared as GridCell });
+                    damaged.push([col, row]);
+                }
+            }
+        }
+        if (edits.length > 0) {
+            args.onCellsEdited?.(edits);
+            this.drawWithDamage(new CellSet(damaged));
+        }
+    }
+
     // --- keyboard nav (Phase 3b) -----------------------------------------------------------------
     // Port of the relevant subset of source's `handleFixedKeybindings`/`updateSelectedCell`/
     // `adjustSelection` (`data-editor.tsx`, see PORTING-NOTES.md for exact line references). Not
@@ -1630,6 +2005,11 @@ export class GridHostController {
     // the phase brief) is ported.
     private readonly onKeyDown = (ev: KeyboardEvent): void => {
         if (this.destroyed || !this.isFocused) return;
+        // While the overlay editor is open, its own container-level `keydown` listener (registered
+        // in `openOverlay`) handles Escape/Enter/Tab and `stopPropagation()`s them -- everything
+        // else (ordinary typing, arrow keys for caret movement inside the editor's textarea) must
+        // bubble through untouched, not be reinterpreted as grid navigation/select-all/etc below.
+        if (this.overlayState !== undefined) return;
 
         const primary = browserIsOSX.value ? ev.metaKey : ev.ctrlKey;
 
@@ -1641,6 +2021,50 @@ export class GridHostController {
             ev.preventDefault();
             ev.stopPropagation();
             return;
+        }
+
+        // Cell activation (Phase 4a) -- Enter, Delete/Backspace, and type-to-overwrite. All three
+        // are no-ops with nothing selected, mirroring source's early-outs for the same keys.
+        if (this.selection.current !== undefined) {
+            const activationArgs = this.resolveArgs();
+            const mangledLocation = this.selection.current.cell;
+
+            if (ev.key === "Enter" && !primary && !ev.altKey) {
+                const cellContent = this.mangledGetCellContent(activationArgs)(mangledLocation);
+                this.activateCell(activationArgs, mangledLocation, cellContent, { highlight: true });
+                ev.preventDefault();
+                ev.stopPropagation();
+                return;
+            }
+
+            if (ev.key === "Delete" || ev.key === "Backspace") {
+                this.deleteSelection(activationArgs);
+                ev.preventDefault();
+                ev.stopPropagation();
+                return;
+            }
+
+            // Type-to-overwrite: mirrors source's `editOnType` (`data-editor.tsx:3505-3524`) --
+            // any single printable character, no modifiers, immediately opens the overlay seeded
+            // with that character instead of the cell's existing content.
+            if (
+                !primary &&
+                !ev.metaKey &&
+                ev.key.length === 1 &&
+                PRINTABLE_CHAR_RE.test(ev.key) &&
+                mangledLocation[1] >= 0
+            ) {
+                const cellContent = this.mangledGetCellContent(activationArgs)(mangledLocation);
+                if (!isInnerOnlyCellKind(cellContent.kind) && isReadWriteCell(cellContent as GridCell)) {
+                    this.activateCell(activationArgs, mangledLocation, cellContent, {
+                        highlight: false,
+                        initialValue: ev.key,
+                    });
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    return;
+                }
+            }
         }
 
         const isArrow =

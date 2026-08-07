@@ -43,7 +43,17 @@ export type {
     BooleanCell,
     UriCell,
     MarkdownCell,
+    LoadingCell,
+    ProtectedCell,
+    RowIDCell,
     EditListItem,
+    SelectionRange,
+    ValidatedGridCell,
+    ProvideEditorCallback,
+    ProvideEditorCallbackResult,
+    ProvideEditorComponent,
+    CellEditorProps,
+    CellEditorHandle,
 } from "./data-grid-types.ts";
 export {
     GridCellKind,
@@ -58,7 +68,14 @@ export {
     isEditableGridCell,
     isReadWriteCell,
     isRectangleEqual,
+    isObjectEditorCallbackResult,
+    booleanCellIsEditable,
 } from "./data-grid-types.ts";
+
+// Cell-type registry (Phase 4a) -- concrete `InternalCellRenderer` implementations for
+// text/number/boolean/loading/protected/row-id, and the `getCellRenderer: GetCellRendererCallback`
+// dispatcher that replaces Phase 2's `-temp-text-cell-renderer.ts` stub.
+export { getCellRenderer, toggleBoolean } from "./cells/index.ts";
 
 // Cell-drawing contracts consumed by the render engine
 export type {

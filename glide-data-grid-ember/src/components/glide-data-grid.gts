@@ -11,7 +11,7 @@ import Component from "@glimmer/component";
 import { registerDestructor } from "@ember/destroyable";
 import { modifier } from "ember-modifier";
 import { GridHostController, type GridHostArgs, type RowMarkerKind } from "../-private/grid-host-controller.ts";
-import { getCellRenderer as defaultGetCellRenderer } from "../rendering/-temp-text-cell-renderer.ts";
+import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
 import type {
     GridColumn,
     GridCell,
@@ -40,7 +40,8 @@ export interface GlideDataGridSignature {
         freezeColumns?: number;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
-        // section for the rationale. Defaults to the temp text-only renderer.
+        // section for the rationale. Defaults to the real Phase 4a cell-type registry
+        // (`../rendering/cells/index.ts`, text/number/boolean/loading/protected/row-id).
         getCellRenderer?: GetCellRendererCallback;
         onReady?: (api: GlideDataGridApi) => void;
 

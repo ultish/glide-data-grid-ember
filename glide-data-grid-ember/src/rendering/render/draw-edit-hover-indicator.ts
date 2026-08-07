@@ -10,7 +10,7 @@ export function drawEditHoverIndicator(
     displayData: string,
     rect: Rectangle,
     hoverAmount: number,
-    overrideCursor: ((cursor: CSSCursorValue | undefined) => void) | undefined
+    overrideCursor: ((cursor: CSSCursorValue) => void) | undefined
 ) {
     ctx.textBaseline = "alphabetic";
 

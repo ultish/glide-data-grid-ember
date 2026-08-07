@@ -1,5 +1,5 @@
 import has from "lodash/has.js";
-import type { Theme } from "./theme.ts";
+import type { Theme, FullTheme } from "./theme.ts";
 import { assertNever, proveType } from "./common/support.ts";
 import type { SpriteManager } from "./data-grid-sprites.ts";
 import type { BaseGridMouseEventArgs, CellActivatedEventArgs } from "./event-args.ts";
@@ -390,17 +390,65 @@ export interface BubbleCell extends BaseGridCell {
 export type SelectionRange = number | readonly [number, number];
 
 /** @category Renderers */
-// Phase 4: editor component contract, redefined for Ember. The source type described a React
+// Phase 4a: editor component contract, redefined for Ember. Source's version described a React
 // function component's props (onChange/onFinishedEditing/theme/portalElementRef/etc.) for
-// rendering a DOM overlay editor over a cell. That whole contract -- and Ember's equivalent of it
-// -- is designed in a later phase, so it is collapsed to `unknown` here rather than guessed at.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export type ProvideEditorComponent<T extends InnerGridCell> = unknown;
+// rendering a DOM overlay editor over a cell, rendered via React itself. This port's overlay host
+// (`GridHostController`'s `openOverlay`/activation machinery, `src/-private/grid-host-controller.ts`)
+// is plain imperative DOM code, not a framework-rendered tree -- there is no Ember-component
+// portal/mounting step anywhere in the overlay path -- so the natural equivalent contract is a
+// plain factory function that builds and returns real DOM directly, not a declarative component.
+// `CellEditorProps`/`CellEditorHandle` below are that contract. See PORTING-NOTES.md's Phase 4a
+// section for the full rationale (including why `GrowingEntry`, ported from source's React
+// component, is likewise a plain DOM-building class rather than a `.gts` component).
+/** @category Renderers */
+export interface CellEditorProps<T extends InnerGridCell> {
+    /** The cell's current value while editing -- starts as the cell being edited (optionally
+     * pre-seeded with a type-to-overwrite starting character), updated via `onChange`. */
+    readonly value: T;
+    /** `true` = select-all-on-focus (overwrite-by-typing UX); `false` = caret placed at the end. */
+    readonly isHighlighted: boolean;
+    /** The realized theme in effect for this cell (post `mergeAndRealizeTheme`), so DOM editors
+     * can match the canvas-drawn font/colors without needing their own CSS-custom-property wiring
+     * (not built yet, theming is Phase 6 -- see PORTING-NOTES.md). Not part of source's editor
+     * props (source's editors read `ThemeContext` via `useTheme()` instead); added here because
+     * `GrowingEntry` genuinely needs font-family/font-size/text-color and there is no other channel
+     * for it to receive them in this port's plain-DOM overlay host. */
+    readonly theme: FullTheme;
+    /** Mirrors source's separate `validatedSelection` editor prop (`data-grid-overlay-editor.tsx`)
+     * -- an explicit text-selection range to (re-)apply inside the editor, e.g. after a
+     * `validateCell` callback adjusts the value. No Phase 4a cell renderer/overlay host code sets
+     * this yet (no `validateCell` support is ported), but `GrowingEntry`-based editors already
+     * consume it, so it's part of the contract now rather than bolted on later. */
+    readonly validatedSelection?: SelectionRange;
+    /** Called whenever the user changes the in-progress value (does not close the editor). */
+    readonly onChange: (newValue: T) => void;
+    /** Called to close the editor. `newValue === undefined` means cancel (discard any changes);
+     * otherwise it's the value to commit. `movement` is `[dx, dy]` telling the grid which
+     * direction to move the active cell afterwards (`[0,1]` = Enter, `[±1,0]` = Tab/Shift+Tab,
+     * `[0,0]` = Escape/click-outside -- stay on the same cell). */
+    readonly onFinishedEditing: (newValue: T | undefined, movement?: readonly [-1 | 0 | 1, -1 | 0 | 1]) => void;
+}
+
+/** @category Renderers */
+export interface CellEditorHandle {
+    /** Root DOM node the overlay host appends into its positioned container. */
+    readonly element: HTMLElement;
+    /** Called once, right after `element` is attached to the DOM, to focus + (per
+     * `CellEditorProps.isHighlighted`) select the editable content. */
+    focus(): void;
+    /** Called once when the overlay closes (commit or cancel) -- release listeners/resources. */
+    destroy(): void;
+}
+
+/** @category Renderers */
+export type ProvideEditorComponent<T extends InnerGridCell> = (props: CellEditorProps<T>) => CellEditorHandle;
 
 type ObjectEditorCallbackResult<T extends InnerGridCell> = {
     editor: ProvideEditorComponent<T>;
     deletedValue?: (toDelete: T) => T;
     // Phase 4: editor style-override contract, redefined for Ember (was React's `CSSProperties`).
+    // Still unused/unguessed -- no Phase 4a cell renderer sets `styleOverride`, and the overlay
+    // host doesn't consume it yet (its own container styling is fixed, not per-cell-overridable).
     styleOverride?: unknown;
     disablePadding?: boolean;
     disableStyling?: boolean;

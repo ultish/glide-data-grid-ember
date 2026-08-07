@@ -763,6 +763,198 @@ Row reorder is the same mechanism, gated on being in the row-marker column (col 
 a live preview during drag (remaps row indices so the dragged row visually appears at the drop
 target before the move is committed) and auto-scroll near grid edges while dragging.
 
+## Phase 4 — Core cell types + overlay editors (research, 2026-08-07)
+
+**Repo path gotcha:** the addon package is nested two levels:
+`/Users/jxhui/Developer/glide-data-grid-ember/glide-data-grid-ember/` (workspace root `glide-data-grid-ember/`
+contains an addon dir of the *same name*). Always use the full nested path or you'll `cd` into the
+wrong directory (this bit the researcher once this session — `cd .../glide-data-grid-ember && ls src`
+silently resolved to the outer workspace root, not the addon).
+
+### Existing hook points already in the port (don't rebuild these)
+
+- `src/rendering/cell-types.ts` already has the **complete** registry contracts ported 1:1 from
+  source's `cells/cell-types.ts`: `BaseDrawArgs`, `DrawArgs<T>`, `PrepResult`, `DrawCallback`,
+  `BaseCellRenderer`/`InternalCellRenderer<T>`/`CustomRenderer<T>`/`CellRenderer<T>`,
+  `GetCellRendererCallback`. Nothing to change here for Phase 4 — just implement renderers that
+  satisfy `InternalCellRenderer<T>`.
+- `src/rendering/-temp-text-cell-renderer.ts` is the Phase-2 smoke-test stub — **delete it** once a
+  real registry (`getCellRenderer`) exists, per its own header comment. `GridHostArgs.getCellRenderer`
+  in `grid-host-controller.ts` already plumbs whatever function is passed in; no signature changes
+  needed there.
+- `GridHostController.onMouseMove` (hover) already calls `args.getCellRenderer(cell)` and checks
+  `renderer.needsHover` to drive `AnimationManager` — the hover-fade wiring is **done**, cell
+  renderers just need to set `needsHover` truthily to opt in (e.g. `newRowCellRenderer`).
+  `renderer.onClick`/`onSelect` are **not yet wired** into `resolveMouseHit`/click dispatch — that's
+  new Phase 4 work (see below).
+- Row-marker checkbox + select-all is **already implemented as bespoke code directly in
+  `GridHostController`** (Phase 3a), not via a `marker-cell.tsx`-style registry renderer, even
+  though source itself does route it through the registry (`cells/marker-cell.tsx`). This is a known
+  divergence — it already works, leave it as-is, no need to refactor to match source's structure.
+- Keyboard nav comment at `grid-host-controller.ts:1618-1630` already flags exactly what Phase 4 must
+  add: "cell activation (Enter/Space/printable-char — Phase 4, no cell editors exist)".
+
+### Cell renderer interface & source files to port
+
+`packages/core/src/cells/*.tsx` (13 files, each exports one `InternalCellRenderer<T>` object +
+a `draw*Cell` function): `text-cell.tsx`, `number-cell.tsx`, `boolean-cell.tsx`, `bubble-cell.tsx`,
+`image-cell.tsx`, `uri-cell.tsx`, `markdown-cell.tsx`, `drilldown-cell.tsx`, `marker-cell.tsx`
+(skip — see divergence note above), `loading-cell.tsx`, `protected-cell.tsx`, `row-id-cell.tsx`,
+`new-row-cell.tsx`. Each renderer implements `kind`, `draw`, optionally `drawPrep`/`measure`/
+`needsHover`/`onClick`/`onDelete`/`provideEditor`, and (for `InternalCellRenderer`) `onPaste` +
+`getAccessibilityString`. Port each near-verbatim, same pattern as Phase 1's render-function ports.
+
+**Complexity tiers** (drives the sub-phase split below):
+- **No overlay editor, trivial draw**: `loading-cell.tsx` (spinner/skeleton), `protected-cell.tsx`
+  (dots), `row-id-cell.tsx` (plain text, readonly), `new-row-cell.tsx` (hover-icon "+" affordance,
+  `needsHover: true`, `measure: () => 200` fixed width, no editor — `onClick`-less, activation is via
+  the *grid* clicking a trailing blank row, see "New-row / trailing blank row" below).
+- **No overlay editor, click-toggle**: `boolean-cell.tsx` (checkbox; toggles directly via `onClick`
+  returning a mutated cell — **never opens an overlay**, confirmed in source's `reselect()`: `if (c.kind
+  === GridCellKind.Boolean && activation.inputType === "keyboard" ...)` branch bypasses
+  `setOverlaySimple` entirely and calls `onCellsEdited` + `damage` directly. Port this bypass into
+  GridHostController's activation logic, not into the overlay-open path).
+- **Text-like overlay editor** (uses ported `GrowingEntry`): `text-cell.tsx`, `number-cell.tsx` (same
+  editor, parses/formats numeric string), `uri-cell.tsx` (same editor + link-icon click-to-open
+  affordance), `markdown-cell.tsx` (`GrowingEntry` + rendered-HTML preview via `marked`, see below).
+- **List/chip editor**: `bubble-cell.tsx` (renders pill/chip list, read-only — no `provideEditor` at
+  all in source, it's **display-only**, confirm before assuming it needs an editor), `drilldown-cell.tsx`
+  (chips with optional icons, also **no `provideEditor`** in source — display-only).
+- **Custom editor**: `image-cell.tsx` (thumbnail draw + an editor for a list of image URLs, uses
+  `ImageWindowLoader` — already ported in Phase 1 as `image-window-loader-interface.ts`/
+  `common/image-window-loader.ts`).
+
+### Overlay editor architecture
+
+Source: `internal/data-grid-overlay-editor/data-grid-overlay-editor.tsx` (262 lines) + `internal/
+growing-entry/growing-entry.tsx` + per-cell-type editor components (some inline in the cell file,
+markdown's is a separate `internal/data-grid-overlay-editor/private/markdown-overlay-editor.tsx`).
+
+- **DOM overlay, not canvas-drawn.** A single absolutely-positioned `<div>` rendered via
+  `ReactDOM.createPortal` into a `#portal` element (or a consumer-supplied `portalElementRef`),
+  positioned at `target: Rectangle` (the cell's on-screen bounding rect in the *same coordinate
+  space* the render engine already computes cell rects in — `GridHostController` already has this
+  math for hit-testing, reuse it, don't recompute). No React portal equivalent needed in Ember —
+  either append the overlay element directly to `this.root` (simplest, avoids `{{in-element}}`
+  target-management complexity) or use `{{in-element}}` into a dedicated container; either is fine,
+  pick whichever is less code, this isn't architecturally load-bearing the way the canvas/scroll
+  trick was.
+- **Open/close state**: source keeps `overlay: {target, content, cell, initialValue, highlight,
+  forceEditMode, activation, theme} | undefined` as one piece of state (`data-editor.tsx:776-784`).
+  Port as a plain instance field on `GridHostController` (e.g. `private overlayState: OverlayState |
+  undefined`), toggled imperatively — matches the port's existing dual-path model (imperative
+  controller, not framework-reactive internal state), consistent with how selection/hover state is
+  already handled.
+- **Commit/cancel contract**: the editor component calls `onFinishEditing(newCell: GridCell |
+  undefined, movement: [-1|0|1, -1|0|1])`. `undefined` cell = cancel (no edit applied). `movement`
+  tells the grid which direction to move the active cell after closing (e.g. `[0,1]` = Enter moves
+  down, `[1,0]`/`[-1,0]` = Tab/Shift+Tab, `[0,0]` = Escape/click-outside, stay put). On commit, source
+  calls its `onCellsEdited`/`mangledOnCellsEdited` equivalent — in this port that's
+  `GridHostArgs.onCellsEdited`, already exists, plus a damage-redraw of just that cell (reuse
+  `updateCells()`/`drawWithDamage`, already exists).
+- **Editor-internal key handling** (`data-grid-overlay-editor.tsx:onKeyDown`, ~line 141-165):
+  `Escape` → cancel (movement `[0,0]`, no save). `Enter` (no shift — shift+Enter is reserved for
+  multi-line text insertion) → save + movement `[0,1]`. `Tab`/`Shift+Tab` → save + movement
+  `[±1,0]`. All three `stopPropagation`+`preventDefault` so the grid's own `onKeyDown` doesn't also
+  react. Click-outside the overlay (`ClickOutsideContainer`) → save (not cancel!) with `[0,0]`.
+- **`allowOverlay` flag**: every `EditableGridCell` in source's type union carries an `allowOverlay:
+  boolean` field (already ported in Phase 1's `data-grid-types.ts` — verify it's there, it should be
+  since the whole cell type union was ported). Activation only opens an overlay if
+  `cell.allowOverlay === true` — readonly/marker/loading/etc. cells set this `false`.
+- **GrowingEntry** (`internal/growing-entry/growing-entry.tsx`, ~70 lines): a `<textarea>` with an
+  invisible sibling `<div>` ("shadow box") mirroring the same text content via CSS to auto-size the
+  container to fit the text (classic autosize-textarea trick — no JS measurement needed, pure CSS).
+  Controlled component: `value`/`onChange` props, focuses + selects-all (or places caret at end,
+  depending on `highlight`) on mount. Straightforward `.gts` port — no architectural risk here.
+
+### Activation (how editing gets triggered) — source `data-editor.tsx`, exact refs
+
+- **`cellActivationBehavior`** prop, default `"second-click"` (line 848). Values: `"second-click"`
+  (click an *already-selected* cell to activate — single click elsewhere just selects),
+  `"double-click"` (native-feeling double-click required even on an already-selected cell),
+  `"single-click"` (any click activates immediately). Per-cell override via
+  `cell.activationBehaviorOverride`. **Port `"second-click"` as the only supported behavior for
+  Phase 4** (matches the default everyone actually uses; don't build the full 3-mode + per-cell
+  override system unless asked — YAGNI per project norms).
+- **Double-click detection is NOT the native `dblclick` event.** Source manually times it in
+  `onPointerUp` (`internal/data-grid/data-grid.tsx` ~line 1132-1163): a `lastUpTime` ref timestamp
+  is compared against `Date.now()` on the *next* pointerup; if the gap is `< 500ms` (mouse) / `<
+  1000ms` (touch), `isDoubleClick: true` is stamped onto that event's args. Port this exact pattern
+  into `GridHostController`'s existing mouseup handler — add a `lastMouseUpTime` field, no new event
+  listeners needed.
+- **Click activation logic** (`handleMaybeClick`, `data-editor.tsx:2367-2429`): on a valid click (down
+  and up landed on the same cell), if `isDoubleClick === true` **or** (`cellActivationBehavior ===
+  "second-click"` **and** this cell was already the selected cell before this click) → activate.
+  Boolean cells activate-and-toggle-immediately (no overlay) as noted above; other `allowOverlay`
+  cells open the overlay via `reselect(bounds, activationEvent)` with `initialValue: undefined,
+  highlight: true, forceEditMode: false` (i.e., opens showing existing content, selected/highlighted
+  for easy overwrite-by-typing).
+- **Enter key activation**: `keys.activateCell` default keybinding is Enter (confirmed via
+  `handleFixedKeybindings`, `data-editor.tsx:3294-3306`) — same `reselect()` call, same
+  highlight/forceEditMode as click activation. Wire into the port's existing `onKeyDown` (currently
+  handles arrows/Home/End/Ctrl+A only, per its own "Phase 4" TODO comment).
+- **Type-to-overwrite activation**: any single printable character (`event.key.length === 1` +
+  unicode letter/mark/number/symbol/punctuation regex, `data-editor.tsx:3505-3524`) typed while a
+  read-write cell is selected (and no modifier keys, and `editOnType` — default `true`) immediately
+  activates the overlay **with that character as the starting content** (`reselect(bounds,
+  activationEvent, event.key)` — the third arg is `initialValue`). For `NumberCell`: parsed as float
+  (special-cased `"-"` → `-0`, `NaN` → `0`). For `Text`/`Markdown`/`Uri`: used as-is as the new
+  `data`. This is genuine "start typing to overwrite a cell" spreadsheet-style UX — port it, it's a
+  cheap addition once the overlay framework exists and is a real UX expectation for a data grid.
+- **Delete key**: clears selected cell(s)' content via each renderer's `onDelete?.(cell) => T |
+  undefined` (falls back to a generic clear if `onDelete` is absent). **Check whether Phase 3c
+  already ported this** — `grid-host-controller.ts` has a `clearedCellValue` method (found near line
+  2004) but it's not yet confirmed whether it's wired to the `Delete`/`Backspace` key or only used by
+  cut. Verify and wire to keydown if missing.
+
+### Markdown cell — corrects earlier PHASES.md speculation
+
+**No ProseMirror anywhere in source.** `markdown-cell.tsx`'s editor is just `GrowingEntry` (a plain
+textarea) + a live preview (`MarkdownDiv`, `internal/markdown-div/markdown-div.tsx`) that renders
+markdown → HTML via the **`marked`** npm package (`marked(contents)` → innerHTML string, injected via
+`Range.createContextualFragment`-style DOM manipulation, all `<a>` tags forced to
+`target="_blank" rel="noreferrer noopener"`). Add `marked` as a dependency and port `MarkdownDiv`
+as a small `.gts` component (or plain DOM-manipulation class + template, doesn't need to be
+reactive — content only changes when the editor's value changes, which is already tracked at the
+overlay-state level). This eliminates what PHASES.md flagged as a research risk — it's a trivial
+dependency add, not a framework-integration question.
+
+### New-row / trailing blank row
+
+Source's "click below the last row to add a new row" affordance (`new-row-cell.tsx` +
+`showTrailingBlankRow` prop + `onRowAppended` callback) **does not exist in the port at all yet** —
+confirmed via `grid-host-controller.ts:1624`'s own comment ("no trailing-blank-row ... concepts exist
+in this port yet"). This is more than a cell renderer — it needs: (1) a `showTrailingBlankRow: boolean`
+arg, (2) the row-count/hit-testing math to treat `row === rows` as a real (virtual) row when that
+flag is set, (3) an `onRowAppended` callback fired on activating that row, (4) the `newRowCellRenderer`
+draw function itself (trivial, ~40 lines, already read in full during this research — hover-fade "+"
+icon or custom icon/hint text). Scope this as its own sub-phase (4d below) rather than folding it
+into the general cell-renderer work, since items 1-3 touch `GridHostController`'s row-counting/hit-
+testing, not just the renderer registry.
+
+### Suggested sub-phase split (mirrors Phase 3's 3a-3d pattern)
+
+- **4a — Overlay framework + simple cells**: `GetCellRendererCallback` registry replacing the temp
+  stub, `GrowingEntry` .gts component, overlay DOM host (open/position/close), activation wiring
+  (double-click timing, second-click, Enter, type-to-overwrite, Escape/Enter/Tab commit, Delete-key
+  clear if not already done), `onFinishEditing`→`onCellsEdited`+damage-redraw plumbing. Cell types:
+  `text-cell`, `number-cell`, `boolean-cell` (exercises both the overlay path and the no-overlay
+  toggle-bypass path), `loading-cell`, `protected-cell`, `row-id-cell`. This is the
+  architecturally-risky sub-phase — most other sub-phases just add renderers on top of it.
+- **4b — Text-family + markdown**: `uri-cell` (reuses text overlay + link affordance), `markdown-cell`
+  (+ port `MarkdownDiv`, add `marked` dependency).
+  - **Depends on 4a** (needs the overlay framework).
+- **4c — Display-only chip cells**: `bubble-cell`, `drilldown-cell` (both confirmed display-only, no
+  `provideEditor` in source — lower risk, can run in parallel with 4b since neither touches the
+  overlay framework).
+- **4d — Image cell + new-row/trailing-blank-row**: `image-cell` (uses existing `ImageWindowLoader`),
+  plus the trailing-blank-row feature (`showTrailingBlankRow`/`onRowAppended`/`newRowCellRenderer`,
+  see above — the row-counting/hit-testing changes here are the main risk, do this one carefully and
+  re-verify row math doesn't break existing selection/scroll tests).
+  - **Depends on 4a** for image-cell's editor; trailing-blank-row work is independent of 4a and could
+    theoretically run in parallel, but bundling it with image-cell keeps the sub-phase count matching
+    Phase 3's precedent.
+
 ## Process note for whoever picks this up next
 
 Two 2a attempts before this note existed wasted significant time/tokens: two died to
@@ -771,3 +963,102 @@ re-derivation of facts (like the `.ts`-extension import rule and `noUncheckedInd
 handling) that were already established in this file's predecessor knowledge. **Always update
 this file when you learn something reusable, and always tell the next agent to read it first.**
 This file existing and being kept current is the fix.
+
+## Phase 4a — Overlay editor framework + simple cells (COMPLETE, 2026-08-07)
+
+Built directly by Claude after two subagent attempts died mid-task (first died with zero progress,
+relaunched with a narrower prompt; second died again -- both times stalling in a research/context-
+gathering phase before writing the actual overlay-wiring code, despite the architecture already
+being fully documented above). The salvaged work from those attempts (cell renderers, `GrowingEntry`,
+the `CellEditorProps`/`CellEditorHandle` contract) was good and is now the foundation everything else
+in this phase builds on -- see below for the final shape.
+
+**Delivered**: `getCellRenderer` registry (`src/rendering/cells/index.ts`) covering
+Text/Number/Boolean/Loading/Protected/RowID, replacing `-temp-text-cell-renderer.ts` (deleted).
+`GrowingEntry` (`src/-private/growing-entry.ts`) -- plain-DOM autosize-textarea class, NOT an Ember
+component (see its own header comment for why: the overlay host that consumes it is itself
+plain imperative DOM code with no Ember-rendering context available). Full overlay editor host in
+`GridHostController`: `openOverlay`/`finishOverlay`/`commitCellEdit`/`activateCell`/
+`deleteSelection`/`onOverlayOutsideClick`, an `OverlayState` instance field, wired into
+`dispatchCellMouseDown` (renderer `onClick` dispatch + click-on-already-selected activation) and
+`onKeyDown` (Enter/Delete/Backspace/type-to-overwrite, plus a guard that bails out entirely while
+an overlay is open so ordinary typing/arrow-keys inside the editor aren't reinterpreted as grid
+nav). Demo app (`test-app/app/utils/demo-data.ts`, `demo-grid.gts`) now varies cell kind by column
+(row-id/number/boolean/text) and has a real `edits` override map wired to `@onCellsEdited`.
+
+**Editor contract** (`src/rendering/data-grid-types.ts`, search "Phase 4a"): `CellEditorProps<T>`
+(`value`, `isHighlighted`, `theme`, `validatedSelection?`, `onChange`, `onFinishedEditing`) and
+`CellEditorHandle` (`{element, focus(), destroy()}`) -- a plain factory function
+`(props) => CellEditorHandle`, not a component. Any 4b/4c/4d cell's `provideEditor` must return
+something satisfying this (either a bare function, or `{editor, disablePadding?, disableStyling?,
+styleOverride?, deletedValue?}` per source's `ObjectEditorCallbackResult` shape, unwrapped via
+`isObjectEditorCallbackResult`).
+
+**Simplifications vs source, deliberate** (see the Phase 4 research section above for why):
+`cellActivationBehavior` is always effectively `"second-click"` -- no double-click timing needed at
+all, since "click on the already-selected cell" (checked in `dispatchCellMouseDown`) already covers
+double-click's second mousedown as a special case. No `validateCell` support. No `editorBloom`.
+
+**Real bugs found via browser testing (not caught by tsc/build) -- both fixed**:
+1. **Select-all-on-activation silently collapsed to a caret.** `openOverlay` originally called
+   `handle.focus()` synchronously, inside the same native `mousedown` dispatch that triggered
+   activation. But `handle.focus()` runs *before* that same click's `mouseup`/`click` have fired --
+   Chrome delivers them to whatever's now under the pointer, which by then is the freshly-inserted,
+   freshly-focused textarea, and its default click-positions-caret handling silently overwrote the
+   `setSelectionRange(0, length)` select-all that had just run. Source never hits this because
+   React defers the equivalent `useEffect`-based focus past the triggering event's *entire* native
+   dispatch (mousedown+mouseup+click all complete before React's commit phase runs effects) -- this
+   port's imperative controller has no equivalent scheduling point. **Fix**: wrap `handle.focus()`
+   in `window.setTimeout(..., 0)`. The click-outside-commit listener registration was already
+   deferred the same way for an analogous reason (don't catch the activating click itself);
+   `handle.focus()` needed the identical treatment and originally didn't have it.
+2. **Type-to-overwrite committed the wrong text if the user didn't type a second character before
+   Enter/Tab.** `activateCell`'s `initialValue` seeding set `data` but not `displayData` for Text
+   cells. `text-cell.ts`'s renderer *draws* `cell.displayData`, not `.data` -- so a seed-then-
+   immediately-commit (e.g. type one character then hit Tab) silently committed the *stale* old
+   `displayData` while `data` held the correct new value underneath. Source's own `reselect()` has
+   this same asymmetry (only sets `data`), but doesn't surface as a visible bug there for reasons
+   not fully traced -- fixed directly in this port's `activateCell` (Text case now sets both
+   `data` and `displayData` to the seeded value) since it's a real, reproducible, user-visible
+   defect here regardless of source's own behavior.
+
+**Addon-consumed-via-built-dist gotcha (costly, hit repeatedly this phase)**: `test-app`'s Vite dev
+server consumes `glide-data-grid-ember` via its **built** `dist/` output (`glide-data-grid-ember/
+dist/`, produced by `pnpm --filter glide-data-grid-ember build`, a Rollup build), NOT by live-
+watching the addon's `src/`. Editing addon `.ts` files and just reloading the test-app page does
+**nothing** -- you'll debug a phantom "bug" against stale behavior for a long time otherwise (this
+happened during Phase 4a browser testing: several rounds of "fix -> reload -> still broken" before
+realizing the dist was stale). **Every time you change addon source and want to browser-test it**:
+rebuild the addon (`pnpm --filter glide-data-grid-ember build` from the workspace root) **then**
+reload the test-app page. Additionally, Vite's own dependency pre-bundle cache
+(`test-app/node_modules/.vite/`) can itself go stale relative to a freshly-rebuilt dist in a way a
+plain page reload doesn't reliably invalidate -- if a rebuild+reload still looks stale, kill the
+dev server, `rm -rf test-app/node_modules/.vite`, and restart it (`pnpm --filter test-app run
+start`) to be sure. Cheap insurance: just always do the full kill+clear-cache+restart after every
+addon rebuild during a browser-testing session, rather than trying to save the ~10s and
+occasionally chasing a phantom bug for many minutes instead.
+
+**Browser-testing environment quirk (this session, this automation setup specifically)**: calling
+the real DOM `.focus()` method on an element (e.g. via a `javascript_tool`-injected script, or
+transitively through this port's own `onMouseDown` -> `this.root.focus()`) reliably changes
+`document.activeElement` but does **not** reliably fire a native `'focus'` DOM event in this
+Chrome-extension-driven tab (most likely because the tab/window lacks true OS-level focus in this
+automation context) -- confirmed by direct testing: `root.focus(); document.activeElement === root`
+is `true`, yet a `focus` listener attached via `addEventListener` never fires, while manually
+dispatching `new FocusEvent('focus')` on the same element *does* reliably reach the same listener.
+This port's `isFocused` field (real DOM focus tracking, load-bearing for the selection-ring-
+visibility fix from Phase 3a) is gated on that event actually firing, so **raw-`dispatchEvent`-only
+test scripts that never see a real click will silently fail every focus-gated interaction** (this
+cost significant time this session before being root-caused). Genuine `computer`-tool clicks
+(trusted, CDP-dispatched) reliably deliver focus and worked correctly throughout this phase's
+testing. **For any raw-JS single-script test that needs the grid focused without going through the
+`computer` tool**: explicitly dispatch `root.dispatchEvent(new FocusEvent('focus', {bubbles:
+false}))` immediately after (or as part of) the synthetic mousedown/mouseup -- don't rely on
+`.focus()` alone. Also: keydown events aimed at an *open overlay editor* must be dispatched on
+`document.activeElement` (the editor's textarea), not on `root` -- bubbling only goes upward from
+the actual target, and the overlay's own commit-key handling lives on its container, a `root`
+descendant the textarea bubbles through but a `root`-targeted dispatch never reaches.
+
+Remaining Phase 4 sub-phases (4b: uri/markdown, 4c: bubble/drilldown, 4d: image/new-row) all build
+on the overlay host and editor contract delivered here -- see the "Suggested sub-phase split"
+above, still accurate.
