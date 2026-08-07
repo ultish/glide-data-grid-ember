@@ -1274,3 +1274,169 @@ gets for free -- no further action needed unless image-cell's editor has unusual
 or any future renderer needs `onSelect`'s `preventDefault()`-suppresses-selection behavior, that
 gap will need to be closed in `grid-host-controller.ts`'s `dispatchCellMouseDown`, not assumed to
 already work.
+
+## Phase 4d — Image cell + trailing blank row / "add row" affordance (COMPLETE, browser-verified,
+2026-08-07). **Phase 4 (core cell types) is now fully complete: 4a/4b/4c/4d all done.**
+
+### Image cell
+
+**Delivered**: `src/rendering/cells/image-cell.ts`, ported near-verbatim from
+`packages/core/src/cells/image-cell.tsx` for `draw`/`measure`/`onDelete`/`onPaste` (reuses the
+already-ported `roundedRect` and the Phase-1 `ImageWindowLoader`, same `imageLoader.loadOrGetImage`
+pattern `drilldown-cell.ts` already established). Added as a `case GridCellKind.Image:` branch +
+export in `src/rendering/cells/index.ts`.
+
+**Real, worth-recording finding: source's own default image-cell editor (`ImageOverlayEditor`,
+`internal/data-grid-overlay-editor/private/image-overlay-editor.tsx`) is NOT actually editable.**
+It destructures only `{urls, canWrite, onEditClick, renderImage}` from its props -- the
+`onChange`/`onCancel` props declared on `OverlayImageEditorProps` are never consumed by the
+component body at all. Its one interactive affordance (an edit-pencil button) is gated on
+`canWrite && onEditClick`, but `image-cell.tsx`'s own `provideEditor` never passes `onEditClick`
+when instantiating the default editor -- so even that never renders. Net effect in source itself:
+the built-in image overlay is a pure read-only image carousel viewer; real editing only happens via
+a fully custom `imageEditorOverride` (a consumer-supplied component, not shipped in `packages/
+core`) or via paste/delete. This is the same "editor renders but doesn't actually wire commit"
+pattern Phase 4c already found and documented for bubble-cell/drilldown-cell.
+
+**Deliberate deviation from source, per this phase's own task instructions** ("a reasonably simple
+textarea-per-URL-list ... is fine if source's own UI is more complex than fits cleanly"): rather
+than faithfully porting a dead-end read-only viewer, `image-cell.ts`'s `provideEditor` builds a
+genuinely *editable* editor -- a thumbnail preview row (plain `<img>` tags, one per URL) plus a
+single comma-separated `GrowingEntry` (reusing the exact same primitive every other text-based
+editor in this port already uses) that splits/rejoins on `,`, matching the same comma-separated
+format `onPaste` already parses. No carousel/paging UI (source's `react-responsive-carousel`
+dependency was not added -- multiple thumbnails just wrap in a flex row). This is more useful than
+a straight port and stays low-risk since it's built entirely from already-existing primitives.
+
+**Real bug found and fixed, not specific to image-cell but only surfaced by it**:
+`GridHostController.activateCell` gated overlay-opening on `isReadWriteCell(cell) &&
+cell.allowOverlay === true`. `isReadWriteCell` (`data-grid-types.ts:270`) deliberately excludes
+`GridCellKind.Image` -- images aren't edited via generic typed/pasted text, so `isReadWriteCell`
+correctly returning `false` for them is itself correct behavior for paste/type-to-overwrite/delete
+gating. But it does NOT correctly gate overlay-opening: source's own `reselect()`
+(`data-editor.tsx:1451`) only checks `c.allowOverlay`, never `isReadWriteCell`. This port's extra
+`isReadWriteCell` check silently made every `allowOverlay:true` cell that isn't also "read-write"
+(only `Image` in this port's type union, at least for now) permanently unable to open its overlay
+via click-on-selected or Enter -- confirmed by browser-testing image-cell's editor and finding
+nothing happened on click/Enter despite `provideEditor` being fully implemented and correct.
+**Fixed**: `activateCell`'s gate is now just `if (cell.allowOverlay !== true) return;` (matching
+source exactly) -- the `isReadWriteCell` check was removed from this one call site only; the other
+two call sites (`deleteSelection`'s per-cell loop, `onCut`'s per-cell loop) correctly keep
+`isReadWriteCell` since those really are generic-text-editing concepts image cells don't support.
+
+### Trailing blank row / "add row" affordance
+
+**Delivered**: `src/rendering/cells/new-row-cell.ts` (ported near-verbatim from
+`packages/core/src/cells/new-row-cell.tsx` -- hover-fade "+" icon/line, `needsHover: true`,
+`measure: () => 200`, no editor), registered as `case InnerGridCellKind.NewRow:` in
+`src/rendering/cells/index.ts`. New `GridHostArgs` fields `showTrailingBlankRow?: boolean` and
+`onRowAppended?: () => void` (both forwarded through `<GlideDataGrid>`'s `Args`/
+`buildGridHostArgs()` in `src/components/glide-data-grid.gts`, same mechanical 1:1 pattern as every
+other field there). Simplification vs source: this port doesn't expose source's richer
+`trailingRowOptions` (per-column hint/icon/tint/sticky config) -- `showTrailingBlankRow` is a plain
+boolean, and the hint text is hardcoded to `"Add row"` on the first real column only (every other
+column's trailing cell has an empty hint, matching source's own per-column fallback-to-empty when
+no `trailingRowOptions` is configured).
+
+**The mechanics** (all in `src/-private/grid-host-controller.ts`), for anyone building on this
+later (e.g. Phase 7's demo app):
+
+- **`effectiveRows(args)`** -- new private helper, `args.rows + (args.showTrailingBlankRow ? 1 :
+  0)`. This is the row count used for every *layout/hit-testing/scroll* computation that must treat
+  `row === args.rows` as a real, in-bounds row: `runDraw`'s `DrawGridArg.rows` (this is what
+  actually makes `drawGrid` iterate and draw the extra row at all) and `hasAppendRow` (now
+  `args.showTrailingBlankRow` instead of hardcoded `false`), `rebuildScrollContent`'s
+  `totalRowsHeight` call (padder div total height, so the scrollbar has room to reach the extra
+  row), `onScroll`'s `computeYOffset` call, `onMouseMove`'s `getRowIndexForY`/`computeBounds` calls
+  (hover hit-testing, needed for the "+" icon's `needsHover` fade to work at all), the drag-extend
+  fallback location, `resolveMouseHit`'s `getRowIndexForY`/out-of-bounds fallback (needed for the
+  row to be *clickable* at all -- `getRowIndexForY`/`computeBounds` both internally return an empty/
+  `undefined` result whenever `row >= rows`, so without this the trailing row would draw but never
+  hit-test), `computeCellRect`, `moveActiveCell`'s row clamp (so plain Arrow-key nav can step onto
+  it), and `scrollCellIntoView`'s bound check.
+- **`args.rows` itself is left unchanged everywhere else** and keeps meaning "real data row count
+  only" -- this matters for: `selectAll`'s range height (Cmd+A must NOT select the trailing row,
+  verified against source's own `keys.selectAll` branch using the un-mangled `rows`, not
+  `mangledRows`), the header select-all checkbox's row-count comparisons, `rowMarkerWidthDefault`,
+  the row-marker column's `rowMarkerChecked` tri-state math, `adjustSelection`'s vertical bound
+  (shift+Arrow range-growing must NOT extend into the trailing row either -- verified against
+  source's `adjustSelection` using its own un-mangled `rows`, distinct from `updateSelectedCell`'s
+  `mangledRows`-based bound), and copy/cut/paste region bounds (`selectedRegion`'s `rows`/`columns`
+  CompactSelection branches, paste's `targetRow >= args.rows` guard).
+- **One asymmetry worth remembering**: Ctrl(Cmd)+End reaches the trailing row (`targetRow =
+  effectiveRows(args) - 1`), but Ctrl(Cmd)+ArrowDown does NOT (`targetRow = args.rows - 1`,
+  unchanged) -- this is not a port inconsistency, it faithfully mirrors source: `goToLastCell`
+  (End) sets `row = Number.MAX_SAFE_INTEGER` and lets `updateSelectedCell`'s generic clamp (`rowMax
+  = mangledRows - 1`) resolve it, while `goToLastRow` (Ctrl+ArrowDown) explicitly hardcodes `row =
+  rows - 1` (the real, non-mangled count) itself, `data-editor.tsx:3353-3354` vs `:3326-3328`.
+- **`mangledGetCellContent`** now also mangles in the trailing row (previously it only existed to
+  handle `rowMarkers`, and its early-return fast path skipped mangling entirely when
+  `!hasRowMarkers` -- that fast path is now gated on `!hasRowMarkers && !showTrailingBlankRow`
+  instead). For `row === args.rows`: the row-marker column (if any) gets a plain `{kind:
+  GridCellKind.Loading, allowOverlay: false}` (matches source's `loadingCell` -- no checkbox on the
+  append-row affordance), every other column gets the `NewRowCell`.
+- **Activation**: a real column cell click on the trailing row appends *immediately* -- added as an
+  early branch in `dispatchCellMouseDown`, before the "ordinary cell click" section, deliberately
+  bypassing the normal click-on-already-selected-cell activation gate (matches source's own
+  single-click-appends UX, `data-editor.tsx:1912-1913`, which has no preceding `setCurrent` call
+  either -- selection is untouched by the click). The row-marker column's trailing-row click is a
+  no-op (added to the existing early-return guard in the row-marker branch, matching source's
+  `showTrailingBlankRow === true && row === rows` check there). Enter-key activation (reachable via
+  keyboard nav landing `selection.current.cell` on the trailing row, since `moveActiveCell`'s clamp
+  now allows it) is handled by a guard added at the very top of `activateCell`: `if
+  (cellContent.kind === InnerGridCellKind.NewRow) { args.onRowAppended?.(); return; }` -- placed
+  before the pre-existing `isInnerOnlyCellKind` early-return so it doesn't get silently swallowed by
+  that more general guard. Neither path mutates `this.selection` -- consistent with source, and with
+  this port's established "controller never mutates the data it doesn't own" contract:
+  `onRowAppended` is purely a notification, the consumer must grow its own row count.
+- **Copy/cut/delete safety net**: `selectedRegion`'s `current`-range branch now clamps `rowEnd =
+  Math.min(r.y + r.height, args.rows)`. Without this, a selection that includes the trailing row
+  (reachable via keyboard nav, e.g. arrow-down onto it then Cmd+C) would have handed `row ===
+  args.rows` to the *caller's own* `getCellContent` in `buildCopyBuffer`/`deleteSelection`/`onCut`
+  (all of which call `args.getCellContent` directly, not the mangled wrapper) -- an out-of-range row
+  index the caller never expects. Paste already had an equivalent guard (`targetRow >= args.rows`
+  break); this fix gives copy/cut/delete the same protection at a single shared choke point.
+- **Drag-extend** (rect/row-range selection growth while dragging) is clamped away from the
+  trailing row in `handleDragMove` (`row = args.rows - 1` whenever the raw location's row `>=
+  args.rows`) -- a deliberate simplification vs source's `landedOnLastStickyRow` handling (which
+  distinguishes "drag started from the trailing row" vs "drag entered it," dropping the event
+  entirely in the former case): this port just treats the trailing row as a wall drag-extend can't
+  cross in either direction, simpler and with the same practical outcome (the resulting selection
+  never includes it).
+
+**Demo wiring** (`test-app/app/utils/demo-data.ts`, `test-app/app/components/demo-grid.gts`): image
+cell added as column 5 (1-2 thumbnails per row, reusing the same tiny inlined data-URI PNG the
+drilldown column already uses -- zero external network dependency). `DemoGrid`'s `rows` field is
+now `@tracked` (was a plain field before this phase -- had no reason to be tracked until something
+could change it) with a `handleRowAppended` action that does `this.rows = this.rows + 1`;
+`demoGetCellContent` is a pure function of `[col, row]` with no upper bound baked in, so widening
+`rows` alone is sufficient for the newly-appended row to immediately render real generated content
+-- no separate "seed the new row's data" step needed for this demo. `<GlideDataGrid
+@showTrailingBlankRow={{true}} @onRowAppended={{this.handleRowAppended}} .../>` added alongside the
+existing args.
+
+**Verification**: `npx tsc --noEmit -p tsconfig.json` clean, `pnpm --filter glide-data-grid-ember
+build` (rollup) and `pnpm --filter test-app exec vite build` (428 modules) both succeed with no new
+errors. **Browser-verified** end to end on a fresh dev server (killed the stale one, cleared
+`test-app/node_modules/.vite`, restarted, per the established gotcha): image column renders real
+thumbnail(s) from the data-URI (confirmed via zoomed screenshot, not just "something drew"),
+click-then-click opens the editor showing the thumbnail(s) + an editable comma-separated URL
+textarea (this is what surfaced the `activateCell`/`isReadWriteCell` bug above -- initially nothing
+opened, root-caused via a working text-cell comparison click + a plain-DOM click-toggle regression
+check with the same gesture, then reading `activateCell` line by line against source). Trailing row:
+Cmd+End correctly jumped to the trailing row across both axes with correct auto-scroll (`scroller.
+scrollHeight` was exactly `6,800,070` = `36 + 200,000×34 + 34`, confirming the padder total-height
+math includes exactly one extra row); the "+ Add row" affordance is permanently visible in column 0
+(icon + hint, not hover-gated, matching `alwaysShowIcon = data !== ""`) and correctly hover-fades in
+on every other column; clicking the "Add row" text appended a real new row (`row-200000` appeared
+with fully-generated content across every cell type -- row-id/number/boolean/uri/markdown/image/
+bubble/drilldown/text all rendered correctly for the freshly-appended row) and the trailing row
+moved down by exactly one row (`scrollHeight` grew by exactly `34`); Enter-key activation (arrow-
+down from a real row onto the trailing row, then Enter) also correctly appended a second new row
+(`row-200001`). **Regression-tested per this phase's own instructions** (not just the new feature):
+plain arrow-key nav up/down through real rows still works correctly after landing on/leaving the
+trailing row; Cmd+A select-all still correctly excludes the trailing row (confirmed via a zoomed
+screenshot showing the last real row highlighted and the "Add row" row directly below it NOT
+highlighted); a normal cell click-select-activate-edit-Cmd+A-retype-Enter-commit cycle on an
+unrelated text column (column 9) still works and correctly moves the selection down one row after
+commit. No console errors at any point in this session.

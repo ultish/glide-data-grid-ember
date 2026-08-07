@@ -63,6 +63,11 @@ export interface GlideDataGridSignature {
         onColumnResizeEnd?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
         onColumnProposeMove?: (startIndex: number, endIndex: number) => boolean;
         onColumnMoved?: (startIndex: number, endIndex: number) => void;
+
+        // Trailing blank row / "add row" affordance (Phase 4d) -- forwarded straight through to
+        // `GridHostArgs`; see that interface's doc comments for exact semantics.
+        showTrailingBlankRow?: boolean;
+        onRowAppended?: () => void;
     };
 }
 
@@ -102,6 +107,8 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onColumnResizeEnd: this.args.onColumnResizeEnd,
         onColumnProposeMove: this.args.onColumnProposeMove,
         onColumnMoved: this.args.onColumnMoved,
+        showTrailingBlankRow: this.args.showTrailingBlankRow,
+        onRowAppended: this.args.onRowAppended,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s

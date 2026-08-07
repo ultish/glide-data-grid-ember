@@ -199,6 +199,29 @@ export interface GridHostArgs {
      * undefined`.
      */
     readonly onColumnMoved?: (startIndex: number, endIndex: number) => void;
+
+    // --- Phase 4d: trailing blank row / "add row" affordance -------------------------------------
+    /**
+     * When `true`, renders one extra virtual row immediately past `rows` whose every cell is the
+     * `new-row-cell` hover-fade "+" affordance (`InnerGridCellKind.NewRow`, `rendering/cells/
+     * new-row-cell.ts`). This row participates fully in hit-testing/selection/keyboard-nav/scrolling
+     * as a real row (see `PORTING-NOTES.md`'s Phase 4d section for the exact mechanics) -- it is
+     * NOT a `GridCell` a consumer's `getCellContent` is ever asked for; `GridHostController`
+     * synthesizes it internally. Mirrors source's `showTrailingBlankRow` (there derived from
+     * `trailingRowOptions !== undefined`; this port exposes it directly as a boolean and doesn't
+     * port the richer `trailingRowOptions` per-column hint/icon/tint/sticky config -- deliberate
+     * simplification, see PORTING-NOTES.md).
+     * @defaultValue false
+     */
+    readonly showTrailingBlankRow?: boolean;
+    /**
+     * Fired when the trailing blank row is activated (clicking any real-column cell in it, or
+     * selecting it via keyboard nav and pressing Enter) -- mirrors source's `onRowAppended`. Like
+     * every other edit-adjacent callback on this interface, **`GridHostController` does not mutate
+     * `rows`/any backing data store itself** -- the consumer must increase its own row count (and
+     * make `getCellContent` return real data for the new row) for a new row to actually appear.
+     */
+    readonly onRowAppended?: () => void;
 }
 
 export interface GridHostControllerOptions {
@@ -239,6 +262,9 @@ interface ResolvedGridHostArgs {
         | undefined;
     readonly onColumnProposeMove: ((startIndex: number, endIndex: number) => boolean) | undefined;
     readonly onColumnMoved: ((startIndex: number, endIndex: number) => void) | undefined;
+
+    readonly showTrailingBlankRow: boolean;
+    readonly onRowAppended: (() => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -690,7 +716,19 @@ export class GridHostController {
             onColumnResizeEnd: args.onColumnResizeEnd,
             onColumnProposeMove: args.onColumnProposeMove,
             onColumnMoved: args.onColumnMoved,
+
+            showTrailingBlankRow: args.showTrailingBlankRow === true,
+            onRowAppended: args.onRowAppended,
         };
+    }
+
+    // Phase 4d: total row count including the synthetic trailing blank row, when enabled. Used for
+    // every layout/hit-testing/scroll computation that must treat `row === args.rows` as a real,
+    // in-bounds row -- `args.rows` itself keeps meaning "real data row count" everywhere else
+    // (select-all, the header select-all toggle, row-marker sizing, copy/cut/paste region clamping)
+    // since the trailing row is never real data and must never be included in those.
+    private effectiveRows(args: ResolvedGridHostArgs): number {
+        return args.rows + (args.showTrailingBlankRow ? 1 : 0);
     }
 
     // --- row-marker column mangling (Phase 3a) ----------------------------------------------------
@@ -729,11 +767,26 @@ export class GridHostController {
         return Math.min(mangledColumnCount, args.freezeColumns + (args.hasRowMarkers ? 1 : 0));
     }
 
+    // Phase 4d: also mangles in the synthetic trailing blank row (`showTrailingBlankRow`) when
+    // enabled -- mirrors source's `getMangledCellContent`'s `isTrailing` branches
+    // (`data-editor.tsx:1309-1382`, cited in full in PORTING-NOTES.md's Phase 4 research section).
+    // The row-marker column's trailing-row cell is a plain `loadingCell` (kind `Loading`,
+    // `allowOverlay: false`) in source -- no checkbox on the append-row affordance -- and every
+    // other column's trailing-row cell is the `new-row-cell` renderer's `NewRowCell`. Only the first
+    // real (non-marker) column gets a hint string; source derives this per-column from
+    // `trailingRowOptions`, not ported here (see the `GridHostArgs.showTrailingBlankRow` doc
+    // comment) -- a fixed "Add row" hint on the first column is this port's simplification.
     private mangledGetCellContent(args: ResolvedGridHostArgs): (item: Item) => InnerGridCell {
-        if (!args.hasRowMarkers) return args.getCellContent as (item: Item) => InnerGridCell;
+        if (!args.hasRowMarkers && !args.showTrailingBlankRow) {
+            return args.getCellContent as (item: Item) => InnerGridCell;
+        }
         const { rowMarkerOffset } = args;
         return ([col, row]: Item): InnerGridCell => {
-            if (col === 0) {
+            const isTrailing = args.showTrailingBlankRow && row === args.rows;
+            if (args.hasRowMarkers && col === 0) {
+                if (isTrailing) {
+                    return { kind: GridCellKind.Loading, allowOverlay: false };
+                }
                 const markerKind: "checkbox" | "number" | "both" | "checkbox-visible" =
                     args.rowMarkers === "clickable-number"
                         ? "number"
@@ -751,6 +804,13 @@ export class GridHostController {
                     // `drawHandle: onRowMoved !== undefined`, which is always `false` here.
                     drawHandle: false,
                     cursor: args.rowMarkers === "clickable-number" ? "pointer" : undefined,
+                };
+            }
+            if (isTrailing) {
+                return {
+                    kind: InnerGridCellKind.NewRow,
+                    hint: col === rowMarkerOffset ? "Add row" : "",
+                    allowOverlay: false,
                 };
             }
             return args.getCellContent([col - rowMarkerOffset, row]);
@@ -888,9 +948,9 @@ export class GridHostController {
             selection: this.selection,
             fillHandle: DEFAULT_FILL_HANDLE,
             freezeTrailingRows: 0,
-            hasAppendRow: false,
+            hasAppendRow: args.showTrailingBlankRow,
             hyperWrapping: false,
-            rows: args.rows,
+            rows: this.effectiveRows(args),
             getCellContent: this.mangledGetCellContent(args),
             overrideCursor: cursor => {
                 this.cursorOverride = cursor;
@@ -942,7 +1002,7 @@ export class GridHostController {
         const { mappedColumns } = this.computeMangledLayout(args);
         const totalWidth = mappedColumns.reduce((sum, c) => sum + c.width, 0);
         const totalHeaderHeight = args.headerHeight + (ENABLE_GROUPS ? args.groupHeaderHeight : 0);
-        const totalHeight = totalHeaderHeight + totalRowsHeight(args.rows, args.rowHeight);
+        const totalHeight = totalHeaderHeight + totalRowsHeight(this.effectiveRows(args), args.rowHeight);
 
         this.stackEl.replaceChildren();
 
@@ -971,7 +1031,7 @@ export class GridHostController {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
 
         const { cellXOffset, translateX } = computeXOffset(this.scrollerEl.scrollLeft, mappedColumns, freezeColumns);
-        const { cellYOffset, translateY } = computeYOffset(this.scrollerEl.scrollTop, args.rows, args.rowHeight);
+        const { cellYOffset, translateY } = computeYOffset(this.scrollerEl.scrollTop, this.effectiveRows(args), args.rowHeight);
 
         this.cellXOffset = cellXOffset;
         this.translateX = translateX;
@@ -1003,7 +1063,7 @@ export class GridHostController {
             ENABLE_GROUPS,
             args.headerHeight,
             ENABLE_GROUPS ? args.groupHeaderHeight : 0,
-            args.rows,
+            this.effectiveRows(args),
             args.rowHeight,
             this.cellYOffset,
             this.translateY,
@@ -1055,7 +1115,10 @@ export class GridHostController {
         // `onItemHoveredImpl` (`data-editor.tsx:2728-2809`), minus fill-handle/row-grouping
         // clamping (out of scope -- no fill handle or row grouping ported yet).
         if (this.mouseDownState !== undefined && ev.buttons !== 0) {
-            const dragLocation: Item = [col !== -1 ? col : (x < 0 ? 0 : mappedColumns.length - 1), row ?? args.rows - 1];
+            const dragLocation: Item = [
+                col !== -1 ? col : (x < 0 ? 0 : mappedColumns.length - 1),
+                row ?? this.effectiveRows(args) - 1,
+            ];
             this.handleDragMove(args, this.mouseDownState, dragLocation);
         }
 
@@ -1074,7 +1137,7 @@ export class GridHostController {
                 this.cellYOffset,
                 this.translateX,
                 this.translateY,
-                args.rows,
+                this.effectiveRows(args),
                 freezeColumns,
                 0,
                 mappedColumns,
@@ -1144,7 +1207,7 @@ export class GridHostController {
             ENABLE_GROUPS,
             args.headerHeight,
             ENABLE_GROUPS ? args.groupHeaderHeight : 0,
-            args.rows,
+            this.effectiveRows(args),
             args.rowHeight,
             this.cellYOffset,
             this.translateY,
@@ -1156,7 +1219,7 @@ export class GridHostController {
         const metaKey = ev.metaKey;
 
         if (col === -1 || row === undefined || x < 0 || y < 0 || x > this.width || y > this.height) {
-            const location: Item = [col !== -1 ? col : (x < 0 ? 0 : mappedColumns.length - 1), row ?? args.rows - 1];
+            const location: Item = [col !== -1 ? col : (x < 0 ? 0 : mappedColumns.length - 1), row ?? this.effectiveRows(args) - 1];
             // `offsetWidth - clientWidth` is 0 for overlay scrollbars (nothing to guard against
             // there) and approximates the classic scrollbar width otherwise -- good enough for this
             // best-effort guard, source's own `getScrollBarWidth()` isn't ported.
@@ -1228,7 +1291,7 @@ export class GridHostController {
             this.cellYOffset,
             this.translateX,
             this.translateY,
-            args.rows,
+            this.effectiveRows(args),
             freezeColumns,
             0,
             mappedColumns,
@@ -1271,7 +1334,7 @@ export class GridHostController {
             this.cellYOffset,
             this.translateX,
             this.translateY,
-            args.rows,
+            this.effectiveRows(args),
             freezeColumns,
             0,
             mappedColumns,
@@ -1425,8 +1488,12 @@ export class GridHostController {
         this.lastSelectedCol = undefined;
 
         if (args.hasRowMarkers && col === 0) {
-            // Row-marker column click (`data-editor.tsx:1853-1911`).
-            if (args.rowMarkers === "number" || args.rowSelect === "none") return;
+            // Row-marker column click (`data-editor.tsx:1853-1911`). Phase 4d: no-op on the
+            // trailing blank row -- there's no marker cell there (`mangledGetCellContent` returns a
+            // plain loading cell for it), mirrors source's `showTrailingBlankRow === true && row ===
+            // rows` guard in the same branch.
+            if ((args.showTrailingBlankRow && row === args.rows) || args.rowMarkers === "number" || args.rowSelect === "none")
+                return;
 
             const selectedRows = this.selection.rows;
             const isSelected = selectedRows.hasIndex(row);
@@ -1482,6 +1549,17 @@ export class GridHostController {
                 );
                 this.lastSelectedRow = row;
             }
+            return;
+        }
+
+        // Phase 4d: a click on any real (non-marker) column's cell in the trailing blank row
+        // appends immediately -- no selection is set first, mirrors source exactly (`col >=
+        // rowMarkerOffset && showTrailingBlankRow && row === rows` branch, `data-editor.tsx:1912-
+        // 1913`, "void appendRow(...)" with no preceding `setCurrent`). Deliberately does NOT go
+        // through `activateCell`'s second-click-to-activate gating -- this is a real behavioral
+        // difference from every other cell kind, matching source's own single-click-appends UX.
+        if (args.showTrailingBlankRow && row === args.rows) {
+            args.onRowAppended?.();
             return;
         }
 
@@ -1658,7 +1736,15 @@ export class GridHostController {
         mouseDownState: { location: Item; previousSelection: GridSelection },
         location: Item
     ): void {
-        const [col, row] = location;
+        const [col] = location;
+        // Phase 4d: drag-extend (rect/row-range selection) never grows into the trailing blank row
+        // -- mirrors source's `landedOnLastStickyRow` guard (`data-editor.tsx:2771-2775`, cited in
+        // PORTING-NOTES.md). Clamping here (rather than special-casing every branch below) is a
+        // deliberate simplification vs source's "drop the event entirely if dragging FROM the
+        // trailing row" behavior -- this port just treats the trailing row as a wall drag-extend
+        // can't cross, which is simpler and has the same practical effect (the selection never ends
+        // up including it).
+        const row = args.showTrailingBlankRow && location[1] >= args.rows ? args.rows - 1 : location[1];
 
         // Dragging out of a row-marker cell that was *just* selected by this same mousedown extends
         // a contiguous row range, taking priority over rect-selection (`data-editor.tsx:2734-2747`).
@@ -1732,7 +1818,7 @@ export class GridHostController {
             this.cellYOffset,
             this.translateX,
             this.translateY,
-            args.rows,
+            this.effectiveRows(args),
             freezeColumns,
             0,
             mappedColumns,
@@ -1754,14 +1840,24 @@ export class GridHostController {
     // Port of source's `reselect()` (`data-editor.tsx:1444-1493`) -- the single entry point every
     // activation trigger (click-on-selected, Enter, type-to-overwrite) below funnels through.
     // `cellContent` is mangled-space `InnerGridCell` (as returned by `mangledGetCellContent`);
-    // marker/new-row cells are filtered out by callers before reaching here (they're never
-    // reachable via a real column click/selection anyway).
+    // marker cells are filtered out by callers before reaching here (never reachable via a real
+    // column click/selection). New-row cells (Phase 4d) ARE reachable here -- keyboard nav can
+    // select the trailing blank row (see `moveActiveCell`'s widened clamp) and then activate it via
+    // Enter, which must append rather than silently no-op like every other inner-only kind. Mirrors
+    // source's own explicit `row === rows && showTrailingBlankRow` check right at its
+    // `keys.activateCell` handler (`data-editor.tsx:3300-3306`), consolidated here since this port
+    // funnels both click-activation and Enter-activation through one `activateCell` method (source
+    // has two separate call sites that each need the same check).
     private activateCell(
         args: ResolvedGridHostArgs,
         mangledLocation: Item,
         cellContent: InnerGridCell,
         opts: { readonly highlight: boolean; readonly initialValue?: string }
     ): void {
+        if (cellContent.kind === InnerGridCellKind.NewRow) {
+            args.onRowAppended?.();
+            return;
+        }
         if (isInnerOnlyCellKind(cellContent.kind)) return;
         const cell = cellContent as GridCell;
 
@@ -1773,7 +1869,14 @@ export class GridHostController {
             return;
         }
 
-        if (!isReadWriteCell(cell) || cell.allowOverlay !== true) return;
+        // Phase 4d bugfix: this used to also gate on `isReadWriteCell(cell)`, but source's own
+        // `reselect()` (`data-editor.tsx:1451`) only checks `c.allowOverlay` here -- `isReadWriteCell`
+        // deliberately excludes `GridCellKind.Image` (`data-grid-types.ts:270`, images aren't edited
+        // via generic typed/pasted text), so the old gate silently made image cells' overlay
+        // unreachable via click/Enter activation even though `imageCellRenderer.provideEditor` is
+        // fully implemented. `isReadWriteCell` remains the right gate for type-to-overwrite/paste/
+        // delete (those really are text-editing concepts Image doesn't support) -- just not here.
+        if (cell.allowOverlay !== true) return;
 
         let content: GridCell = cell;
         if (opts.initialValue !== undefined) {
@@ -2122,10 +2225,16 @@ export class GridHostController {
                 targetRow = 0;
             } else if (isEnd) {
                 targetCol = Number.MAX_SAFE_INTEGER;
-                targetRow = args.rows - 1;
+                // Ctrl(Cmd)+End reaches the trailing blank row when shown (source's
+                // `updateSelectedCell` clamps to `mangledRows - 1`, `data-editor.tsx:3026` -- Ctrl+
+                // ArrowDown below deliberately does NOT, see its own comment).
+                targetRow = this.effectiveRows(args) - 1;
             } else if (ev.key === "ArrowUp") {
                 targetRow = 0;
             } else if (ev.key === "ArrowDown") {
+                // Ctrl(Cmd)+ArrowDown ("go to last row") deliberately excludes the trailing blank
+                // row -- mirrors source's `goToLastRow` setting `row = rows - 1` (the real, non-
+                // mangled row count; `data-editor.tsx:3353-3354`), distinct from Ctrl+End above.
                 targetRow = args.rows - 1;
             } else if (ev.key === "ArrowLeft") {
                 targetCol = args.rowMarkerOffset;
@@ -2157,15 +2266,19 @@ export class GridHostController {
     };
 
     // Port of `updateSelectedCell`'s core (clamp + no-op-if-unchanged + `setCurrent(..., "keyboard-nav")`
-    // + scroll-into-view), minus the `freeMove`/trailing-blank-row/`lastSent` concerns that don't
-    // apply to this port yet. Returns whether the active cell actually moved (false when the
-    // clamped target equals the current cell -- i.e. the move was into a wall).
+    // + scroll-into-view), minus the `freeMove`/`lastSent` concerns that don't apply to this port
+    // yet. Returns whether the active cell actually moved (false when the clamped target equals the
+    // current cell -- i.e. the move was into a wall). Phase 4d: the row clamp's upper bound is
+    // `effectiveRows(args) - 1`, not `args.rows - 1`, so plain Arrow-key nav (and Ctrl+End, via its
+    // own `targetRow` above) can reach the trailing blank row -- mirrors source's
+    // `updateSelectedCell`'s `rowMax = mangledRows - (fromEditingTrailingRow ? 0 : 1)`
+    // (`data-editor.tsx:3026`, the common non-`fromEditingTrailingRow` case).
     private moveActiveCell(args: ResolvedGridHostArgs, colIn: number, rowIn: number): boolean {
         const { mappedColumns } = this.computeMangledLayout(args);
         const minCol = args.rowMarkerOffset;
         const maxCol = mappedColumns.length - 1;
         const col = Math.min(Math.max(colIn, minCol), maxCol);
-        const row = Math.min(Math.max(rowIn, 0), args.rows - 1);
+        const row = Math.min(Math.max(rowIn, 0), this.effectiveRows(args) - 1);
 
         const current = this.selection.current;
         if (current !== undefined && current.cell[0] === col && current.cell[1] === row) return false;
@@ -2282,7 +2395,7 @@ export class GridHostController {
     // fully visible within the non-frozen/non-header viewport, doing nothing if it already is.
     private scrollCellIntoView(args: ResolvedGridHostArgs, col: number, row: number): void {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
-        if (col < 0 || col >= mappedColumns.length || row < 0 || row >= args.rows) return;
+        if (col < 0 || col >= mappedColumns.length || row < 0 || row >= this.effectiveRows(args)) return;
 
         const bounds = computeBounds(
             col,
@@ -2295,7 +2408,7 @@ export class GridHostController {
             this.cellYOffset,
             this.translateX,
             this.translateY,
-            args.rows,
+            this.effectiveRows(args),
             freezeColumns,
             0,
             mappedColumns,
@@ -2335,7 +2448,14 @@ export class GridHostController {
     // produce (3a's row/column click handling always replaces-or-extends a single contiguous run).
 
     /** Mangled (row-marker-space) column/row bounds of the current selection, or `undefined` if
-     *  nothing is selected. `colEnd`/`rowEnd` are exclusive. */
+     *  nothing is selected. `colEnd`/`rowEnd` are exclusive.
+     *
+     *  Phase 4d: `rowEnd` is always clamped to `args.rows` (real data rows only), even for the
+     *  `current`-range branch, since keyboard nav can now land `selection.current.cell`/`.range` on
+     *  the trailing blank row (see `moveActiveCell`'s widened clamp) -- copy/cut/delete must never
+     *  hand that row's index to the caller's own `getCellContent` (it isn't real data and the
+     *  caller has no cell for it). The `rows`/`columns` CompactSelection branches below already used
+     *  `args.rows` and needed no change. */
     private selectedRegion(
         args: ResolvedGridHostArgs
     ): { colStart: number; colEnd: number; rowStart: number; rowEnd: number } | undefined {
@@ -2343,7 +2463,7 @@ export class GridHostController {
         const { mappedColumns } = this.computeMangledLayout(args);
         if (sel.current !== undefined) {
             const r = sel.current.range;
-            return { colStart: r.x, colEnd: r.x + r.width, rowStart: r.y, rowEnd: r.y + r.height };
+            return { colStart: r.x, colEnd: r.x + r.width, rowStart: r.y, rowEnd: Math.min(r.y + r.height, args.rows) };
         }
         if (sel.rows.length > 0) {
             const rows = [...sel.rows];

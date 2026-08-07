@@ -19,7 +19,10 @@ export default class DemoGrid extends Component {
     // data itself (same "consumer owns the data" contract as columns above), so a real consumer
     // needs exactly this kind of override-map + `onCellsEdited` handler to make edits stick.
     @tracked edits: ReadonlyMap<string, GridCell> = new Map();
-    rows = DEMO_ROW_COUNT;
+    // Phase 4d: `@tracked` (not a plain field like the rest of this demo's row count used to be) --
+    // `onRowAppended` increments this, and the grid needs to actually re-render with the new row
+    // count for the trailing-blank-row "add row" affordance to visibly do anything.
+    @tracked rows = DEMO_ROW_COUNT;
 
     getCellContent = (item: Item): GridCell => {
         return this.edits.get(`${item[0]},${item[1]}`) ?? demoGetCellContent(item);
@@ -46,6 +49,14 @@ export default class DemoGrid extends Component {
         this.edits = next;
     }
 
+    // Phase 4d: `demoGetCellContent` is a pure function of `[col, row]` (no upper bound baked in),
+    // so simply widening `rows` is enough for the newly-appended row to render real (generated)
+    // content immediately -- no separate "seed the new row's data" step needed for this demo.
+    @action
+    handleRowAppended(): void {
+        this.rows = this.rows + 1;
+    }
+
     <template>
         <GlideDataGrid
             @columns={{this.columns}}
@@ -54,6 +65,8 @@ export default class DemoGrid extends Component {
             @onColumnResize={{this.handleColumnResize}}
             @onColumnMoved={{this.handleColumnMoved}}
             @onCellsEdited={{this.handleCellsEdited}}
+            @showTrailingBlankRow={{true}}
+            @onRowAppended={{this.handleRowAppended}}
         />
     </template>
 }

@@ -5,12 +5,12 @@
 // that switches at runtime).
 //
 // Scope: text/number/boolean/loading/protected/row-id (Phase 4a), uri/markdown (Phase 4b), plus
-// bubble/drilldown (Phase 4c). Every other `GridCellKind` (image/custom) returns `undefined` here,
-// same as an unregistered kind always has -- the render engine already handles that gracefully
-// (draws an empty cell), and `GridHostController`'s edit/paste/delete paths already have a
-// non-renderer-backed fallback for exactly this reason. Later sub-phases (4d, see PORTING-NOTES.md)
-// add more `case` branches here, nothing else needs to change.
-import { GridCellKind, type InnerGridCell } from "../data-grid-types.ts";
+// bubble/drilldown (Phase 4c), image + new-row/trailing-blank-row (Phase 4d). Every other
+// `GridCellKind` (custom) returns `undefined` here, same as an unregistered kind always has -- the
+// render engine already handles that gracefully (draws an empty cell), and
+// `GridHostController`'s edit/paste/delete paths already have a non-renderer-backed fallback for
+// exactly this reason.
+import { GridCellKind, InnerGridCellKind, type InnerGridCell } from "../data-grid-types.ts";
 import type { CellRenderer, GetCellRendererCallback } from "../cell-types.ts";
 import { textCellRenderer } from "./text-cell.ts";
 import { numberCellRenderer } from "./number-cell.ts";
@@ -22,6 +22,8 @@ import { uriCellRenderer } from "./uri-cell.ts";
 import { markdownCellRenderer } from "./markdown-cell.ts";
 import { bubbleCellRenderer } from "./bubble-cell.ts";
 import { drilldownCellRenderer } from "./drilldown-cell.ts";
+import { imageCellRenderer } from "./image-cell.ts";
+import { newRowCellRenderer } from "./new-row-cell.ts";
 
 export { textCellRenderer } from "./text-cell.ts";
 export { numberCellRenderer } from "./number-cell.ts";
@@ -33,6 +35,8 @@ export { uriCellRenderer } from "./uri-cell.ts";
 export { markdownCellRenderer } from "./markdown-cell.ts";
 export { bubbleCellRenderer } from "./bubble-cell.ts";
 export { drilldownCellRenderer } from "./drilldown-cell.ts";
+export { imageCellRenderer } from "./image-cell.ts";
+export { newRowCellRenderer } from "./new-row-cell.ts";
 
 export const getCellRenderer: GetCellRendererCallback = <T extends InnerGridCell>(cell: T): CellRenderer<T> | undefined => {
     switch (cell.kind) {
@@ -56,6 +60,10 @@ export const getCellRenderer: GetCellRendererCallback = <T extends InnerGridCell
             return bubbleCellRenderer as unknown as CellRenderer<T>;
         case GridCellKind.Drilldown:
             return drilldownCellRenderer as unknown as CellRenderer<T>;
+        case GridCellKind.Image:
+            return imageCellRenderer as unknown as CellRenderer<T>;
+        case InnerGridCellKind.NewRow:
+            return newRowCellRenderer as unknown as CellRenderer<T>;
         default:
             return undefined;
     }

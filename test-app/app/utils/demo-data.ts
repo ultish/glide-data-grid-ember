@@ -26,6 +26,11 @@ const BUBBLE_TAGS = ["urgent", "bug", "feature", "design", "backend", "frontend"
 const DRILLDOWN_ICON =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR42mNk+M9QzzCAgHFgYBQMYQAA4WkBH8fY6WkAAAAASUVORK5CYII=";
 
+// Phase 4d: same tiny inlined data-URI PNG reused for the image column's thumbnail(s) -- keeps the
+// demo free of any external network dependency (a real consumer would pass real image URLs;
+// `ImageWindowLoader` doesn't care whether the URL is a data URI or a network one).
+const IMAGE_SAMPLE = DRILLDOWN_ICON;
+
 // Phase 4b sample content for the markdown column -- exercises headings, bold/italic, and a list
 // so the rendered-HTML preview (vs. the raw-text canvas draw) is visually obvious in the browser.
 const MARKDOWN_SAMPLES = [
@@ -36,9 +41,10 @@ const MARKDOWN_SAMPLES = [
 
 // Phase 4a: varies cell kind by column so text/number/boolean/row-id editing can all be exercised
 // in the browser -- col 0 is a row-id (readonly), col 1 a number, col 2 a boolean. Phase 4b adds
-// col 3 (uri, editable link) and col 4 (markdown, editable + rendered preview). Phase 4c adds col 6
-// (bubble, display-only chip list of 2-4 tags) and col 7 (drilldown, display-only chips, one
-// carrying a small icon). Everything else falls through to plain editable text.
+// col 3 (uri, editable link) and col 4 (markdown, editable + rendered preview). Phase 4d adds col 5
+// (image, 1-2 thumbnails + editable URL-list overlay). Phase 4c adds col 6 (bubble, display-only
+// chip list of 2-4 tags) and col 7 (drilldown, display-only chips, one carrying a small icon).
+// Everything else falls through to plain editable text.
 export function demoGetCellContent(item: Item): GridCell {
     const [col, row] = item;
 
@@ -89,6 +95,16 @@ export function demoGetCellContent(item: Item): GridCell {
         return {
             kind: GridCellKind.Markdown,
             data: MARKDOWN_SAMPLES[row % MARKDOWN_SAMPLES.length]!,
+            allowOverlay: true,
+        };
+    }
+
+    if (col === 5) {
+        // 1 or 2 thumbnails per row, exercising `image-cell.ts`'s multi-image layout math.
+        const count = 1 + (row % 2);
+        return {
+            kind: GridCellKind.Image,
+            data: Array.from({ length: count }, () => IMAGE_SAMPLE),
             allowOverlay: true,
         };
     }
