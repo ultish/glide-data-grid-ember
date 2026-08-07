@@ -1914,3 +1914,274 @@ screenshot, and packing navigate+act+screenshot into as few round-trips as possi
 (`browser_batch`) to minimize the window for another agent's tab operations to interfere. Recreating
 a fresh tab (`tabs_context_mcp({createIfEmpty: true})`) after a tab vanished worked reliably every
 time; fighting to keep reusing a specific tab ID did not.
+
+## Phase 6 — Theming (COMPLETE, browser-verified, 2026-08-07)
+
+Consumer-facing theming API + docs. **The main deliverable a consumer sees is
+`glide-data-grid-ember/THEMING.md`** — read that before answering any "how do I theme this"
+question; this section is the implementation/porting record, not the user guide.
+
+### Final API surface (use this, don't re-read the code)
+
+All from the `glide-data-grid-ember/rendering/index` barrel:
+
+```ts
+getDataEditorTheme(): Theme                 // pre-existing (Phase 1) -- the complete light base
+getDataEditorDarkTheme(): Partial<Theme>    // NEW -- stock dark theme, an OVERLAY not a full theme
+mergeAndRealizeTheme(theme, ...overlays): FullTheme   // pre-existing
+makeCSSStyle(theme: Theme): Record<string, string>    // NEW -- the `--gdg-*` map
+type GetRowThemeCallback = (row: number) => Partial<Theme> | undefined  // NEW re-export
+```
+
+New `<GlideDataGrid>` / `GridHostArgs` field (only one): `getRowThemeOverride?: GetRowThemeCallback`.
+Everything else in the theming story was already reachable: `@theme`, `column.themeOverride`,
+`cell.themeOverride`.
+
+New private helpers on `GridHostController` (`src/-private/grid-host-controller.ts`) that later
+phases should reuse rather than re-deriving a merge order:
+- `mergedTheme(args): FullTheme` — base + `@theme`. **Memoized on `args.theme` identity** (see the
+  blit section below — this is load-bearing, not a micro-opt). Mirrors source's
+  `React.useMemo(() => mergeAndRealizeTheme(getDataEditorTheme(), theme), [theme])`
+  (`data-editor.tsx:1093`).
+- `themeForCell(args, cell, mangledCol, row): FullTheme` — the full per-cell merge, in the exact
+  order the render engine uses: `mergeAndRealizeTheme(mergedTheme, column.themeOverride,
+  getRowThemeOverride(row), cell.themeOverride)`. Group themes are omitted only because
+  `ENABLE_GROUPS` is hardcoded `false` project-wide. `mangledCol` is in the **render engine's**
+  column space (includes the row-marker column), same space as `computeCellRect`.
+- `applyThemeCssVariables(el, theme)` — stamps `makeCSSStyle`'s output via `el.style.setProperty`.
+
+### Real bug found and fixed (task 4): the overlay editor ignored every theme override
+
+`openOverlay` handed the editor `mergeAndRealizeTheme(getDataEditorTheme(), args.theme)` — the
+base+global theme only, with **no column/row/cell override applied**. Practical symptom: an editor
+opened on a dark-themed row rendered with light-theme colors; an editor on a themed column ignored
+that column's colors entirely. Source does not have this gap — its `setOverlaySimple`
+(`data-editor.tsx:1428-1441`) merges `mergedTheme, groupTheme, colTheme, rowTheme,
+content.themeOverride`, i.e. the same order as `themeForCell` above (verified by reading source
+before changing anything, per the task brief). **Fixed**: `openOverlay` now uses `themeForCell`.
+Two adjacent sites were fixed the same way while there:
+- the renderer `onClick` dispatch in `dispatchCellMouseDown` also used the global-only theme, even
+  though several renderers hit-test against theme-derived geometry (`cellHorizontalPadding`,
+  `checkboxMaxSize`, …) that an override can change. Now uses `themeForCell` too.
+- `hitTestHeaderMenu`'s `computeHeaderLayout` call now uses `mergeAndRealizeTheme(mergedTheme,
+  column.themeOverride)`, matching how headers are actually drawn
+  (`render/data-grid-render.header.ts:65-69`).
+
+Browser-confirmed after the fix: with the dark theme on, opening the editor on demo column 1 (which
+has a `themeOverride`) at an odd (zebra-striped) row gives container background
+`rgb(73,62,49)` (dark base + zebra blue + column amber, correctly composed), text `#b06a00`
+(the column override's `textDark`), border `#8c96ff` (the dark theme's `accentColor`) — versus the
+white/`#313139`/`#4F5DFF` it produced before.
+
+### Task 3 result: per-column and per-cell `themeOverride` were already working
+
+Verified in the browser, not just read: `normalizeColumns`'s `...c` spread and `mapColumns`'
+`themeOverride` forwarding really do carry a column override end to end, and `cell.themeOverride`
+flows straight from the consumer's `getCellContent` into the draw loop. No fix needed for the
+*canvas* rendering of either. (Their absence from the *overlay editor* was the real gap — above.)
+
+### `makeCSSStyle` / `--gdg-*` (task 5)
+
+Ported verbatim from `common/styles.ts:7`. Applied at source's two sites: the grid **root element**
+(global theme, mirrors `data-editor.tsx:4215`) and **each overlay-editor container** (that cell's
+fully-merged theme, mirrors `data-grid-overlay-editor.tsx:237`). 37 variables land on each;
+confirmed in-browser via `getComputedStyle`. The root stamp is identity-guarded on the memoized
+theme object so it is a no-op on ordinary scroll/hover redraws instead of ~37 `setProperty` calls
+per frame. Nothing in the grid's own rendering consumes these — they exist purely so consumers can
+style surrounding/overlaid DOM from the grid's resolved theme.
+
+### MAJOR pre-existing finding: `computeCanBlit` compares `DrawGridArg` fields by IDENTITY, and this port was failing that check every frame
+
+This is the most important thing in this section for future phases. `computeCanBlit`
+(`src/rendering/render/data-grid-render.blit.ts:233-254`) gates the **scroll blit fast path** — the
+optimization that translates the previous frame's canvas image and repaints only the newly exposed
+strip, instead of redrawing every visible cell. It compares ~18 `DrawGridArg` fields with `!==`,
+i.e. **object identity, not value equality**. Source gets away with this because every one of those
+values is a React `useMemo`/`useCallback` result; this port's `runDraw` was rebuilding three of them
+from scratch on every single draw:
+
+1. `theme` — `mergeAndRealizeTheme(...)` returns a brand-new object on every call.
+2. `verticalBorder` — was a literal inline `() => true` in the `DrawGridArg` object literal.
+3. `getCellContent` — `mangledGetCellContent(args)` returns a fresh closure whenever `rowMarkers`
+   or `showTrailingBlankRow` is enabled (the demo enables the latter).
+
+Any one of those alone makes `computeCanBlit` return `false` unconditionally, so **the blit fast
+path had never engaged in this port** — scrolling was doing a full repaint of the visible window
+every frame. Given that "performance parity, especially scroll performance" is an explicit original
+requirement, this was worth fixing here rather than deferring.
+
+**Fixed** (all in `grid-host-controller.ts`): `mergedTheme()` is memoized on `args.theme` identity;
+`verticalBorder` is now the module-scope `ALWAYS_VERTICAL_BORDER` constant; `mangledGetCellContent`
+is memoized on exactly the values its closure captures (`getCellContent`/`hasRowMarkers`/
+`showTrailingBlankRow`/`rows`/`rowMarkers`/`rowMarkerOffset` — deliberately *not* on `this.selection`,
+which the closure reads lazily and which `computeCanBlit` compares separately anyway).
+
+**Verified in-browser after the fix**: instrumented `computeCanBlit` to record which fields differ,
+then drove a real `computer`-tool scroll — the only differing field is now `mappedColumns`, which
+falls into `computeCanBlit`'s own deep-equal branch and returns `true` when no column actually
+changed. So the blit path now engages during scroll. (Instrumentation was removed afterwards;
+`git status` confirms both `render/` files are unmodified.)
+
+`mappedColumns` is still a fresh array every draw (`mapColumns` in `computeMangledLayout`), which
+costs a `deepEqual` over every column per frame. That's correct but wasteful, and note
+`computeCanBlit` bails out entirely (`return false`) once `mappedColumns.length > 100` — **a grid
+with more than 100 columns therefore still gets no blit at all**. Memoizing `computeMangledLayout`
+on `columns`/`freezeColumns`/marker-state identity would fix both; not done here (it's Phase 4d/3a
+mangling infra, out of a theming phase's scope). Flagged as a good perf follow-up.
+
+**Rule for every future phase: any value put into `DrawGridArg` must be identity-stable across
+draws unless it genuinely changed.** Check `computeCanBlit`'s field list before adding or touching
+one. A freshly-allocated object/closure there silently costs the whole scroll optimization with no
+error, no warning, and no visual difference.
+
+### Browser-testing gotcha that cost real time here (add to the existing browser-quirks knowledge)
+
+`javascript_tool` runs in the Chrome extension's **isolated world**, not the page's main world.
+Consequences hit repeatedly this phase:
+- Monkeypatching a **prototype** (e.g. `CanvasRenderingContext2D.prototype.drawImage`) from
+  `javascript_tool` does **not** affect page code — JS prototypes are per-world. A "0 calls"
+  measurement taken that way is meaningless, not a real result.
+- `globalThis.__foo` set by page code is **invisible** to `javascript_tool`, and vice versa. Use the
+  **DOM** as the bridge (`document.documentElement.setAttribute(...)` from page code) — DOM objects
+  *are* shared.
+- Even then, reading via the `dataset` DOMStringMap proxy returned stale values across calls in this
+  environment; `getAttribute()` read correctly. Prefer `getAttribute`.
+- Setting `scrollerEl.scrollTop` from `javascript_tool` scrolls the element but did **not** reliably
+  drive the page's `scroll` listener / redraw path. A real `computer` `scroll` action did. Same
+  class of issue as the already-documented `.focus()`-doesn't-fire-`focus` quirk.
+
+Also re-confirmed the hard way: **rebuilding the addon while the dev server is running is not
+enough** — the already-documented "addon-consumed-via-built-dist" gotcha bit again, and the browser
+additionally kept executing cached ES modules across plain reloads. The reliable loop is
+kill server → `rm -rf test-app/node_modules/.vite` → restart → navigate with a **fresh query string**
+(`?cb=<random>`) to defeat the page-level cache.
+
+### Gotcha: the addon's `README.md` is a build artifact, don't edit it
+
+`glide-data-grid-ember/README.md` (and `LICENSE.md`) are **gitignored copies** — see
+`glide-data-grid-ember/.gitignore`, which lists `/README.md` and `/LICENSE.md`. The authoritative
+file is the **monorepo root** `README.md`, and `pnpm --filter glide-data-grid-ember build` copies it
+down into the addon package so it also ships to npm. Editing the addon-level copy looks like it
+works and is then silently clobbered by the next build (this cost a round-trip here). Edit the root
+`README.md`. `THEMING.md` is *not* part of that copy mechanism — it lives at
+`glide-data-grid-ember/THEMING.md` and is a normal tracked file, which is also why the root README
+links to it by that path.
+
+### Demo wiring
+
+`test-app/app/components/demo-grid.gts`: a real light/dark toggle button (`@tracked isDark`, a
+`theme` getter returning module-scope `DARK_THEME` or `undefined`), plus
+`@getRowThemeOverride={{this.getRowThemeOverride}}` bound to a **module-scope function**
+(`demoGetRowThemeOverride` in `demo-data.ts`) — deliberately, per the identity rule above. The grid
+is now wrapped in a flex column so the button sits above it.
+`test-app/app/utils/demo-data.ts`: column 1 carries a `themeOverride` (translucent amber `bgCell` +
+amber `textDark` + semibold `baseFontStyle`); `demoGetRowThemeOverride` zebra-stripes odd rows with
+a translucent `bgCell`; column 0's `RowID` cell carries a per-cell `themeOverride` (red) on every
+10th row. All three levels are visible simultaneously and compose correctly in both themes.
+
+**Why the overrides use translucent `bgCell`**: `mergeAndRealizeTheme` treats `bgCell` specially and
+**blends** an overlay's value over the value beneath it rather than replacing it (every other field
+is a plain overwrite). An alpha tint therefore reads correctly over both the light and the dark
+base; a solid color would flatten whatever a less-specific level set. Worth knowing before writing
+any theme override.
+
+### Deliberately NOT done (out of scope, restating so nobody assumes otherwise)
+
+Column/row-grouping theming (`ENABLE_GROUPS` is `false` project-wide — `textGroupHeader`/
+`bgGroupHeader`/`bgGroupHeaderHovered` are emitted as CSS variables but never drawn), search-result
+theming (`bgSearchResult`, same situation), a theme *service* / Ember context or provider (the
+port's model is plain args, deliberately unchanged), `styleOverride` plumbing through the overlay
+host (still the separate Phase 9 item flagged in Phase 5c's notes), and any theme beyond
+light + the stock dark one.
+
+### Verification
+
+`npx tsc --noEmit -p tsconfig.json` clean, `pnpm --filter glide-data-grid-ember build` (rollup +
+glint declarations) succeeds, `pnpm --filter test-app exec vite build` succeeds (442 modules, no new
+errors). **Browser-verified** on a dedicated dev server (port 4321 — :4200 was another concurrent
+agent's, checked with `lsof` first) after a full kill/clear-`.vite`/restart:
+- dark toggle visibly repaints cells, headers, gridlines and text (root `--gdg-bg-cell` flips
+  `#FFFFFF` → `#16161b`, `--gdg-accent-color` `#4F5DFF` → `#8c96ff`)
+- zebra `getRowThemeOverride` visibly alternates, and keeps alternating correctly at row 5000+ after
+  a large scroll
+- the per-column override on column 1 and the per-cell override on every 10th row of column 0 are
+  both visibly distinct, and compose with the row override rather than fighting it
+- 37 `--gdg-*` variables confirmed present on the root element and on the overlay container
+  (`getComputedStyle`), with the overlay's carrying the merged per-cell values
+- the overlay-editor theme fix confirmed with concrete computed values (above)
+- regressions checked: vertical + horizontal scroll (sticky header holds), click-select,
+  shift-click range selection, second-click activation → type → Enter commit (value updated on the
+  canvas, selection advanced one row), Escape cancel. No console errors at any point.
+
+### Independently re-verified by the orchestrator (not just the implementing agent's self-report)
+
+Re-ran `tsc`/rollup/vite builds (all clean, 442 modules) and did a separate browser pass. Confirmed
+directly, beyond what the agent reported:
+- **`git status` shows `src/rendering/render/**` untouched** — the blit instrumentation really was
+  removed, not left behind.
+- **The `mangledGetCellContent` memoization is sound.** Audited the closure line by line: it reads
+  exactly `showTrailingBlankRow`, `rows`, `hasRowMarkers`, `rowMarkers`, `getCellContent` and the
+  destructured `rowMarkerOffset` off the captured `args`, and *every one of those is in the cache
+  key* — so the captured (potentially stale) `args` object can never disagree with the live one.
+  `this.selection` is read lazily through `this`, so the marker checkbox state can't go stale
+  either. This is the one genuinely dangerous change in the phase (a memoized cell-content closure
+  that missed a key would silently serve stale cell data), so it was checked rather than trusted.
+- **`makeCSSStyle` is byte-for-byte identical to source's**, including the three conditional spreads.
+- **The overlay merge order matches source exactly** — verified `setOverlaySimple`
+  (`data-editor.tsx:1428-1441`) merges `mergedTheme, groupTheme, colTheme, rowTheme,
+  content.themeOverride`; `themeForCell` reproduces it with only `groupTheme` omitted, consistent
+  with `ENABLE_GROUPS` being off project-wide.
+- **Blit correctness under first-time activation.** This is the risk the agent's own field-diff
+  check could not cover: the blit fast path had *never* executed in this port before, so enabling it
+  meant exercising `data-grid-render.blit.ts` in anger for the first time. Real wheel-scroll in both
+  axes at 200k rows showed no torn/stale strips, and the zebra/column/cell overrides kept alternating
+  correctly across the newly-exposed edge strips (a wrong blit shows up here first, as a band of
+  rows carrying the previous frame's row theme). Trailing "Add row" still renders and mangles
+  correctly at row 200,000 under the memoized closure.
+
+**Useful verification technique, reusable for any future theme/merge fix**: rather than eyeballing a
+screenshot, walk the DOM ancestor chain from the open editor collecting elements with inline
+`--gdg-*` properties. That yields a direct, non-visual proof of the merge: the grid root showed the
+*global* theme (`--gdg-bg-cell: #16161b`) while the overlay container showed the *per-cell merged*
+theme (`rgba(73,62,49)`, dark blended with the column's amber override, plus `--gdg-text-dark:
+#b06a00`). Two different stamped values on two nested elements is exactly the thing the fix claims
+to produce, and a screenshot can't distinguish it from a coincidence.
+
+## Standing lessons for orchestrators and subagents (added Phase 6 — read alongside the top section)
+
+**1. Identity-compared fields are a silent-performance-regression class — check for them whenever you
+touch `DrawGridArg`.** `computeCanBlit` (`render/data-grid-render.blit.ts:233-250`) compares ~18
+`DrawGridArg` fields **by identity**, and a single freshly-allocated value among them makes it return
+`false` forever. This port shipped three such allocations (`theme`, `verticalBorder`,
+`getCellContent`) from Phase 2 through Phase 5 — the scroll blit fast path never once engaged, and
+**nothing caught it**: `tsc` passes, all builds pass, every browser test passes, and the grid looks
+and behaves perfectly. It is invisible to every check this project runs. Source is immune only
+because React's `useMemo` makes the equivalent values reference-stable by construction, so a faithful
+port of the *logic* silently loses the *performance contract* around it. Before adding or changing a
+`DrawGridArg` field, read `computeCanBlit` and confirm whether your field is identity-compared; if it
+is, it must come from a memo/cache or module scope, never an inline literal or closure. The same
+reasoning applies to any consumer-facing callback arg (hence the "hoist `getRowThemeOverride` to a
+stable reference" guidance in `THEMING.md`).
+
+**2. Keep `CLAUDE.md`'s status block in the per-phase update ritual.** The established ritual updated
+`PHASES.md` and `PORTING-NOTES.md` after every phase but not `CLAUDE.md` — so by Phase 6 its "Current
+status" section still announced "Phases 0–3 complete" and pointed a cold-starting session at
+`-temp-text-cell-renderer.ts`, a file deleted back in Phase 4a. That is worse than stale, it is
+actively misleading, and `CLAUDE.md` is the one file a fresh session reads *first* and trusts most.
+**Update all three files when a phase lands**, not two.
+
+**3. Pre-establish "already works — verify, don't rebuild" facts in subagent prompts.** Phase 6's
+prompt stated up front that per-column and per-cell `themeOverride` were already wired end to end
+(with the file:line evidence) and that the agent's job was to confirm them in the browser. Without
+that, the natural reading of "build the theming system" is to build all three override levels from
+scratch, rediscovering two-thirds of an already-working system. Spending orchestrator time locating
+the existing hook points *before* delegating is consistently cheaper than the agent rediscovering
+them — and it converts a vague scope into a checkable one.
+
+**4. Let a subagent's honest "I did not test X" stand, and cover X yourself.** Phase 6's agent
+explicitly flagged that it had not tested row markers, resize/reorder or copy/paste, and that its
+blit fix was confirmed by field-diff rather than a frame benchmark. That candour is what made it
+obvious where the orchestrator's own verification pass had to go (first-time blit activation under
+real scroll). An agent that had rounded those caveats up to "fully verified" would have been far more
+expensive, not less — the gap would still exist, just unmarked. Prompt for this explicitly and treat
+it as a positive signal, not a shortfall.

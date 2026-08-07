@@ -46,8 +46,14 @@ Both files are kept current after every phase. If anything below conflicts with 
 
 ## Current status (see PHASES.md for the authoritative table)
 
-Phases 0–3 complete: workspace scaffold, framework-agnostic rendering-engine port, Ember canvas
-host layer (sticky header, native scroll, virtualization), and the full interaction layer
-(selection, keyboard nav, copy/paste, column resize/reorder). Real cell type renderers
-(text/number/boolean/etc, Phase 4) don't exist yet — there's only a placeholder text-only renderer
-at `glide-data-grid-ember/src/rendering/-temp-text-cell-renderer.ts`.
+Phases 0–5 complete, all browser-verified and committed: workspace scaffold, framework-agnostic
+rendering-engine port, Ember canvas host layer (sticky header, native scroll, virtualization), the
+full interaction layer (selection, keyboard nav, copy/paste, column resize/reorder), all core cell
+types + the overlay-editor framework (Phase 4), and all 13 `packages/cells` extra cell types
+including sparklines (Phase 5). The Phase-2 placeholder renderer
+(`src/rendering/-temp-text-cell-renderer.ts`) was deleted in Phase 4a — the real registry is
+`src/rendering/cells/index.ts` (`getCellRenderer`), combined with extras via
+`createCombinedCellRenderer` from `src/rendering/extra-cells/index.ts`.
+
+Next up: Phase 6 (consumer-facing theming API), then 7 (grid.glideapps.com demo replication) and
+8 (async/streaming updates). Phase 9 is a deliberately non-auto-scheduled backlog of known gaps.

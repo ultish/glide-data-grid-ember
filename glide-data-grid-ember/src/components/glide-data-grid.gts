@@ -20,6 +20,7 @@ import type {
     Rectangle,
     Theme,
     GetCellRendererCallback,
+    GetRowThemeCallback,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -68,6 +69,12 @@ export interface GlideDataGridSignature {
         // `GridHostArgs`; see that interface's doc comments for exact semantics.
         showTrailingBlankRow?: boolean;
         onRowAppended?: () => void;
+
+        // Theming (Phase 6). `@theme` above is the global overlay on the base theme; this is the
+        // per-row overlay, applied after a column's `themeOverride` and before a cell's. See
+        // THEMING.md for the full precedence table -- and note the blit-invalidation caveat there:
+        // pass a *stable* function reference, not a fresh inline arrow each render.
+        getRowThemeOverride?: GetRowThemeCallback;
     };
 }
 
@@ -109,6 +116,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onColumnMoved: this.args.onColumnMoved,
         showTrailingBlankRow: this.args.showTrailingBlankRow,
         onRowAppended: this.args.onRowAppended,
+        getRowThemeOverride: this.args.getRowThemeOverride,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s

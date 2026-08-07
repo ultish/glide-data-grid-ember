@@ -4,17 +4,47 @@
 // `getCellContent` function -- nothing is materialized up front. This is what actually proves the
 // virtualization/scroll pipeline works: only cells the render engine asks for (the visible window)
 // ever get a `GridCell` object built.
-import { GridCellKind, type CustomCell, type GridCell, type GridColumn, type Item } from "glide-data-grid-ember/rendering/index";
+import { GridCellKind, type CustomCell, type GridCell, type GridColumn, type Item, type Theme } from "glide-data-grid-ember/rendering/index";
 
 export const DEMO_ROW_COUNT = 200_000;
 export const DEMO_COLUMN_COUNT = 50;
+
+// Phase 6: a per-column theme override on column 1, so `column.themeOverride` is visibly exercised
+// end to end in the demo. `bgCell` is deliberately semi-transparent: `mergeAndRealizeTheme` treats
+// `bgCell` specially and *blends* an overlay's value over the value beneath it (rather than
+// replacing it, like every other field) -- so an alpha tint reads correctly over both the light and
+// the dark base theme, which a solid color would not. See THEMING.md.
+const DEMO_COLUMN_THEME_OVERRIDE: Partial<Theme> = {
+    bgCell: "rgba(255, 196, 61, 0.22)",
+    textDark: "#b06a00",
+    baseFontStyle: "600 13px",
+};
 
 // Varied widths (visually obvious horizontal scrolling) and distinct titles per column.
 export const demoColumns: readonly GridColumn[] = Array.from({ length: DEMO_COLUMN_COUNT }, (_, i) => ({
     id: `col-${i}`,
     title: `Column ${i}`,
     width: 90 + ((i * 37) % 220),
+    themeOverride: i === 1 ? DEMO_COLUMN_THEME_OVERRIDE : undefined,
 }));
+
+// Phase 6: zebra striping via `getRowThemeOverride`. **Module scope on purpose** -- the render
+// engine's blit fast path compares this callback by identity across draws
+// (`render/data-grid-render.blit.ts:243`), so a fresh inline arrow function per render would
+// silently disable it and make scrolling repaint from scratch every frame. Returning `undefined`
+// (not an empty object) for non-striped rows is also deliberate: it takes the cheap "no override"
+// branch in the draw loop.
+const ZEBRA_ROW_THEME: Partial<Theme> = { bgCell: "rgba(79, 93, 255, 0.07)" };
+
+// Phase 6: per-cell theme override (see column 0's cell below) -- the most specific override level.
+const CELL_FLAG_THEME_OVERRIDE: Partial<Theme> = {
+    bgCell: "rgba(255, 71, 87, 0.30)",
+    textDark: "#c40021",
+    textLight: "#c40021",
+};
+export function demoGetRowThemeOverride(row: number): Partial<Theme> | undefined {
+    return row % 2 === 1 ? ZEBRA_ROW_THEME : undefined;
+}
 
 // Phase 4c sample data: a handful of tags per row for the bubble column, and a small chip list
 // (one with an icon, mixing in a data-URI so the demo has zero external network dependency) for
@@ -80,6 +110,10 @@ export function demoGetCellContent(item: Item): GridCell {
             kind: GridCellKind.RowID,
             data: `row-${row}`,
             allowOverlay: false,
+            // Phase 6: per-cell `themeOverride`, the most specific level of the precedence chain
+            // (it wins over both the column and the row override). Every 10th row is flagged red
+            // so the cell level is visibly exercised alongside the column/row levels.
+            themeOverride: row % 10 === 0 ? CELL_FLAG_THEME_OVERRIDE : undefined,
         };
     }
 

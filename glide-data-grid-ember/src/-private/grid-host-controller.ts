@@ -33,6 +33,7 @@ import {
     RenderStateProvider,
     getDataEditorTheme,
     mergeAndRealizeTheme,
+    makeCSSStyle,
     CompactSelection,
     DEFAULT_FILL_HANDLE,
     isSizedGridColumn,
@@ -66,6 +67,8 @@ import type {
     Slice,
     GetCellRendererCallback,
     Theme,
+    FullTheme,
+    GetRowThemeCallback,
     HoverInfo,
     SelectionBehaviorOptions,
     CellBuffer,
@@ -222,6 +225,23 @@ export interface GridHostArgs {
      * make `getCellContent` return real data for the new row) for a new row to actually appear.
      */
     readonly onRowAppended?: () => void;
+
+    // --- Phase 6: theming ------------------------------------------------------------------------
+    /**
+     * Per-row theme overlay, mirrors source's `getRowThemeOverride` (`DataEditorProps`). Returning
+     * `undefined` for a row means "no override" (the common case -- return `undefined` rather than
+     * an empty object, it is a cheaper code path in the render loop). Merged *after* the column's
+     * own `themeOverride` and *before* the cell's, i.e. a cell override always wins over a row
+     * override, which always wins over a column override. See THEMING.md for the full precedence
+     * table.
+     *
+     * **Hoist this to a stable function reference.** `render/data-grid-render.blit.ts:243` compares
+     * `getRowThemeOverride` by identity when deciding whether the previous frame can be blitted
+     * instead of fully repainted -- a fresh inline arrow function on every draw makes that check
+     * fail every time and silently defeats the scroll fast path. Define it once (a module-scope
+     * function, or a class field / `@action`-bound method), don't build it inside a getter.
+     */
+    readonly getRowThemeOverride?: GetRowThemeCallback;
 }
 
 export interface GridHostControllerOptions {
@@ -265,6 +285,8 @@ interface ResolvedGridHostArgs {
 
     readonly showTrailingBlankRow: boolean;
     readonly onRowAppended: (() => void) | undefined;
+
+    readonly getRowThemeOverride: GetRowThemeCallback | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -297,6 +319,13 @@ function isInnerOnlyCellKind(kind: InnerGridCell["kind"]): boolean {
 // Phase 4a: single printable character, no modifiers -- mirrors source's `editOnType` regex
 // (`data-editor.tsx:3510`, `/[\p{L}\p{M}\p{N}\p{S}\p{P}]/u`) exactly.
 const PRINTABLE_CHAR_RE = /[\p{L}\p{M}\p{N}\p{S}\p{P}]/u;
+
+// `DrawGridArg.verticalBorder` -- this port always draws every vertical gridline (no per-column
+// suppression is exposed as an arg). Hoisted to module scope on purpose: `computeCanBlit`
+// (`render/data-grid-render.blit.ts:246`) compares this field by *identity* against the previous
+// frame's arg, so an inline `() => true` in `runDraw` made the check fail on every frame and
+// disabled the scroll blit fast path entirely. Found in Phase 6, see PORTING-NOTES.md.
+const ALWAYS_VERTICAL_BORDER = (): boolean => true;
 
 // Column grouping isn't wired up yet in this phase -- no group-header args are exposed on
 // `GridHostArgs`. Fixed to `false` throughout, and (mirroring `data-editor.tsx`'s
@@ -719,7 +748,65 @@ export class GridHostController {
 
             showTrailingBlankRow: args.showTrailingBlankRow === true,
             onRowAppended: args.onRowAppended,
+
+            getRowThemeOverride: args.getRowThemeOverride,
         };
+    }
+
+    // --- Phase 6: theming ------------------------------------------------------------------------
+    // The global theme: base theme + the consumer's `@theme` overlay. This is what the render
+    // engine gets as `DrawGridArg.theme` (it applies column/row/cell overrides itself, per cell,
+    // in `render/data-grid-render.cells.ts`) and what `makeCSSStyle` is stamped from on the root
+    // element -- mirrors source's `mergedTheme` (`data-editor.tsx:1093`) and its use at `:4215`.
+    //
+    // **The memoization here is load-bearing, not a micro-optimization.** `mergeAndRealizeTheme`
+    // returns a brand-new object on every call, and `computeCanBlit`
+    // (`render/data-grid-render.blit.ts:238`) compares `current.theme !== last.theme` by *identity*
+    // -- so recomputing it per draw made that check fail every single frame and silently disabled
+    // the scroll blit fast path entirely. Source avoids this because its `mergedTheme` is a
+    // `React.useMemo(..., [theme])`; this cache is the direct equivalent, keyed on the consumer's
+    // `@theme` object identity exactly like source's dependency array.
+    private mergedThemeCache: { readonly src: Partial<Theme> | undefined; readonly value: FullTheme } | undefined;
+
+    private mergedTheme(args: ResolvedGridHostArgs): FullTheme {
+        const cached = this.mergedThemeCache;
+        if (cached !== undefined && cached.src === args.theme) return cached.value;
+        const value = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+        this.mergedThemeCache = { src: args.theme, value };
+        return value;
+    }
+
+    // The fully-merged theme for one specific cell, in the exact order the render engine uses
+    // (`render/data-grid-render.cells.ts:160-163,264-272`): global -> column -> row -> cell.
+    // Source does the same for its overlay editor (`data-editor.tsx`'s `setOverlaySimple`, which
+    // merges `mergedTheme, groupTheme, colTheme, rowTheme, content.themeOverride`) and for
+    // `themeForCell` (`:1821-1830`). Group themes are omitted here only because column grouping is
+    // hardcoded off project-wide (`ENABLE_GROUPS`), matching every other group-shaped omission.
+    //
+    // `mangledCol` is in the render engine's column space (i.e. includes the row-marker column when
+    // one exists), matching `computeCellRect`/`computeMangledLayout`.
+    private themeForCell(args: ResolvedGridHostArgs, cell: GridCell, mangledCol: number, row: number): FullTheme {
+        const column = this.mangledColumns(args)[mangledCol];
+        return mergeAndRealizeTheme(
+            this.mergedTheme(args),
+            column?.themeOverride,
+            args.getRowThemeOverride?.(row),
+            cell.themeOverride
+        );
+    }
+
+    // Last theme object stamped onto `root` as `--gdg-*` variables. Guards the ~37 `setProperty`
+    // calls behind an identity check so they don't run on every scroll frame -- `mergedTheme` is
+    // memoized above, so this is stable until the consumer's `@theme` actually changes.
+    private lastRootStampedTheme: FullTheme | undefined;
+
+    // Stamps `makeCSSStyle(theme)`'s `--gdg-*` custom properties onto an element. Both of source's
+    // application sites go through this (the grid root, and each overlay-editor container).
+    private applyThemeCssVariables(el: HTMLElement, theme: Theme): void {
+        const vars = makeCSSStyle(theme);
+        for (const [name, value] of Object.entries(vars)) {
+            el.style.setProperty(name, value);
+        }
     }
 
     // Phase 4d: total row count including the synthetic trailing blank row, when enabled. Used for
@@ -776,12 +863,43 @@ export class GridHostController {
     // real (non-marker) column gets a hint string; source derives this per-column from
     // `trailingRowOptions`, not ported here (see the `GridHostArgs.showTrailingBlankRow` doc
     // comment) -- a fixed "Add row" hint on the first column is this port's simplification.
+    //
+    // Phase 6: **the returned closure must be identity-stable across draws.** `computeCanBlit`
+    // (`render/data-grid-render.blit.ts:247`) compares `getCellContent` by identity, so rebuilding
+    // this wrapper every frame silently disabled the scroll blit fast path whenever row markers or
+    // the trailing blank row were enabled. Cached on exactly the values the closure captures; the
+    // things it reads *lazily* (`this.selection`, for the marker checkbox state) are deliberately
+    // not part of the key -- `computeCanBlit` already compares `selection` separately.
+    private mangledCellContentCache:
+        | {
+              readonly getCellContent: (item: Item) => GridCell;
+              readonly hasRowMarkers: boolean;
+              readonly showTrailingBlankRow: boolean;
+              readonly rows: number;
+              readonly rowMarkers: RowMarkerKind;
+              readonly rowMarkerOffset: number;
+              readonly value: (item: Item) => InnerGridCell;
+          }
+        | undefined;
+
     private mangledGetCellContent(args: ResolvedGridHostArgs): (item: Item) => InnerGridCell {
         if (!args.hasRowMarkers && !args.showTrailingBlankRow) {
             return args.getCellContent as (item: Item) => InnerGridCell;
         }
+        const cached = this.mangledCellContentCache;
+        if (
+            cached !== undefined &&
+            cached.getCellContent === args.getCellContent &&
+            cached.hasRowMarkers === args.hasRowMarkers &&
+            cached.showTrailingBlankRow === args.showTrailingBlankRow &&
+            cached.rows === args.rows &&
+            cached.rowMarkers === args.rowMarkers &&
+            cached.rowMarkerOffset === args.rowMarkerOffset
+        ) {
+            return cached.value;
+        }
         const { rowMarkerOffset } = args;
-        return ([col, row]: Item): InnerGridCell => {
+        const value = ([col, row]: Item): InnerGridCell => {
             const isTrailing = args.showTrailingBlankRow && row === args.rows;
             if (args.hasRowMarkers && col === 0) {
                 if (isTrailing) {
@@ -815,6 +933,16 @@ export class GridHostController {
             }
             return args.getCellContent([col - rowMarkerOffset, row]);
         };
+        this.mangledCellContentCache = {
+            getCellContent: args.getCellContent,
+            hasRowMarkers: args.hasRowMarkers,
+            showTrailingBlankRow: args.showTrailingBlankRow,
+            rows: args.rows,
+            rowMarkers: args.rowMarkers,
+            rowMarkerOffset: args.rowMarkerOffset,
+            value,
+        };
+        return value;
     }
 
     private computeMangledLayout(args: ResolvedGridHostArgs): {
@@ -918,7 +1046,14 @@ export class GridHostController {
     // changed" blit shortcut, and they do NOT update `lastFullDrawArg`.
     private runDraw(args: ResolvedGridHostArgs, damage: CellSet | undefined): void {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
-        const theme = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+        const theme = this.mergedTheme(args);
+        // Mirrors source's root-element `style={makeCSSStyle(mergedTheme)}` (`data-editor.tsx:4215`).
+        // Done here rather than once at construction so a changed `@theme` restamps the variables;
+        // identity-guarded so it's a no-op on ordinary scroll/hover redraws.
+        if (this.lastRootStampedTheme !== theme) {
+            this.applyThemeCssVariables(this.root, theme);
+            this.lastRootStampedTheme = theme;
+        }
 
         const current: DrawGridArg = {
             canvasCtx: this.canvasCtx,
@@ -940,7 +1075,10 @@ export class GridHostController {
             groupHeaderHeight: ENABLE_GROUPS ? args.groupHeaderHeight : 0,
             disabledRows: CompactSelection.empty(),
             rowHeight: args.rowHeight,
-            verticalBorder: () => true,
+            // Module-scope constant, NOT an inline arrow: `computeCanBlit` compares
+            // `verticalBorder` by identity (`render/data-grid-render.blit.ts:246`), so a fresh
+            // closure per draw silently disabled the scroll blit fast path. See ALWAYS_VERTICAL_BORDER.
+            verticalBorder: ALWAYS_VERTICAL_BORDER,
             isResizing: this.resizeState !== undefined,
             resizeCol: this.resizeState?.col,
             isFocused: this.isFocused,
@@ -957,7 +1095,7 @@ export class GridHostController {
                 this.scrollerEl.style.cursor = cursor ?? "";
             },
             getGroupDetails: name => ({ name }),
-            getRowThemeOverride: undefined,
+            getRowThemeOverride: args.getRowThemeOverride,
             drawHeaderCallback: undefined,
             drawCellCallback: undefined,
             prelightCells: undefined,
@@ -1297,7 +1435,11 @@ export class GridHostController {
             mappedColumns,
             args.rowHeight
         );
-        const theme = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+        // Phase 6: header cells are drawn with `mergeAndRealizeTheme(outerTheme, groupTheme,
+        // c.themeOverride)` (`render/data-grid-render.header.ts:65-69`), so the hit-test uses the
+        // same column-merged theme -- `computeHeaderLayout` reads `cellHorizontalPadding`/
+        // `headerIconSize` off it, both of which a column override may legitimately change.
+        const theme = mergeAndRealizeTheme(this.mergedTheme(args), column.themeOverride);
         const layout = computeHeaderLayout(
             this.headerCanvasCtx,
             column,
@@ -1579,7 +1721,11 @@ export class GridHostController {
         const renderer = args.getCellRenderer(cellContent);
         if (renderer?.onClick !== undefined && !isInnerOnlyCellKind(cellContent.kind)) {
             const cellRect = this.computeCellRect(args, col, row);
-            const theme = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+            // Phase 6: the renderer's `onClick` gets the same fully-merged per-cell theme its
+            // `draw()` was given (column -> row -> cell overrides applied), not just the global
+            // theme -- several renderers hit-test against theme-derived geometry
+            // (`cellHorizontalPadding`, `checkboxMaxSize`, ...) which an override can change.
+            const theme = this.themeForCell(args, cellContent as GridCell, col, row);
             const clickArgs = {
                 cell: cellContent as never,
                 posX: hit.localX - cellRect.x,
@@ -1925,7 +2071,12 @@ export class GridHostController {
 
         const [mCol, mRow] = mangledLocation;
         const cellRect = this.computeCellRect(args, mCol, mRow);
-        const theme = mergeAndRealizeTheme(getDataEditorTheme(), args.theme);
+        // Phase 6 fix: this used to be the base+global theme only, with no column/row/cell override
+        // applied -- so an editor opened over e.g. a dark-themed row rendered with light-theme
+        // colors. Source hands its overlay the fully-merged per-cell theme (`data-editor.tsx`'s
+        // `setOverlaySimple`: `mergeAndRealizeTheme(mergedTheme, groupTheme, colTheme, rowTheme,
+        // content.themeOverride)`), which is exactly what `themeForCell` reproduces.
+        const theme = this.themeForCell(args, cell, mCol, mRow);
 
         const container = document.createElement("div");
         Object.assign(container.style, {
@@ -1954,6 +2105,11 @@ export class GridHostController {
             overflow: "auto",
             padding: disablePadding ? "0" : `${theme.cellVerticalPadding}px ${theme.cellHorizontalPadding}px`,
         } satisfies Partial<CSSStyleDeclaration>);
+        // Phase 6: source's second `makeCSSStyle` application site
+        // (`data-grid-overlay-editor.tsx:237`) -- the overlay container carries this *cell's*
+        // fully-merged theme as `--gdg-*` variables, so editor DOM (and any consumer CSS targeting
+        // it) can style itself from the same values the canvas drew that cell with.
+        this.applyThemeCssVariables(container, theme);
 
         const state: OverlayState = {
             realLocation: [mCol - args.rowMarkerOffset, mRow],

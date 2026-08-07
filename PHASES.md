@@ -79,7 +79,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 3 | Interaction layer (selection, copy/paste, sort menu, DnD resize/reorder, hover anim) | **Done, browser-verified, committed** (3a selection+clicks, 3b keyboard nav, 3c copy/paste, 3d resize/reorder DnD) |
 | 4 | Core cell types + overlay editors | **Done, browser-verified, committed** (4a text/number/boolean/loading/protected/row-id + overlay editor framework; 4b uri/markdown, `marked` dependency added; 4c bubble/drilldown, both confirmed display-only; 4d image cell + trailing blank row/"add row" affordance, including a real `activateCell` overlay-gating bugfix surfaced by image-cell) |
 | 5 | Extra cell types incl. sparklines | **Done, browser-verified, committed** (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator; 5b tags/dropdown/multi-select/links; 5c date-picker/button/tree-view/user-profile/article, incl. a shared `pasteValueIntoCell` fix so paste dispatches to `CustomRenderer.onPaste` for all 13 extra cells — see PORTING-NOTES.md for full per-cell detail) |
-| 6 | Theming system | Pending |
+| 6 | Theming system | **Done, browser-verified, committed** — `getDataEditorDarkTheme()`, `makeCSSStyle`/`--gdg-*` on the grid root + overlay containers, `@getRowThemeOverride` plumbed end to end, per-column/per-cell overrides verified, a real overlay-editor theme-merge bugfix, `glide-data-grid-ember/THEMING.md` + README section, and demo wiring (light/dark toggle + zebra rows + a themed column/cell). Also fixed a **major pre-existing perf defect found along the way**: three `DrawGridArg` fields were allocated fresh every draw, so `computeCanBlit`'s identity checks always failed and the scroll blit fast path had never engaged — see PORTING-NOTES.md's Phase 6 section, it applies to every future phase touching `DrawGridArg`. |
 | 7 | Demo app matching glideapps.com + browser verification | Pending |
 | 8 | Async/streaming data + real-time updates demo | Pending |
 | 9 | Backlog — deferred features (**not auto-scheduled**, see detail below) | Not scheduled |
@@ -134,6 +134,11 @@ This phase is about the consumer-facing theming API/docs: how to override the de
 (light/dark), per-column/per-row theme overrides (source supports these via
 `column.themeOverride`/`getRowThemeOverride` — already plumbed through `DrawGridArg` in Phase 2),
 and documenting the pattern clearly since the user explicitly asked "how do we theme it?".
+**Done** — the consumer-facing answer to that question lives in `glide-data-grid-ember/THEMING.md`
+(precedence chain, full `Theme` field reference, dark-theme example, per-column/row/cell examples,
+the `--gdg-*` CSS custom properties, and the identity-stability rules). Implementation record,
+including the overlay-editor theme bug and the `computeCanBlit` identity finding, is in
+PORTING-NOTES.md's Phase 6 section.
 
 **Phase 7 — Demo app + browser verification.** Replicate https://grid.glideapps.com/'s fancy
 example grid AND the 6 feature cards (Scale to millions of rows / Blazingly fast scrolling / Fully
@@ -176,6 +181,12 @@ Work on any of these only when explicitly asked. Audited against `PORTING-NOTES.
   render even though `groupHeaderHeight` is accepted as a prop.
 - **Real column auto-sizing** — auto-width columns get a fixed fallback width
   (`DEFAULT_AUTO_COLUMN_WIDTH`), not source's actual text-measurement-based auto-sizing.
+- **`mappedColumns` identity churn (perf)** — `computeMangledLayout` rebuilds the mapped-column
+  array on every draw, so `computeCanBlit` falls into its `deepEqual`-per-column branch each frame,
+  and bails out of the blit fast path entirely once a grid has **more than 100 columns**. Phase 6
+  fixed the three other identity-instability sources (see PORTING-NOTES.md's Phase 6 section); this
+  one is left because it's row-marker/trailing-row mangling infra, not theming. Memoize
+  `computeMangledLayout` on `columns`/`freezeColumns`/marker-state identity to close it.
 
 *Sort* — still just `onHeaderMenuClick`'s hit-test + callback (Phase 3). No menu UI, no sort state,
 no sort logic anywhere. This was in the **original explicit requirements list** and is currently the

@@ -3,10 +3,13 @@
 // Phase 1 scope note: the Theme/FullTheme type definitions, the base theme constant, and the
 // pure `mergeAndRealizeTheme`/`getDataEditorTheme` helpers are ported as-is (the render engine
 // depends on them directly). `ThemeContext`/`useTheme` (a React Context + hook) are NOT ported --
-// Ember's theming wiring (likely a service or context-like pattern) is a later phase. `makeCSSStyle`
-// is also not ported: nothing in the ported render-engine file set imports it (it is only used by
-// the React DataEditor component wiring for setting CSS custom properties on the DOM, which is out
-// of scope here).
+// this port's theming wiring is plain args on `<GlideDataGrid>` (`@theme`, `@getRowThemeOverride`,
+// `column.themeOverride`, `cell.themeOverride`), no context/provider abstraction. See THEMING.md.
+//
+// Phase 6 additions: `makeCSSStyle` (ported verbatim from source, used by `GridHostController` to
+// stamp `--gdg-*` custom properties onto the grid root + each overlay-editor container, mirroring
+// source's two application sites) and `getDataEditorDarkTheme` (source ships no dark theme in
+// `packages/core`; this is its `docs/examples/theme-support.stories.tsx` `darkTheme` object).
 import { blend } from "./color-parser.ts";
 
 // theme variable precidence
@@ -108,6 +111,66 @@ const dataEditorBaseTheme: Theme = {
     checkboxMaxSize: 18,
 };
 
+/**
+ * Maps a theme onto the `--gdg-*` CSS custom properties. Ported verbatim from source's
+ * `common/styles.ts:7` (minus the React import it sat next to). Source applies the result at two
+ * places -- the DataEditor root element (`data-editor.tsx:4215`, using the *global* merged theme)
+ * and each overlay-editor container (`data-grid-overlay-editor.tsx:237`, using that specific
+ * cell's fully-merged theme) -- and this port mirrors both sites from `GridHostController`.
+ *
+ * The grid's own canvas rendering does not read these; they exist so consumers can style anything
+ * they layer on top of (or inside) the grid using the grid's own resolved theme values.
+ * @category Theme
+ */
+export function makeCSSStyle(theme: Theme): Record<string, string> {
+    return {
+        "--gdg-accent-color": theme.accentColor,
+        "--gdg-accent-fg": theme.accentFg,
+        "--gdg-accent-light": theme.accentLight,
+        "--gdg-text-dark": theme.textDark,
+        "--gdg-text-medium": theme.textMedium,
+        "--gdg-text-light": theme.textLight,
+        "--gdg-text-bubble": theme.textBubble,
+        "--gdg-bg-icon-header": theme.bgIconHeader,
+        "--gdg-fg-icon-header": theme.fgIconHeader,
+        "--gdg-text-header": theme.textHeader,
+        "--gdg-text-group-header": theme.textGroupHeader ?? theme.textHeader,
+        "--gdg-bg-group-header": theme.bgGroupHeader ?? theme.bgHeader,
+        "--gdg-bg-group-header-hovered": theme.bgGroupHeaderHovered ?? theme.bgHeaderHovered,
+        "--gdg-text-header-selected": theme.textHeaderSelected,
+        "--gdg-bg-cell": theme.bgCell,
+        "--gdg-bg-cell-medium": theme.bgCellMedium,
+        "--gdg-bg-header": theme.bgHeader,
+        "--gdg-bg-header-has-focus": theme.bgHeaderHasFocus,
+        "--gdg-bg-header-hovered": theme.bgHeaderHovered,
+        "--gdg-bg-bubble": theme.bgBubble,
+        "--gdg-bg-bubble-selected": theme.bgBubbleSelected,
+        "--gdg-bubble-height": `${theme.bubbleHeight}px`,
+        "--gdg-bubble-padding": `${theme.bubblePadding}px`,
+        "--gdg-bubble-margin": `${theme.bubbleMargin}px`,
+        "--gdg-bg-search-result": theme.bgSearchResult,
+        "--gdg-border-color": theme.borderColor,
+        "--gdg-horizontal-border-color": theme.horizontalBorderColor ?? theme.borderColor,
+        "--gdg-drilldown-border": theme.drilldownBorder,
+        "--gdg-link-color": theme.linkColor,
+        "--gdg-cell-horizontal-padding": `${theme.cellHorizontalPadding}px`,
+        "--gdg-cell-vertical-padding": `${theme.cellVerticalPadding}px`,
+        "--gdg-header-font-style": theme.headerFontStyle,
+        "--gdg-base-font-style": theme.baseFontStyle,
+        "--gdg-marker-font-style": theme.markerFontStyle,
+        "--gdg-font-family": theme.fontFamily,
+        "--gdg-editor-font-size": theme.editorFontSize,
+        "--gdg-checkbox-max-size": `${theme.checkboxMaxSize}px`,
+        ...(theme.resizeIndicatorColor === undefined
+            ? {}
+            : { "--gdg-resize-indicator-color": theme.resizeIndicatorColor }),
+        ...(theme.headerBottomBorderColor === undefined
+            ? {}
+            : { "--gdg-header-bottom-border-color": theme.headerBottomBorderColor }),
+        ...(theme.roundingRadius === undefined ? {} : { "--gdg-rounding-radius": `${theme.roundingRadius}px` }),
+    };
+}
+
 export interface FullTheme extends Theme {
     headerFontFull: string;
     baseFontFull: string;
@@ -117,6 +180,58 @@ export interface FullTheme extends Theme {
 /** @category Theme */
 export function getDataEditorTheme(): Theme {
     return dataEditorBaseTheme;
+}
+
+// Ported verbatim from source's `docs/examples/theme-support.stories.tsx`'s `darkTheme` object
+// (source deliberately does NOT ship a dark theme from `packages/core` -- it only exists as an
+// example). Kept as a `Partial<Theme>` because that is genuinely what it is: it names only the
+// fields that differ from the base light theme and is meant to be layered over it, i.e.
+// `mergeAndRealizeTheme(getDataEditorTheme(), getDataEditorDarkTheme())` -- which is exactly what
+// passing it as `<GlideDataGrid @theme={{...}}>` already does internally.
+const dataEditorDarkTheme: Partial<Theme> = {
+    accentColor: "#8c96ff",
+    accentLight: "rgba(202, 206, 255, 0.253)",
+
+    textDark: "#ffffff",
+    textMedium: "#b8b8b8",
+    textLight: "#a0a0a0",
+    textBubble: "#ffffff",
+
+    bgIconHeader: "#b8b8b8",
+    fgIconHeader: "#000000",
+    textHeader: "#a1a1a1",
+    textHeaderSelected: "#000000",
+
+    bgCell: "#16161b",
+    bgCellMedium: "#202027",
+    bgHeader: "#212121",
+    bgHeaderHasFocus: "#474747",
+    bgHeaderHovered: "#404040",
+
+    bgBubble: "#212121",
+    bgBubbleSelected: "#000000",
+
+    bgSearchResult: "#423c24",
+
+    borderColor: "rgba(225,225,225,0.2)",
+    drilldownBorder: "rgba(225,225,225,0.4)",
+
+    linkColor: "#4F5DFF",
+
+    headerFontStyle: "bold 14px",
+    baseFontStyle: "13px",
+    fontFamily:
+        "Inter, Roboto, -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, helvetica, Ubuntu, noto, arial, sans-serif",
+    checkboxMaxSize: 18,
+};
+
+/**
+ * The stock dark theme, as a `Partial<Theme>` overlay meant to be layered over the base theme.
+ * Pass it straight to `<GlideDataGrid @theme={{...}}>`, or spread it to tweak individual fields.
+ * @category Theme
+ */
+export function getDataEditorDarkTheme(): Partial<Theme> {
+    return dataEditorDarkTheme;
 }
 
 export function mergeAndRealizeTheme(theme: Theme, ...overlays: Partial<Theme | undefined>[]): FullTheme {
