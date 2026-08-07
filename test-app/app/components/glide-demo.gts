@@ -27,7 +27,7 @@ import { on } from "@ember/modifier";
 import { htmlSafe } from "@ember/template";
 import { registerDestructor } from "@ember/destroyable";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
-import { withColumnSort, type ColumnSort } from "glide-data-grid-ember/data-source/index";
+import { withColumnSort, type ColumnSort, type ColumnSortResult } from "glide-data-grid-ember/data-source/index";
 import {
     getCellRenderer as defaultGetCellRenderer,
     createCombinedCellRenderer,
@@ -100,12 +100,38 @@ export default class GlideDemo extends Component {
     }
 
     /**
-     * The undecorated cell accessor. Keyed on `this.columns` identity: it closes over the column
-     * order (a reorder changes which field physical column N shows), and nothing else.
+     * Committed cell edits, keyed `"<originalRow>:<columnId>"`.
+     *
+     * The grid never mutates consumer data -- `onCellsEdited` is a *notification*, and applying it
+     * is the consumer's job (same contract as `onColumnResize`/`onColumnMoved` above). Without this
+     * map and its handler, the overlay editor opens and accepts input but every commit is silently
+     * dropped -- and so are Delete and paste, which funnel through the same callback.
+     *
+     * Keyed by **original** row (not displayed row) so edits survive re-sorting, and by **column
+     * id** (not index) so they survive a column reorder.
+     */
+    @tracked edits: ReadonlyMap<string, GridCell> = new Map();
+
+    /**
+     * The undecorated cell accessor, with committed edits layered on top.
+     *
+     * Note the row index reaching this closure is already the **original** index: `withColumnSort`
+     * remaps `row` before delegating, so everything below the decorator works in unsorted space.
+     *
+     * Keyed on `this.columns` (it closes over the column order) and `this.edits`. Re-reading after
+     * an edit yields a new closure identity, which is correct -- the data really did change, so the
+     * blit fast path *should* be invalidated and the sort map rebuilt.
      */
     @cached
     get baseGetCellContent(): (item: Item) => GridCell {
-        return makeGlideDemoGetCellContent(this.columns);
+        const inner = makeGlideDemoGetCellContent(this.columns);
+        const edits = this.edits;
+        if (edits.size === 0) return inner;
+        const fieldIds = this.columns.map(c => c.id ?? "");
+        return (item: Item): GridCell => {
+            const [col, row] = item;
+            return edits.get(`${row}:${fieldIds[col] ?? ""}`) ?? inner(item);
+        };
     }
 
     @cached
@@ -125,13 +151,17 @@ export default class GlideDemo extends Component {
      * original reference untouched when there is no sort. The `@cached` here is belt-and-braces.
      */
     @cached
-    get getCellContent(): (item: Item) => GridCell {
+    get sortResult(): ColumnSortResult {
         return withColumnSort({
             columns: this.displayColumns,
             rows: GLIDE_DEMO_ROW_COUNT,
             getCellContent: this.baseGetCellContent,
             sort: this.sort,
-        }).getCellContent;
+        });
+    }
+
+    get getCellContent(): (item: Item) => GridCell {
+        return this.sortResult.getCellContent;
     }
 
     // --- Sort menu ------------------------------------------------------------------------------
@@ -199,6 +229,34 @@ export default class GlideDemo extends Component {
         this.applySort("desc");
     }
 
+    // --- Cell edits ------------------------------------------------------------------------------
+
+    /**
+     * Applies committed edits from the overlay editor, the Delete key, and paste -- all three
+     * funnel through this one callback.
+     *
+     * **`location` is in displayed coordinates**, so when a sort is active it must be translated
+     * back to the underlying record before being stored, or editing a sorted row would write to a
+     * different person's record. `getOriginalIndex` (returned by `withColumnSort` alongside
+     * `getCellContent`) exists exactly for this; with no sort active it is the identity function,
+     * so this code path is the same either way.
+     *
+     * `location[0]` is already in *real* column space -- the grid strips the row-marker column at
+     * the callback boundary -- so it indexes `this.columns` directly, with no `ROW_MARKER_OFFSET`.
+     */
+    @action
+    handleCellsEdited(edits: readonly { location: Item; value: GridCell }[]): void {
+        const next = new Map(this.edits);
+        const toOriginalRow = this.sortResult.getOriginalIndex;
+        for (const { location, value } of edits) {
+            const [col, displayedRow] = location;
+            const fieldId = this.columns[col]?.id;
+            if (fieldId === undefined) continue;
+            next.set(`${toOriginalRow(displayedRow)}:${fieldId}`, value);
+        }
+        this.edits = next;
+    }
+
     // --- Column resize / reorder -----------------------------------------------------------------
 
     @action
@@ -227,6 +285,7 @@ export default class GlideDemo extends Component {
                 @rowSelect="multi"
                 @groupHeaderHeight={{28}}
                 @headerHeight={{34}}
+                @onCellsEdited={{this.handleCellsEdited}}
                 @onHeaderMenuClick={{this.handleHeaderMenuClick}}
                 @onColumnResize={{this.handleColumnResize}}
                 @onColumnMoved={{this.handleColumnMoved}}

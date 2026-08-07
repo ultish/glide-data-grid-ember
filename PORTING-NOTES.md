@@ -2738,3 +2738,57 @@ directly on the grid root via `javascript_tool`. Same class as the already-docum
 "`.focus()` doesn't fire a `focus` event" quirk. **When testing a hover-gated affordance here,
 dispatch the `mousemove` yourself on `root`; don't conclude from a `hover` action alone that the
 feature is broken.** (Real `computer` *clicks* remain reliable, as previously documented.)
+
+## Phase 7f — Demo edits didn't persist; and a correction on how to browser-test clipboard
+
+**Reported by the user after Phase 7 was committed:** in the Glide demo the overlay editor opened
+and accepted typing, but nothing saved on Enter or blur -- while the older `<DemoGrid>` saved fine,
+and copy worked in both.
+
+**Cause: `glide-demo.gts` never passed `@onCellsEdited`.** Nothing in the addon was wrong. The
+controller is non-mutating by contract (established Phase 3c) -- it *notifies* and the consumer
+applies. With no handler wired, the notification went nowhere.
+
+**The same callback carries three features, which is why the symptom looked broader than it was.**
+`grid-host-controller.ts` funnels all of these into `onCellsEdited`: the overlay-editor commit
+(`commitCellEdit`), the Delete/Backspace clear (`deleteSelection`), and **paste** (`onPaste`). So a
+demo missing that one arg silently loses editing, delete *and* paste, while copy keeps working
+because copy only reads. **Whenever "editing doesn't stick" is reported, check the consumer's
+`@onCellsEdited` wiring before looking at the addon at all.**
+
+### The non-obvious part: `onCellsEdited`'s `location` is in DISPLAYED row space
+
+This is the bit worth internalising, because it is silently wrong rather than loudly broken. With a
+sort active, `withColumnSort` remaps rows *above* the consumer's `getCellContent`, so:
+
+- the `row` reaching the consumer's own `getCellContent` is the **original** index, but
+- the `row` in `onCellsEdited`'s `location` is the **displayed** index.
+
+Storing the edit under the displayed index means editing a sorted row writes to a different record,
+and the corruption only becomes visible after the next re-sort. **`getOriginalIndex` -- returned by
+`withColumnSort` alongside `getCellContent` -- exists exactly for this**, and this is its first real
+use in the project. With no sort active it is the identity function, so the same code path is
+correct either way.
+
+`location[0]` needs no equivalent adjustment: the controller converts to real column space at the
+callback boundary, so it indexes the consumer's own `columns` with **no** `rowMarkerOffset`.
+
+The demo now keys its edit map `"<originalRow>:<columnId>"` -- original row so edits survive
+re-sorting, column *id* rather than index so they survive a column reorder.
+
+**Browser-verified**: plain edit commits and the selection advances; with Last-name-ascending
+active, editing displayed row 1 (`leslie.allen17@example.com`) and then round-tripping the sort
+desc→asc leaves the edited value still attached to that same record, and displayed row 1 under the
+descending sort shows real unedited data. Paste verified into a different row.
+
+### Correction: real Cmd+C/Cmd+V DO work in this browser-automation setup
+
+Phases 3c and 5c concluded that paste could not be exercised here, because synthetic
+`ClipboardEvent` + `DataTransfer` dispatch reported `preventDefault()` but never visibly redrew
+anything. That conclusion was too broad. **Real `computer`-tool key presses (`cmd+c` / `cmd+v`) are
+trusted CDP events and drive the whole clipboard pipeline end to end** -- click a cell, `cmd+c`,
+click another cell, `cmd+v`, and the pasted value renders. This is now the preferred way to test
+clipboard behaviour here; reach for synthetic `ClipboardEvent`s only if a real key press is
+impossible. (Consistent with the wider pattern already recorded in this file: trusted `computer`
+input works where synthetic dispatch silently doesn't -- same as `.focus()` not firing `focus`, and
+the `hover` action not firing `mousemove`.)
