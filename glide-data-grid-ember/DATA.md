@@ -188,6 +188,51 @@ Only relevant if profiling actually points here.
 
 ---
 
+## ⚠️ If you add column sort, edits need a row translation
+
+**Read this before wiring `@onCellsEdited` on a sorted grid. Getting it wrong corrupts data
+silently**, and you won't see it until the next re-sort.
+
+`withColumnSort` remaps rows *above* your data layer. That leaves the read and write paths in
+different coordinate spaces:
+
+| | row index you get |
+|---|---|
+| your own `getCellContent` | **original** — the decorator already translated it |
+| `@onCellsEdited`'s `location` | **displayed** — the row's on-screen position |
+
+So an edit to the top visible row of a sorted grid arrives as row `0`, and writing it to record `0`
+updates whichever record happens to be first *unsorted* — a different person. Translate it back with
+`getOriginalIndex`, which `withColumnSort` returns for exactly this purpose:
+
+```ts
+@cached get sorted() {
+    return withColumnSort({ columns, rows, getCellContent: this.baseGetCellContent, sort: this.sort });
+}
+
+@action handleCellsEdited(edits) {
+    for (const { location, value } of edits) {
+        const [col, displayedRow] = location;
+        this.applyEdit(this.sorted.getOriginalIndex(displayedRow), col, value);  // <- translate
+    }
+}
+```
+
+With no sort active `getOriginalIndex` is the identity function, so this one code path is correct
+either way — write it unconditionally rather than branching on whether a sort is set.
+
+Two things that need no adjustment: `location[0]` is already in your own column space (the grid
+strips the row-marker column at the callback boundary), and `@onSelectionChanged` reports *displayed*
+rows deliberately, since that's what's visually selected.
+
+Prefer keying stored edits by a stable **record id and column id** rather than by numeric indices, so
+they also survive column reorders. A worked example is in
+`test-app/app/components/glide-demo.gts`.
+
+> **This asymmetry is slated to be removed** — see `PHASES.md`, Phase 8: `withColumnSort` will
+> optionally take and return `onCellsEdited`, translating locations itself so the two spaces cannot
+> disagree. `getOriginalIndex` will remain as the escape hatch. Until then, translate by hand.
+
 ## Status of this recommendation
 
 Honest note, so you can calibrate how much to trust the above. The **eager-read half** — that a

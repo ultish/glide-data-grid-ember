@@ -92,7 +92,24 @@ export interface ColumnSortResult {
      * unchanged inputs -- pass it straight to `<GlideDataGrid @getCellContent=...>`.
      */
     readonly getCellContent: GetCellContentFn;
-    /** Maps a *displayed* row index back to its index in the caller's original row order. */
+    /**
+     * Maps a *displayed* row index back to its index in the caller's original row order.
+     *
+     * **Required when applying `onCellsEdited` on a sorted grid, and easy to forget.** This
+     * decorator remaps rows above the caller's data layer, which leaves the read and write paths in
+     * different coordinate spaces: the row reaching the caller's own `getCellContent` is already the
+     * *original* index, but the row in `onCellsEdited`'s `location` is the *displayed* one. Applying
+     * an edit without translating it here writes to a different record -- silently, and invisibly
+     * until the next re-sort.
+     *
+     * With no sort active this is the identity function, so callers should translate
+     * unconditionally rather than branching on whether a sort is set.
+     *
+     * See `DATA.md`'s "If you add column sort, edits need a row translation" section for a worked
+     * example. Note this asymmetry is slated for removal (PHASES.md, Phase 8): `withColumnSort` will
+     * optionally take and return `onCellsEdited` and do the translation itself, at which point this
+     * stays available as the escape hatch rather than the required step.
+     */
     readonly getOriginalIndex: (index: number) => number;
 }
 

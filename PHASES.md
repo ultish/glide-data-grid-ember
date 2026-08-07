@@ -246,6 +246,41 @@ What Phase 7 already built that Phase 8 must build **on top of**, not duplicate:
 - Column grouping is live now (Phase 7b) and row markers/header icons actually render (Phase 7e), so
   a Phase 8 demo can use them freely.
 
+**REQUIRED in Phase 8 — settle the decorator coordinate-space contract (agreed with the user
+2026-08-08).** A decorator that remaps the *read* path must also remap the *write* path, or the two
+end up in different coordinate spaces and every consumer has to bridge them by hand.
+
+Today `withColumnSort` remaps rows for `getCellContent` but has no involvement in `onCellsEdited`,
+whose `location` is in **displayed** row space while the caller's `getCellContent` sees **original**
+row space. Applying an edit without translating through `getOriginalIndex` writes to the wrong
+record — silently, and invisibly until the next re-sort. This is faithful to source (its
+`useColumnSort` has the same shape) but it is a genuine data-corruption footgun, and it bit this
+project for real: Phase 7c's demo shipped without the translation. Currently documented as a
+caveat in `DATA.md` and on `ColumnSortResult.getOriginalIndex`; Phase 8 should make it structural:
+
+```ts
+export interface ColumnSortProps {
+    columns; rows; getCellContent;
+    onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;  // NEW
+    sort?: ColumnSort | readonly ColumnSort[];
+}
+export interface ColumnSortResult {
+    getCellContent;
+    onCellsEdited?: ...;   // NEW -- locations already translated to original row space
+    getOriginalIndex;      // KEEP -- demoted from required step to escape hatch
+}
+```
+so a consumer spreads both halves and cannot get it wrong. **`recordsSource` must adopt the same
+contract**, and so must any later decorator that remaps rows or columns (source's
+`use-movable-columns` / `use-collapsing-groups` both would) — settling it once here is much cheaper
+than retrofitting it per decorator.
+
+**Do NOT blanket-translate every callback.** `onSelectionChanged` reporting *displayed* rows is
+correct — that is what is visually selected. This is specifically about the write path, where
+displayed-space is a trap. Update `DATA.md`'s caveat section and
+`ColumnSortResult.getOriginalIndex`'s doc comment when this lands, since both currently tell
+consumers to translate by hand.
+
 **One genuinely new piece vs source:** a *synchronous* `recordsSource` (an in-memory array of
 records → `getCellContent`). Source only ships the async paged variant
 (`pageSize`/`maxConcurrency`, `Promise`-per-range); its consumers hand-write `getCellContent` for
