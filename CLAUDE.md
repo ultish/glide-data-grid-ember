@@ -66,7 +66,12 @@ feature cards from the original requirements were dropped deliberately; don't "r
 **Next up: Phase 8** (async/streaming + the `recordsSource` data-source layer — note `withColumnSort`
 already established the composable-decorator shape and the `src/data-source/` directory it belongs
 in; `recordsSource` should return `columns`/`rows`/`getCellContent` under exactly those names so the
-two compose). Phase 9 is a deliberately non-auto-scheduled backlog.
+two compose). Phase 8 also carries a **required API fix agreed with the user**: a decorator that
+remaps the read path must remap the write path too, so `withColumnSort` should take and return
+`onCellsEdited` rather than making every consumer translate `location` through `getOriginalIndex` by
+hand — today's asymmetry silently writes edits to the wrong record on a sorted grid. Full rationale
+and API sketch in PHASES.md's "Phase 8 — START HERE" block; read it before designing `recordsSource`,
+which must adopt the same contract. Phase 9 is a deliberately non-auto-scheduled backlog.
 
 Consumer-facing docs now exist and are the spec for future work — keep them in sync rather than
 letting them go stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and
