@@ -37,6 +37,13 @@ export type {
     DrawHeaderCallback,
     DrawCellCallback,
     HoverEffectTheme,
+    CustomCell,
+    TextCell,
+    NumberCell,
+    BooleanCell,
+    UriCell,
+    MarkdownCell,
+    EditListItem,
 } from "./data-grid-types.ts";
 export {
     GridCellKind,
@@ -54,7 +61,15 @@ export {
 } from "./data-grid-types.ts";
 
 // Cell-drawing contracts consumed by the render engine
-export type { BaseDrawArgs, DrawArgs, PrepResult, GetCellRendererCallback, CellRenderer } from "./cell-types.ts";
+export type {
+    BaseDrawArgs,
+    DrawArgs,
+    PrepResult,
+    GetCellRendererCallback,
+    CellRenderer,
+    InternalCellRenderer,
+    CustomRenderer,
+} from "./cell-types.ts";
 
 // Theme
 export type { Theme, FullTheme } from "./theme.ts";
@@ -70,6 +85,11 @@ export type {
     SelectionBehaviorOptions,
     SetCurrentResult,
 } from "./selection-behavior.ts";
+
+// Copy/paste (Phase 3c) -- pure clipboard-buffer construction/parsing, ported from source's
+// `data-editor/copy-paste.ts` (+ `unquote()` from `data-editor/data-editor-fns.ts`).
+export { getCopyBufferContents, decodeHTML, unquote } from "./copy-paste.ts";
+export type { CellBuffer, StringArrayCellBuffer, BasicCellBuffer, CopyBuffer } from "./copy-paste.ts";
 
 // Supporting engine pieces
 export { CellSet } from "./cell-set.ts";

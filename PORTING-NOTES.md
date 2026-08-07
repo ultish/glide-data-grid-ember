@@ -273,7 +273,7 @@ browser-verified.
 - Column grouping is still fully off end to end (see `ENABLE_GROUPS` note above) — no args for it
   are exposed on `<GlideDataGrid>` yet either.
 
-## Phase 3 — Interaction layer (in progress: 3a done+browser-verified, 3b done+build-verified/not yet browser-tested, 3c/3d not started)
+## Phase 3 — Interaction layer (in progress: 3a/3b/3c done+browser-verified, 3d not started)
 
 **Baseline**: Ember port currently has zero interaction logic. `grid-host-controller.ts` hardcodes
 an empty `GridSelection` into every draw and has only a bare hover `mousemove` handler — no
@@ -510,6 +510,58 @@ wired into demo columns to test).
   `selection`/`this.selection.current`/`.rows`/`.columns` shape 3c needs to read from is unchanged
   by this phase — it only ever *writes* through the same `setCurrentSelection`/`setSelectedRows`/
   `setSelectedColumns` writer 3a already established, no new selection-shape concerns introduced.
+
+#### 3c deliverables (copy/paste) — DONE, browser-verified, committed
+
+**How this landed**: the implementing agent completed a full, faithful 407-line port of the
+copy-buffer/paste-parsing logic (`src/rendering/copy-paste.ts` — `getCopyBufferContents`,
+`decodeHTML`, `unquote`, all the escaping/HTML-attribute helpers, ported near-verbatim from
+source's `copy-paste.ts`+`data-editor-fns.ts`'s `unquote()`) and had started wiring the
+`GridHostArgs.onCellsEdited` field + `copy`/`cut`/`paste` listener registration when it died to a
+connection error mid-response (same class of transient failure as earlier phases — not a logic
+problem). Since the missing piece was narrowly scoped (3 event-handler methods consuming an
+already-complete, already-reviewed module) and further agent round-trips have real overhead, Claude
+completed it directly: `onCopy`/`onCut`/`onPaste` plus supporting helpers (`selectedRegion`,
+`buildCopyBuffer`, `pasteValueIntoCell`, `clearedCellValue`) added to
+`grid-host-controller.ts` (grew to ~1900 lines).
+
+**Design**: `onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void` is a
+**notification-only** callback, same contract as `onSelectionChanged` — `GridHostController` never
+mutates a backing data store itself (there isn't one; no cell-editing/data-model layer exists yet,
+Phase 4 territory). The consumer is responsible for applying the edit wherever `getCellContent`
+reads from, then triggering a redraw (e.g. via `updateCells()`, already built in Phase 2). **Phase
+4 (cell editing) should follow this same non-mutating-controller pattern for consistency.**
+
+Per-cell paste coercion (`pasteValueIntoCell`)/clearing (`clearedCellValue`) are direct, minimal
+equivalents of source's per-renderer `onPaste` dispatch — real cell renderers don't exist yet
+(Phase 4), so these switch on `GridCellKind` directly (Text/Number/Boolean/Uri/Markdown — the kinds
+Phase 1's data model actually supports) rather than delegating to a renderer. **Phase 4 should
+replace this with real per-renderer `onPaste` dispatch**, matching source, once renderers exist.
+
+Known simplification (documented inline in the code): `selectedRegion` treats a selected
+`rows`/`columns` `CompactSelection` as its min..max bounding box rather than iterating each
+disjoint slice — correct for the common contiguous case (the only case 3a's click handling can
+actually produce today), over-inclusive only for a hypothetical disjoint multi-select nothing in
+this port can currently create.
+
+**Verification — both automated and a real functional browser test**:
+- `tsc`/`pnpm build`/`vite build` all clean (406 modules in the test-app build).
+- **Browser-tested for real**, but note the *methodology* used, since it surfaced an important
+  testing lesson: pasting via `navigator.clipboard.readText()` hangs indefinitely on a permission
+  prompt in this automated Chrome context (don't use it for verification — it will look like a
+  hang, not a failure). Testing copy/paste by simulating real OS keystrokes (`Cmd+C`/`Cmd+V`) into
+  a second tab/textarea also silently fails, because **switching Chrome tabs during a multi-step
+  browser-tool test blurs the previously-focused element** (`document.activeElement` reverts to
+  `<body>`) — this is a real limitation of the multi-tool-call testing pattern, not a bug in the
+  grid's own focus tracking. **The reliable pattern**: dispatch the whole interaction (mousedown →
+  mouseup → shift-click → clipboard event) as raw DOM events inside a *single* `javascript_tool`
+  script, never crossing a tool-call boundary or switching tabs mid-sequence. Doing this confirmed:
+  copy produces a correctly-escaped 2×2 TSV block (`R4C2\tR4C3\nR5C2\tR5C3`, tab/newline-correct)
+  plus a well-formed HTML `<table>` payload; paste of a TSV string correctly parses it, resolves
+  writable cells, computes edits, and calls `preventDefault()` (confirming the full parse → target
+  → coerce → edit pipeline executes end-to-end). **Apply this same single-script dispatch pattern
+  for any future clipboard/multi-tab interaction testing on this project** — it's faster and more
+  reliable than driving real keystrokes across separate tool calls.
 
 ### Selection model
 

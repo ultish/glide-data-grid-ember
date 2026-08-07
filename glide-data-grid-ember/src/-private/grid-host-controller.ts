@@ -41,6 +41,12 @@ import {
     setCurrentSelection,
     setSelectedRows as writerSetSelectedRows,
     setSelectedColumns as writerSetSelectedColumns,
+    isReadWriteCell,
+    getCopyBufferContents,
+    decodeHTML,
+    unquote,
+    BooleanEmpty,
+    BooleanIndeterminate,
 } from "../rendering/index.ts";
 import type {
     DrawGridArg,
@@ -58,6 +64,10 @@ import type {
     Theme,
     HoverInfo,
     SelectionBehaviorOptions,
+    CellBuffer,
+    CopyBuffer,
+    CustomCell,
+    CustomRenderer,
 } from "../rendering/index.ts";
 import {
     computeBounds,
@@ -129,6 +139,25 @@ export interface GridHostArgs {
      * only: no menu UI or sort logic is built by the grid itself (see PORTING-NOTES.md).
      */
     readonly onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
+
+    // --- Phase 3c: copy/cut/paste -------------------------------------------------------------
+    /**
+     * Fired once per paste (or cut-then-clear) gesture with the *full batch* of cell writes to
+     * apply, in the same "notification only" spirit as `onSelectionChanged` -- mirrors source's
+     * `mangledOnCellsEdited` batching every write from one `paste`/cut event into a single call
+     * rather than firing per-cell (`data-editor.tsx:3742,3180`). `location` is in the caller's own
+     * (real, un-mangled) column space, matching `getCellContent`'s `Item` space -- the row-marker
+     * column, if any, is never a valid edit target and is excluded before this fires.
+     *
+     * **`GridHostController` does NOT mutate any backing data store itself** -- there isn't one in
+     * this port (no cell-editing/data-model layer exists yet, that's Phase 4). This callback is
+     * purely a notification: applying the edit to whatever `getCellContent` reads from, and
+     * triggering a redraw afterwards (e.g. via the `GlideDataGridApi.updateCells` this controller
+     * already exposes), are entirely the consumer's responsibility. Future phases that add real
+     * cell editing (Phase 4) should follow this same non-mutating-controller contract for
+     * consistency, per PORTING-NOTES.md.
+     */
+    readonly onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
 }
 
 export interface GridHostControllerOptions {
@@ -157,6 +186,7 @@ interface ResolvedGridHostArgs {
     readonly rangeSelectionColumnSpanning: boolean;
     readonly onSelectionChanged: ((selection: GridSelection) => void) | undefined;
     readonly onHeaderMenuClick: ((col: number, bounds: Rectangle) => void) | undefined;
+    readonly onCellsEdited: ((edits: readonly { location: Item; value: GridCell }[]) => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -483,6 +513,15 @@ export class GridHostController {
         // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderMenuClick`
         // in that case.
         window.addEventListener("mouseup", this.onMouseUp);
+        // Copy/cut/paste (Phase 3c): native clipboard events, attached at `window` level (not a
+        // specific DOM node) and gated on `this.isFocused` inside each handler -- mirrors source's
+        // own `useEventListener("copy"/"cut"/"paste", ..., safeWindow, ...)` plus its
+        // `document.activeElement` focus check (`data-editor.tsx:3642-3644,3775-3778,3882-3884`),
+        // reusing the same `isFocused` field the 3a/3b focus-gating fix already established rather
+        // than re-deriving `document.activeElement` containment here.
+        window.addEventListener("copy", this.onCopy);
+        window.addEventListener("cut", this.onCut);
+        window.addEventListener("paste", this.onPaste);
 
         this.resizeObserver = new ResizeObserver(entries => {
             const entry = entries[0];
@@ -533,6 +572,7 @@ export class GridHostController {
             rangeSelectionColumnSpanning: args.rangeSelectionColumnSpanning ?? true,
             onSelectionChanged: args.onSelectionChanged,
             onHeaderMenuClick: args.onHeaderMenuClick,
+            onCellsEdited: args.onCellsEdited,
         };
     }
 
@@ -669,6 +709,9 @@ export class GridHostController {
         this.root.removeEventListener("blur", this.onBlur);
         this.root.removeEventListener("keydown", this.onKeyDown);
         window.removeEventListener("mouseup", this.onMouseUp);
+        window.removeEventListener("copy", this.onCopy);
+        window.removeEventListener("cut", this.onCut);
+        window.removeEventListener("paste", this.onPaste);
         this.resizeObserver.disconnect();
 
         this.root.replaceChildren();
@@ -1617,4 +1660,217 @@ export class GridHostController {
         if (deltaX !== 0) this.scrollerEl.scrollLeft += deltaX;
         if (deltaY !== 0) this.scrollerEl.scrollTop += deltaY;
     }
+
+    // --- copy/cut/paste (Phase 3c) -----------------------------------------------------------------
+    // Ported from `data-editor.tsx`'s `onCopy`/`onCut`/`onPasteInternal` + `copy-paste.ts` (see
+    // `src/rendering/copy-paste.ts` and PORTING-NOTES.md's Phase 3 section for the full research).
+    // Simplification vs source, documented in PORTING-NOTES.md: `selectedRegion` treats a selected
+    // `rows`/`columns` CompactSelection as its min..max bounding box rather than iterating each
+    // disjoint slice individually -- correct for the common contiguous case (a single shift-click
+    // range, which is how selection is actually produced today), over-inclusive only for a
+    // hypothetical disjoint multi-row/column selection, which nothing in this port can currently
+    // produce (3a's row/column click handling always replaces-or-extends a single contiguous run).
+
+    /** Mangled (row-marker-space) column/row bounds of the current selection, or `undefined` if
+     *  nothing is selected. `colEnd`/`rowEnd` are exclusive. */
+    private selectedRegion(
+        args: ResolvedGridHostArgs
+    ): { colStart: number; colEnd: number; rowStart: number; rowEnd: number } | undefined {
+        const sel = this.selection;
+        const { mappedColumns } = this.computeMangledLayout(args);
+        if (sel.current !== undefined) {
+            const r = sel.current.range;
+            return { colStart: r.x, colEnd: r.x + r.width, rowStart: r.y, rowEnd: r.y + r.height };
+        }
+        if (sel.rows.length > 0) {
+            const rows = [...sel.rows];
+            return {
+                colStart: args.rowMarkerOffset,
+                colEnd: mappedColumns.length,
+                rowStart: Math.min(...rows),
+                rowEnd: Math.max(...rows) + 1,
+            };
+        }
+        if (sel.columns.length > 0) {
+            const cols = [...sel.columns];
+            return {
+                colStart: Math.min(...cols),
+                colEnd: Math.max(...cols) + 1,
+                rowStart: 0,
+                rowEnd: args.rows,
+            };
+        }
+        return undefined;
+    }
+
+    private buildCopyBuffer(args: ResolvedGridHostArgs): { textPlain: string; textHtml: string } | undefined {
+        const region = this.selectedRegion(args);
+        if (region === undefined) return undefined;
+        // Row-marker column (if any) is never a real data column -- exclude it from the copied
+        // region entirely rather than emitting a placeholder cell for it.
+        const colStart = Math.max(region.colStart, args.rowMarkerOffset);
+        if (colStart >= region.colEnd || region.rowStart >= region.rowEnd) return undefined;
+
+        const columnIndexes: number[] = [];
+        for (let col = colStart; col < region.colEnd; col++) columnIndexes.push(col - args.rowMarkerOffset);
+
+        const cells: GridCell[][] = [];
+        for (let row = region.rowStart; row < region.rowEnd; row++) {
+            const rowCells: GridCell[] = [];
+            for (let col = colStart; col < region.colEnd; col++) {
+                rowCells.push(args.getCellContent([col - args.rowMarkerOffset, row]));
+            }
+            cells.push(rowCells);
+        }
+        return getCopyBufferContents(cells, columnIndexes);
+    }
+
+    // Coerces a parsed paste buffer entry into a replacement `GridCell` matching `existing`'s kind.
+    // Source dispatches this to each cell renderer's own `onPaste` (or a `coercePasteValue` prop);
+    // neither exists yet in this port (real cell renderers are Phase 4), so this is a direct,
+    // minimal equivalent covering the data kinds Phase 1's data model supports -- inverse of
+    // `copy-paste.ts`'s `convertCellToBuffer` for the same kinds. Phase 4 should replace this with
+    // real per-renderer `onPaste` dispatch once cell renderers exist, for consistency with source.
+    private pasteValueIntoCell(existing: GridCell, buf: CellBuffer): GridCell | undefined {
+        const raw = Array.isArray(buf.rawValue)
+            ? buf.rawValue.join(", ")
+            : (buf.rawValue?.toString() ?? buf.formatted.toString());
+        switch (existing.kind) {
+            case GridCellKind.Text:
+                return { ...existing, data: raw, displayData: raw };
+            case GridCellKind.Number: {
+                const trimmed = raw.trim();
+                if (trimmed === "") return { ...existing, data: undefined, displayData: "" };
+                const n = Number(trimmed);
+                if (Number.isNaN(n)) return undefined;
+                return { ...existing, data: n, displayData: raw };
+            }
+            case GridCellKind.Boolean: {
+                const upper = raw.trim().toUpperCase();
+                const data =
+                    upper === "TRUE"
+                        ? true
+                        : upper === "FALSE"
+                          ? false
+                          : upper === "INDETERMINATE"
+                            ? BooleanIndeterminate
+                            : BooleanEmpty;
+                return { ...existing, data };
+            }
+            case GridCellKind.Uri:
+                return { ...existing, data: raw };
+            case GridCellKind.Markdown:
+                return { ...existing, data: raw };
+            default:
+                // Custom/Image/Bubble/Drilldown/RowID/Loading/Protected: not writable via
+                // `isReadWriteCell` anyway (this method is only called for cells that already
+                // passed that check), so `default` is unreachable for those kinds in practice --
+                // returned as a safe no-op rather than asserted, since new GridCell kinds could be
+                // added upstream without this switch being updated in lockstep.
+                return undefined;
+        }
+    }
+
+    // Inverse of `pasteValueIntoCell` for the "cut" gesture -- resets a cell to its kind-appropriate
+    // empty value. Mirrors source's `onCut` = `onCopy` + delete-range, using the same per-kind
+    // emptiness convention `data-editor-fns.ts`'s delete-keybind clearing logic uses.
+    private clearedCellValue(existing: GridCell): GridCell | undefined {
+        switch (existing.kind) {
+            case GridCellKind.Text:
+                return { ...existing, data: "", displayData: "" };
+            case GridCellKind.Number:
+                return { ...existing, data: undefined, displayData: "" };
+            case GridCellKind.Boolean:
+                return { ...existing, data: BooleanEmpty };
+            case GridCellKind.Uri:
+                return { ...existing, data: "" };
+            case GridCellKind.Markdown:
+                return { ...existing, data: "" };
+            default:
+                return undefined;
+        }
+    }
+
+    private readonly onCopy = (ev: ClipboardEvent): void => {
+        if (this.destroyed || !this.isFocused) return;
+        const args = this.resolveArgs();
+        const buffer = this.buildCopyBuffer(args);
+        if (buffer === undefined || ev.clipboardData === null) return;
+        ev.clipboardData.setData("text/plain", buffer.textPlain);
+        ev.clipboardData.setData("text/html", buffer.textHtml);
+        ev.preventDefault();
+    };
+
+    private readonly onCut = (ev: ClipboardEvent): void => {
+        if (this.destroyed || !this.isFocused) return;
+        this.onCopy(ev);
+        const args = this.resolveArgs();
+        const region = this.selectedRegion(args);
+        if (region === undefined) return;
+        const colStart = Math.max(region.colStart, args.rowMarkerOffset);
+        const edits: { location: Item; value: GridCell }[] = [];
+        for (let row = region.rowStart; row < region.rowEnd; row++) {
+            for (let col = colStart; col < region.colEnd; col++) {
+                const realCol = col - args.rowMarkerOffset;
+                const cell = args.getCellContent([realCol, row]);
+                if (!isReadWriteCell(cell)) continue;
+                const cleared = this.clearedCellValue(cell);
+                if (cleared !== undefined) edits.push({ location: [realCol, row], value: cleared });
+            }
+        }
+        if (edits.length > 0) args.onCellsEdited?.(edits);
+    };
+
+    private readonly onPaste = (ev: ClipboardEvent): void => {
+        if (this.destroyed || !this.isFocused) return;
+        const args = this.resolveArgs();
+        if (ev.clipboardData === null) return;
+
+        const html = ev.clipboardData.getData("text/html");
+        const plain = ev.clipboardData.getData("text/plain");
+        let buffer: CopyBuffer | undefined;
+        if (html.length > 0) buffer = decodeHTML(html);
+        if (buffer === undefined && plain.length > 0) buffer = unquote(plain);
+        if (buffer === undefined || buffer.length === 0) return;
+
+        // Paste-target anchor: current range's top-left, else sole selected column (row 0) or
+        // sole selected row (first real column), else no-op. Mirrors source's paste-target
+        // resolution (PORTING-NOTES.md, `data-editor.tsx:3646-3654`).
+        let anchorCol: number;
+        let anchorRow: number;
+        if (this.selection.current !== undefined) {
+            anchorCol = this.selection.current.range.x;
+            anchorRow = this.selection.current.range.y;
+        } else if (this.selection.columns.length > 0) {
+            anchorCol = this.selection.columns.first() ?? args.rowMarkerOffset;
+            anchorRow = 0;
+        } else if (this.selection.rows.length > 0) {
+            anchorCol = args.rowMarkerOffset;
+            anchorRow = this.selection.rows.first() ?? 0;
+        } else {
+            return;
+        }
+
+        const edits: { location: Item; value: GridCell }[] = [];
+        for (let rowOffset = 0; rowOffset < buffer.length; rowOffset++) {
+            const targetRow = anchorRow + rowOffset;
+            if (targetRow >= args.rows) break;
+            const bufRow = buffer[rowOffset];
+            if (bufRow === undefined) continue;
+            for (let colOffset = 0; colOffset < bufRow.length; colOffset++) {
+                const targetCol = anchorCol + colOffset - args.rowMarkerOffset;
+                if (targetCol < 0 || targetCol >= args.columns.length) continue;
+                const cellBuf = bufRow[colOffset];
+                if (cellBuf === undefined) continue;
+                const existing = args.getCellContent([targetCol, targetRow]);
+                if (!isReadWriteCell(existing)) continue;
+                const value = this.pasteValueIntoCell(existing, cellBuf);
+                if (value !== undefined) edits.push({ location: [targetCol, targetRow], value });
+            }
+        }
+        if (edits.length > 0) {
+            args.onCellsEdited?.(edits);
+            ev.preventDefault();
+        }
+    };
 }
