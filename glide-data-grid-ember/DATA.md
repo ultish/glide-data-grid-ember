@@ -188,6 +188,20 @@ Only relevant if profiling actually points here.
 
 ---
 
+## Status of this recommendation
+
+Honest note, so you can calibrate how much to trust the above. The **eager-read half** — that a
+tracked mutation on an in-place model object actually repaints the canvas — is browser-verified
+(`test-app/app/components/tracking-demo.gts` exists specifically to prove it, with the grid's own
+editing paths disabled so nothing else could account for the repaint).
+
+The **per-row `@cached` half** is reasoned from the same verified mechanics but has not yet been run
+at a size where the difference is measurable. Phase 8 is required to build it at ~1,000 rows with a
+recompute counter and confirm a single-field edit recomputes one row rather than all of them; this
+section gets updated with the measured result then. Nothing above is expected to change — the
+mechanism is the same one already verified — but "expected" is not "measured", and you should know
+which is which.
+
 ## Planned
 
 A `recordsSource` helper is planned (see `PHASES.md`, Phase 8) that packages exactly the pattern

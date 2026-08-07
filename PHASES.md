@@ -225,7 +225,18 @@ unproven without them):
    memoization lives in the addon layer rather than in a comment. That file currently carries a long
    "SCALING: don't copy this projection verbatim" note describing the per-row `@cached` pattern it
    deliberately does not implement — that note should shrink to a pointer once the real thing exists.
-3. **A high-frequency `updateCells()` demo** (the original Phase 8 requirement above), which is also
+3. **The test-app must actually run DATA.md's recommended pattern, and prove it is incremental.**
+   This is the point of items 1–2, stated as its own requirement so it can't be quietly skipped.
+   DATA.md tells every consumer to write the per-row `@cached` view model, but **as of Phase 6 that
+   half has only been reasoned about, never executed** — the Phase 6 tracking demo browser-proved
+   the eager-read half (a tracked mutation repaints the canvas) and explicitly did *not* implement
+   per-row memoization, because at 8 rows it would have obscured the proof. Phase 8 must close that
+   gap: build a table large enough for the difference to be real (~1,000 rows), instrument the
+   per-row projection with a recompute counter, and demonstrate in a browser that editing one field
+   recomputes **one** row rather than all of them. Until that has been run, DATA.md's central
+   recommendation is an untested claim in the addon's own consumer documentation, which is worse
+   than no recommendation. Record the measured result in PORTING-NOTES.md.
+4. **A high-frequency `updateCells()` demo** (the original Phase 8 requirement above), which is also
    what proves the O(1)-`getCellContent` contract holds under load.
 
 **Phase 9 — Backlog (deferred features, NOT part of the auto-continue sequence).** Unlike Phases
