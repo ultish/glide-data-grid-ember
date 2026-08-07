@@ -11,6 +11,27 @@ agent's effort.
 Source repo (read-only reference): `/Users/jxhui/Developer/glide-data-grid`
 Target repo (this workspace): `/Users/jxhui/Developer/glide-data-grid-ember`
 
+## Recurring bug class: check this before porting ANY new cell type
+
+**"Display field" staleness.** Several `GridCell` shapes carry a raw value field (`data`) *and* a
+separate derived/formatted display field the canvas actually draws (`displayData` on
+`TextCell`/`RowIDCell`, `displayDate` on `date-picker-cell`'s `DatePickerCell["data"]`, etc.) —
+`draw()` always reads the **display** field, never `data` directly. This exact bug — updating
+`data` but forgetting the matching display field, so a commit silently redraws the OLD value even
+though the underlying data is now correct — has been independently found and fixed **three separate
+times** by three different agents who didn't know about each other's fix: `text-cell.ts`'s
+type-to-overwrite seeding (Phase 4a), `uri-cell.ts`'s editor `onChange` (Phase 4b), and
+`date-picker-cell.ts`'s editor `onChange` *and* `onPaste` (Phase 5c). It is exactly the kind of thing
+this file exists to prevent recurring a fourth time.
+
+**Before writing `draw()`, `provideEditor`, `onPaste`, or any `activateCell`-adjacent seeding logic
+for a new cell type**: check whether that cell's data shape has a separate display/formatted field
+alongside its raw value. If it does, **every single code path that changes the raw value must also
+recompute and set the display field in the same object, in the same place** — there is no shared
+helper that does this for you (each cell kind formats its display field differently), so it has to
+be done by hand at each call site, every time. Grep the cell's own `draw()` for which field name it
+actually reads before assuming `data` is enough.
+
 **Live upstream references (user-supplied, 2026-08-07, general reference — see PHASES.md's Phase 9
 for the context this was given in)**: useful for checking the *public API surface* and *actual
 visual/interaction behavior* of a given cell/feature without reading through source `.tsx`, e.g.
