@@ -2188,6 +2188,11 @@ it as a positive signal, not a shortfall.
 
 ## Autotracking → canvas: how a consumer actually gets reactive cell updates (Phase 6 follow-up)
 
+> **Consumer-facing version of this lives in `glide-data-grid-ember/DATA.md`** — one recommended
+> pattern, copy-pasteable. This section is the *why* (mechanism, evidence, failure modes) for people
+> working on the addon. Keep the two in sync: if the mechanics below change, DATA.md is what
+> consumers actually read.
+
 **This is the single most important thing for a consumer of this addon to understand, and it is not
 obvious.** Added after the user asked, correctly, whether Phase 6's memoization could stop Ember's
 native tracking from updating a cell. It cannot — but the surrounding model has a real sharp edge

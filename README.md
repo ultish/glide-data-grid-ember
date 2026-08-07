@@ -34,6 +34,20 @@ import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 `@getCellContent` is `([col, row]) => GridCell` and is called on demand for visible cells only —
 nothing is materialized up front, which is what makes very large row counts cheap.
 
+## Feeding it data
+
+Because the grid pulls cells during paint rather than rendering them, wiring your data up has one
+rule that isn't obvious: **the tracked reads have to happen in the right place, or the grid silently
+won't update.** The most natural-looking way to write `@getCellContent` — a class-field arrow
+function that reaches into your data — never repaints, because the grid reads the function
+*reference* without calling it, so nothing it touches is registered as a dependency.
+
+**See [DATA.md](glide-data-grid-ember/DATA.md)** for the one recommended pattern (a per-row
+`@cached` view model plus a getter that reads them), which works unchanged from a handful of rows to
+hundreds of thousands. It also covers the single case that needs something different — data you
+can't hold in memory, such as paged or streamed feeds — and where to put formatting and nested-value
+extraction so it stays off the paint path.
+
 ## Theming
 
 The grid renders to a `<canvas>`, so CSS cannot style cells or headers. Instead you pass a plain

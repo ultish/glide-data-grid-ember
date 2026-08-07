@@ -66,6 +66,12 @@
 // This is deliberately NOT done here: at 8 rows it would be ceremony that obscures the one thing
 // this file exists to demonstrate. It belongs in the Phase 8 `recordsSource` layer, where it can be
 // written once instead of copied per consumer -- see PHASES.md's Phase 8 section.
+//
+// **If you are a consumer looking for what to actually write, read
+// `glide-data-grid-ember/DATA.md`, not this file.** That documents the single recommended pattern
+// (per-row `@cached` view model + a getter that reads them) which works unchanged at any size. This
+// component is a minimal *proof* that tracking reaches the canvas, deliberately stripped of
+// anything not needed for that proof -- it is not the reference implementation.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";

@@ -192,6 +192,13 @@ addon depending on any of them. (The user's own apps use `object-scan` with
 `useArraySelector: false` for this and it stays on their side of the boundary — the test-app may
 demo that pattern, but the addon's `package.json` must not gain the dependency.)
 
+**The consumer-facing contract this must satisfy is already written down**: `glide-data-grid-ember/
+DATA.md` documents the single recommended pattern (per-row `@cached` view model + a getter that
+reads them all, keyed on records-array identity) and states that it works unchanged at any size,
+with `updateCells` reserved for data that genuinely cannot be held in memory. **`recordsSource` must
+package exactly that pattern** — if the implementation diverges, DATA.md is the spec and needs
+updating in the same change, not left stale.
+
 **One genuinely new piece vs source:** a *synchronous* `recordsSource` (an in-memory array of
 records → `getCellContent`). Source only ships the async paged variant
 (`pageSize`/`maxConcurrency`, `Promise`-per-range); its consumers hand-write `getCellContent` for
