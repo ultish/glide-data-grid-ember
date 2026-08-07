@@ -77,7 +77,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 1 | Port framework-agnostic rendering engine | **Done, committed** |
 | 2 | Ember canvas host layer | **Done, browser-verified, committed** |
 | 3 | Interaction layer (selection, copy/paste, sort menu, DnD resize/reorder, hover anim) | **Done, browser-verified, committed** (3a selection+clicks, 3b keyboard nav, 3c copy/paste, 3d resize/reorder DnD) |
-| 4 | Core cell types + overlay editors | 4a done, browser-verified, committed (text/number/boolean/loading/protected/row-id + overlay editor framework). 4c done, browser-verified (bubble/drilldown, both confirmed display-only). 4b/4d pending |
+| 4 | Core cell types + overlay editors | 4a done, browser-verified, committed (text/number/boolean/loading/protected/row-id + overlay editor framework). 4b done, browser-verified (uri/markdown, `marked` dependency added). 4c done, browser-verified (bubble/drilldown, both confirmed display-only). 4d pending |
 | 5 | Extra cell types incl. sparklines | Pending |
 | 6 | Theming system | Pending |
 | 7 | Demo app matching glideapps.com + browser verification | Pending |

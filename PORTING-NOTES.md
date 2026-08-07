@@ -1111,3 +1111,166 @@ first per the "consumed via built dist" gotcha, reloaded, and confirmed both col
 styled chip pills (rounded gray backgrounds for bubble tags, bordered chips with a small icon
 square + text for drilldown), not raw/unstyled text -- zoomed screenshot confirmed chip rounding,
 tag text, and the drilldown icon all rendered correctly. No console errors.
+
+## Phase 4b — Uri/markdown cells (COMPLETE, browser-verified, 2026-08-07)
+
+**Delivered**: `src/rendering/cells/uri-cell.ts` and `src/rendering/cells/markdown-cell.ts`, both
+added as `case` branches + exports in `src/rendering/cells/index.ts` (merged alongside 4c's
+bubble/drilldown branches, which had already landed on `main` by the time this phase started --
+check `git log`/current file state before assuming you're the only phase touching this file).
+Two new small plain-DOM helpers: `src/-private/edit-icons.ts` (`createEditPencilIcon`/
+`createCheckmarkIcon`, inline-SVG ports of source's `EditPencil`/`Checkmark` from `common/
+utils.tsx`, reused by both cells' editors) and `src/-private/markdown-div.ts`
+(`createMarkdownDiv(contents, createNode?)`, port of `internal/markdown-div/markdown-div.tsx` +
+its `MarkdownContainer` styled-component, using the **`marked`** npm package -- added as a
+dependency of `glide-data-grid-ember/package.json`, pinned to `^16.1.2` matching source's version,
+actual installed version resolved to `16.4.2`). Both new cells' `provideEditor`s are plain stateful
+DOM factories (not Ember components), matching the `CellEditorProps`/`CellEditorHandle` contract
+and the established plain-DOM-editor pattern from Phase 4a's `GrowingEntry`/`text-cell.ts` -- see
+that phase's section above for the full rationale, not re-derived here.
+
+**`marked` API note**: `marked(contents, { async: false })` returns `string` synchronously (per its
+own overload set, `node_modules/.pnpm/marked@16.4.2/.../marked.d.ts:688-690`) -- source calls the
+bare `marked(contents)` form and casts `as any`; this port passes `{ async: false }` explicitly so
+TS resolves the synchronous overload without a cast, since this port's cell renderers run inside a
+synchronous canvas-draw/editor-open path with no `await` point available.
+
+**Uri-cell**: ported near-verbatim (draw/measure/`onSelect`/`onClick`/hover-link-underline math,
+`getTextRect`/`isOverLinkText`, all copied from source's `uri-cell.tsx` unchanged). Editor
+(`buildUriEditor` in `uri-cell.ts`) is a plain stateful DOM factory porting `UriOverlayEditor`
+(`internal/data-grid-overlay-editor/private/uri-overlay-editor.tsx`): toggles between a "preview"
+view (a real `<a>` link styled with `theme.linkColor`+underline, plus an edit-pencil icon) and an
+"edit" view (`GrowingEntry`, `highlight: true` always regardless of `p.isHighlighted` -- matches
+source's hardcoded `highlight={true}` on its `GrowingEntry`), swapping `container`'s children in
+place since `CellEditorHandle.element` must stay one stable node for the overlay host's lifetime.
+Both views include a decoy hidden `<textarea>` (preview mode only, mirrors source's own hidden
+`autoFocus` textarea) so the overlay host's `handle.focus()` call always has *something* real to
+focus even when showing the non-editable link preview -- without it, Escape/Enter/Tab keydowns
+wouldn't reach the host's container-level commit handler at all while in preview mode, since
+nothing would have real DOM focus. `onSelect` is ported and present on the renderer (matches
+source's contract) but is currently **dead code**: `GridHostController`'s click dispatch only wires
+`renderer.onClick`, not `onSelect` (a pre-existing gap noted in Phase 4a's own comment at
+`grid-host-controller.ts` -- not something this phase introduced or was in scope to fix). Practical
+effect: clicking directly on the link text in a `hoverEffect`+`onClickUri` cell both fires
+`onClickUri` (via `onClick`) AND changes/activates selection normally (source's `onSelect`
+`preventDefault()` would suppress that second effect) -- a minor, pre-existing behavioral gap, not
+a Phase 4b regression.
+
+**Markdown-cell**: `draw` renders the **raw markdown source text** on the canvas (`drawTextCell(a,
+a.cell.data, ...)`, verbatim from source) -- the canvas view is *never* rendered as HTML, only the
+overlay's own preview mode is. Editor (`buildMarkdownEditor` in `markdown-cell.ts`) ports
+`MarkdownOverlayEditor` (`internal/data-grid-overlay-editor/private/markdown-overlay-editor.tsx`)
+as the same preview/edit toggle pattern as uri-cell:
+- **Preview mode** (default unless `data === ""`): `createMarkdownDiv(currentValue.data)` rendered
+  HTML (headings/bold/italic/lists/links all genuinely styled, confirmed visually in browser
+  testing, not raw `**bold**` text) + a spacer + an edit-pencil icon (hidden if `readonly`) + the
+  same decoy-focus-textarea pattern as uri-cell, same rationale.
+- **Edit mode**: `GrowingEntry` (`highlight: false`, matches source) + a checkmark icon.
+  `GrowingEntry`'s `onKeyDown` is set to `ev => { if (ev.key === "Enter") ev.stopPropagation(); }`
+  -- **this is load-bearing, not cosmetic**: without it, every Enter keystroke (needed constantly
+  for real multi-line markdown authoring -- headings/paragraphs/lists all need blank-line
+  separators) would bubble to the overlay host's container-level keydown handler and prematurely
+  commit-and-close the editor after the very first line. Verified via browser testing: typing a
+  multi-line value with real Enter keystrokes correctly stayed in the editor and produced the full
+  multi-line string.
+- **Real interaction nuance, confirmed by reading source closely rather than assuming from the
+  task's informal description**: the checkmark icon's `onClick` in source is `() => onFinish(value)`
+  -- it does **not** toggle back to preview mode within a still-open overlay. It calls the overlay's
+  own finish/commit callback directly: commits the edit **and closes the whole overlay** in one
+  step (the cell then redraws the raw new markdown source on the canvas, per `draw` above). Ported
+  faithfully: the checkmark button calls `p.onFinishedEditing(currentValue)` directly, not a
+  mode-toggle. (The edit-pencil's toggle, by contrast, really is just a local DOM swap with no
+  commit -- `p.onChange`/`p.onFinishedEditing` are not called by clicking it.)
+- Initial mode seeding simplification vs source: source's `editMode = markdown === "" ||
+  forceEditMode`. This port's `CellEditorProps` (Phase 4a's contract) has no `forceEditMode` field,
+  so `editMode` here is seeded from `data === ""` alone -- matches source's overwhelmingly common
+  case (nothing in this port's activation path produces an equivalent of `forceEditMode` yet).
+
+**Real bug found via browser testing (not caught by tsc/build) -- fixed, same class as Phase 4a's
+`displayData`-staleness bug**: `UriCell.draw` reads `cell.displayData ?? cell.data` (verbatim from
+source), so a cell that sets `displayData` (a realistic case -- e.g. showing a friendly label over
+a raw URL; the test-app demo deliberately exercises this) kept showing the **old** `displayData`
+after committing an edit, even though `data` updated correctly underneath and the edit genuinely
+persisted in the consumer's data store -- reproduced by editing a uri cell, committing, and seeing
+the pre-edit text still rendered. Root cause: this port's `buildUriEditor`'s `GrowingEntry.onChange`
+(ported from source's `onChange={e => onChange({...value, data: e.target.value})}`) only ever set
+`data`, never `displayData`, exactly mirroring source's own equivalent staleness gap that Phase 4a
+already found and fixed for `text-cell.ts`. **Fixed** by keeping both fields in sync on every
+keystroke (`onChange: value => p.onChange({ ...p.value, data: value, displayData: value })`) and in
+`onDelete`. Debugging method worth recording: added temporary `console.log`s directly into
+`grid-host-controller.ts`'s `openOverlay`/keydown-commit paths, confirmed `state.currentCell` and
+the value handed to `commitCellEdit` were both already correct at commit time -- proving the bug
+was purely a stale-`displayData`-wins-at-draw-time rendering issue, not a lost/misapplied edit. This
+narrowed the search dramatically versus guessing; worth doing again for any "edit doesn't seem to
+stick" symptom before assuming the commit pipeline itself is broken.
+
+**Second real bug found via browser testing (reported by the user mid-session, not initially
+caught)**: the overlay host's positioned container (`grid-host-controller.ts`'s `openOverlay`) set
+a **fixed** `height`/`width` (both pinned to `cellRect`'s exact dimensions) with `overflow:
+"visible"`. Any editor/preview content taller or wider than the cell itself -- routine for markdown
+(multi-line source, or a rendered preview with a heading + paragraph + list) -- spilled out past the
+container's own edges into the surrounding grid area, which has **no** `theme.bgCell` background,
+reading visually as "text floating transparently over the next row/column" rather than a properly
+contained popup. **Root cause was a straightforward literal-fixed-size layout, not a logic bug** --
+source's real equivalent (`internal/data-grid-overlay-editor/data-grid-overlay-editor-style.tsx`)
+never pins an exact size at all: `min-width`/`min-height` (floor at the cell's own size) +
+`width: max-content`/`max-width: 400px` + `max-height: calc(100vh - top - 10px)`, i.e. the popup
+is *meant* to grow to fit its content in both dimensions, capped at the viewport. **Fixed** to match
+source's semantics (using plain `minWidth`/`width: "max-content"`/`maxWidth: "400px"`/`minHeight`/
+`maxHeight: calc(100vh - ${cellRect.y}px - 10px)`/`overflow: "auto"` instead of the fixed
+`width`/`height`/`overflow: visible`) -- this is shared overlay-host infrastructure (not specific to
+uri/markdown), so it also improves every other Phase-4a-and-later cell's editor for free; re-tested
+text-cell/number-cell/uri-cell after the change to confirm no regression (single-line editors still
+render at exactly their normal column width/row height, since `minWidth`/`minHeight` act as a floor
+and short content's own max-content size never exceeds them). **One thing to know before touching
+this again**: several of this port's editor internals (`GrowingEntry`'s own outer `<div>`, the
+markdown/uri editors' flex-row containers) rely on `width: 100%`/`flex-grow` for their *own*
+children to fill available space -- percentage widths against a `width: max-content`-sized ancestor
+are a real CSS footgun (per spec they can resolve as if unspecified, collapsing the child) if that
+ancestor itself has a percentage-sized child rather than an intrinsically-sized one. This didn't
+bite here because none of the *outer* editor-factory containers (`GrowingEntry.element`, `uri-cell`/
+`markdown-cell`'s own wrapping `container` divs) use percentage widths on themselves, only their
+*inner* children do -- verified empirically in-browser (checked `getBoundingClientRect()` widths
+were non-zero/reasonable, not collapsed) after making the change, not just assumed safe from reading
+the CSS spec. If a future editor's outer element ever uses a percentage width on itself, re-verify
+this doesn't silently collapse it.
+
+**Demo wiring** (`test-app/app/utils/demo-data.ts`): column 3 = uri cell (`hoverEffect: true`,
+`displayData` set to the same URL, deliberately **no** `onClickUri` handler -- see the inline
+comment explaining why: setting one makes a real in-bounds click on the link text short-circuit to
+`window.open(...)`, which would spawn a real new browser tab during automated click-testing; the
+renderer's click-to-open affordance is still fully implemented and works for any real consumer that
+supplies the callback, just not exercised by this demo). Column 4 = markdown cell, 3 sample
+values cycling by row (`# Heading` + bold/italic, `**Bold row**` + a link + a bullet list, `##`
+sub-heading) -- chosen to exercise headings/bold/italic/links/lists in one small rotation. Used
+columns 3/4 (not 6/7, which Phase 4c had already claimed by the time this phase ran, or the
+task-prompt's suggested "4/5" -- checked the file's actual current state before picking columns
+rather than assuming either the prompt or an unverified prior plan was still accurate).
+
+**Verification**: `npx tsc --noEmit -p tsconfig.json` clean, `pnpm --filter glide-data-grid-ember
+build` (rollup) succeeds, `pnpm --filter test-app exec vite build` succeeds (426 modules, no new
+errors). **Browser-verified** on a dedicated dev server (port 4201 -- port 4200 was already in use
+by another concurrent agent's session; always `lsof -i :4200` before assuming you can use it,
+same lesson 4c already recorded): uri column renders link-colored text, click-then-click opens the
+preview/edit-pencil-toggle editor, double-click (real native dblclick, not two `left_click`s) also
+correctly activates on a not-yet-selected cell, typing + Enter commits and the canvas re-renders the
+new value, Escape cancels. Markdown column renders genuinely-styled HTML in preview mode (confirmed
+headings/bold/italic/links/lists, not raw `**` text), edit-pencil toggles to a `GrowingEntry` with
+real multi-line Enter support, checkmark commits+closes in one step and the canvas then shows the
+new raw markdown source. No console errors at any point. **Testing methodology note**: real
+`computer`-tool clicks reliably open/select/activate cells (consistent with Phase 4a's finding), but
+small in-editor icon buttons (edit-pencil/checkmark) were more reliably clicked via a
+`javascript_tool` script dispatching `mousedown`/`mouseup`/`click` directly on the DOM element found
+via `querySelector` than via pixel-coordinate `computer`-tool clicks -- screenshot-space-to-CSS-px
+coordinate translation for small (~24px) targets proved error-prone/inconsistent in this session
+(get the real element and dispatch on it instead of eyeballing pixel coordinates for anything
+smaller than roughly a full grid cell).
+
+**What 4d should know**: the overlay-host container sizing fix above (`minWidth`/`width:
+max-content`/`maxWidth`/`minHeight`/`maxHeight`/`overflow: auto` in `grid-host-controller.ts`'s
+`openOverlay`) is now shared infrastructure any new editor (image-cell's editor, when 4d builds it)
+gets for free -- no further action needed unless image-cell's editor has unusual sizing needs.
+`onSelect` is still not wired into click dispatch (noted above) -- if image-cell's `provideEditor`
+or any future renderer needs `onSelect`'s `preventDefault()`-suppresses-selection behavior, that
+gap will need to be closed in `grid-host-controller.ts`'s `dispatchCellMouseDown`, not assumed to
+already work.

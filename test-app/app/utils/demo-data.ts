@@ -26,9 +26,18 @@ const BUBBLE_TAGS = ["urgent", "bug", "feature", "design", "backend", "frontend"
 const DRILLDOWN_ICON =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR42mNk+M9QzzCAgHFgYBQMYQAA4WkBH8fY6WkAAAAASUVORK5CYII=";
 
+// Phase 4b sample content for the markdown column -- exercises headings, bold/italic, and a list
+// so the rendered-HTML preview (vs. the raw-text canvas draw) is visually obvious in the browser.
+const MARKDOWN_SAMPLES = [
+    "# Heading\n\nSome **bold** and _italic_ text.",
+    "**Bold row** with a [link](https://example.com).\n\n- one\n- two",
+    "## Row note\n\nJust a *simple* paragraph.",
+] as const;
+
 // Phase 4a: varies cell kind by column so text/number/boolean/row-id editing can all be exercised
-// in the browser -- col 0 is a row-id (readonly), col 1 a number, col 2 a boolean. Phase 4c adds
-// col 6 (bubble, display-only chip list of 2-4 tags) and col 7 (drilldown, display-only chips, one
+// in the browser -- col 0 is a row-id (readonly), col 1 a number, col 2 a boolean. Phase 4b adds
+// col 3 (uri, editable link) and col 4 (markdown, editable + rendered preview). Phase 4c adds col 6
+// (bubble, display-only chip list of 2-4 tags) and col 7 (drilldown, display-only chips, one
 // carrying a small icon). Everything else falls through to plain editable text.
 export function demoGetCellContent(item: Item): GridCell {
     const [col, row] = item;
@@ -55,6 +64,32 @@ export function demoGetCellContent(item: Item): GridCell {
             kind: GridCellKind.Boolean,
             data: row % 2 === 0,
             allowOverlay: false,
+        };
+    }
+
+    if (col === 3) {
+        // `hoverEffect: true` alone is enough to exercise the link-colored/underline-on-hover
+        // rendering and the editor open/commit path. Deliberately no `onClickUri` handler: setting
+        // one makes a real in-bounds click on the link text short-circuit to `window.open(...)`
+        // (see `uri-cell.ts`'s `onClick`/`isOverLinkText`) instead of the normal select/activate
+        // flow, which would spawn a real new browser tab during automated click-testing -- not
+        // worth the risk for a demo. The renderer's click-to-open affordance is still fully
+        // implemented and would work for any real consumer that supplies `onClickUri`.
+        const uri = `https://example.com/items/${row}`;
+        return {
+            kind: GridCellKind.Uri,
+            data: uri,
+            displayData: uri,
+            hoverEffect: true,
+            allowOverlay: true,
+        };
+    }
+
+    if (col === 4) {
+        return {
+            kind: GridCellKind.Markdown,
+            data: MARKDOWN_SAMPLES[row % MARKDOWN_SAMPLES.length]!,
+            allowOverlay: true,
         };
     }
 

@@ -52,7 +52,8 @@
     "canvas-hypertxt": "^1.0.3",
     "decorator-transforms": "^2.2.2",
     "ember-modifier": "^4.3.0",
-    "lodash": "^4.17.19"
+    "lodash": "^4.17.19",
+    "marked": "^16.1.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

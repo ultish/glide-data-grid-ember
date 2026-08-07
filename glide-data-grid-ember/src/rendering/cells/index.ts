@@ -4,12 +4,12 @@
 // is generic over the specific cell type per call, so a cast is unavoidable inside a dispatcher
 // that switches at runtime).
 //
-// Scope: text/number/boolean/loading/protected/row-id (Phase 4a) plus bubble/drilldown (Phase 4c).
-// Every other `GridCellKind` (uri/markdown/image/custom) returns `undefined` here, same as an
-// unregistered kind always has -- the render engine already handles that gracefully (draws an
-// empty cell), and `GridHostController`'s edit/paste/delete paths already have a non-renderer-backed
-// fallback for exactly this reason. Later sub-phases (4b/4d, see PORTING-NOTES.md) add more `case`
-// branches here, nothing else needs to change.
+// Scope: text/number/boolean/loading/protected/row-id (Phase 4a), uri/markdown (Phase 4b), plus
+// bubble/drilldown (Phase 4c). Every other `GridCellKind` (image/custom) returns `undefined` here,
+// same as an unregistered kind always has -- the render engine already handles that gracefully
+// (draws an empty cell), and `GridHostController`'s edit/paste/delete paths already have a
+// non-renderer-backed fallback for exactly this reason. Later sub-phases (4d, see PORTING-NOTES.md)
+// add more `case` branches here, nothing else needs to change.
 import { GridCellKind, type InnerGridCell } from "../data-grid-types.ts";
 import type { CellRenderer, GetCellRendererCallback } from "../cell-types.ts";
 import { textCellRenderer } from "./text-cell.ts";
@@ -18,6 +18,8 @@ import { booleanCellRenderer } from "./boolean-cell.ts";
 import { loadingCellRenderer } from "./loading-cell.ts";
 import { protectedCellRenderer } from "./protected-cell.ts";
 import { rowIDCellRenderer } from "./row-id-cell.ts";
+import { uriCellRenderer } from "./uri-cell.ts";
+import { markdownCellRenderer } from "./markdown-cell.ts";
 import { bubbleCellRenderer } from "./bubble-cell.ts";
 import { drilldownCellRenderer } from "./drilldown-cell.ts";
 
@@ -27,6 +29,8 @@ export { booleanCellRenderer, toggleBoolean } from "./boolean-cell.ts";
 export { loadingCellRenderer } from "./loading-cell.ts";
 export { protectedCellRenderer } from "./protected-cell.ts";
 export { rowIDCellRenderer } from "./row-id-cell.ts";
+export { uriCellRenderer } from "./uri-cell.ts";
+export { markdownCellRenderer } from "./markdown-cell.ts";
 export { bubbleCellRenderer } from "./bubble-cell.ts";
 export { drilldownCellRenderer } from "./drilldown-cell.ts";
 
@@ -44,6 +48,10 @@ export const getCellRenderer: GetCellRendererCallback = <T extends InnerGridCell
             return protectedCellRenderer as unknown as CellRenderer<T>;
         case GridCellKind.RowID:
             return rowIDCellRenderer as unknown as CellRenderer<T>;
+        case GridCellKind.Uri:
+            return uriCellRenderer as unknown as CellRenderer<T>;
+        case GridCellKind.Markdown:
+            return markdownCellRenderer as unknown as CellRenderer<T>;
         case GridCellKind.Bubble:
             return bubbleCellRenderer as unknown as CellRenderer<T>;
         case GridCellKind.Drilldown:

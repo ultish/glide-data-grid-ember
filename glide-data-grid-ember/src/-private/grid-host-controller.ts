@@ -1829,14 +1829,26 @@ export class GridHostController {
             position: "absolute",
             left: `${cellRect.x}px`,
             top: `${cellRect.y}px`,
-            width: `${cellRect.width}px`,
-            height: `${cellRect.height}px`,
+            minWidth: `${cellRect.width}px`,
+            width: "max-content",
+            maxWidth: "400px",
+            // Deliberately `minHeight`, not a fixed `height` (a real bug found via browser testing
+            // of Phase 4b's markdown editor, whose content is routinely taller than one row): a
+            // fixed height + `overflow: visible` let multi-line editor/preview content spill out
+            // past this container's own bottom edge, into the area below where there is no `theme
+            // .bgCell` background -- the overflow visually reads as "text floating transparently
+            // over the next row" rather than a properly-sized editor box. `minHeight` lets the
+            // container grow to fit its content (mirrors source's `min-height`/`max-height`
+            // approach, `internal/data-grid-overlay-editor/data-grid-overlay-editor-style.tsx`);
+            // `maxHeight` + `overflow: auto` caps growth at the visible viewport instead of letting
+            // a very long value push the box off-screen, scrolling internally past that point.
             minHeight: `${cellRect.height}px`,
+            maxHeight: `calc(100vh - ${cellRect.y}px - 10px)`,
             boxSizing: "border-box",
             background: theme.bgCell,
             border: `2px solid ${theme.accentColor}`,
             zIndex: "20",
-            overflow: "visible",
+            overflow: "auto",
             padding: disablePadding ? "0" : `${theme.cellVerticalPadding}px ${theme.cellHorizontalPadding}px`,
         } satisfies Partial<CSSStyleDeclaration>);
 
