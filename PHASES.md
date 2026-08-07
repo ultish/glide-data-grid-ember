@@ -204,6 +204,23 @@ table recomputes one row, not all of them, instead of the naive whole-table resc
 `getCellContent` an O(1) lookup regardless: it is called per painted cell inside the draw loop
 (`render/data-grid-render.cells.ts:220`), so any real work there lands on the paint path.
 
+**Required test-app deliverables for this phase** (not optional extras — the data-source layer is
+unproven without them):
+1. **An `object-scan` worked example**, demonstrating the intended consumer-side boundary: nested
+   GQL-shaped records (an array of related entities per row, e.g. `person.pets.name`) flattened via
+   `objectScan([path], { useArraySelector: false, rtn: "value" })` into a `toCell`/`value` accessor
+   that the grid consumes. Add `object-scan` to **`test-app/package.json` only** — adding it to the
+   addon is explicitly forbidden above. Hoist the compiled scanner per column (one `objectScan(...)`
+   call per column, reused across rows) rather than rebuilding it per cell; that is the single
+   biggest cost in the naive form. This example is what makes the "accessor function, not path
+   string" contract concrete for anyone reading the addon cold.
+2. **Rewire `tracking-demo.gts` onto `recordsSource`** once it exists, so the per-row `@cached`
+   memoization lives in the addon layer rather than in a comment. That file currently carries a long
+   "SCALING: don't copy this projection verbatim" note describing the per-row `@cached` pattern it
+   deliberately does not implement — that note should shrink to a pointer once the real thing exists.
+3. **A high-frequency `updateCells()` demo** (the original Phase 8 requirement above), which is also
+   what proves the O(1)-`getCellContent` contract holds under load.
+
 **Phase 9 — Backlog (deferred features, NOT part of the auto-continue sequence).** Unlike Phases
 0–8, this is not something to pick up automatically when the prior phase finishes — it exists so
 the real, accumulated list of "known gaps vs source" lives in one auditable place instead of being

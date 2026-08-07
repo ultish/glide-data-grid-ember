@@ -40,6 +40,32 @@
 // what a form-backed editing table is. For the 200k-row virtualized case, keep the lazy class-field
 // form and drive updates with the imperative `updateCells()` API instead (that is the documented
 // dual-path model in PHASES.md, and it is why `<DemoGrid>` is written the other way).
+//
+// ---------------------------------------------------------------------------------------------
+// SCALING: don't copy this projection verbatim past a few hundred rows
+// ---------------------------------------------------------------------------------------------
+// The snapshot below is a plain `.map()` over every record, which is honest at 8 rows and wrong at
+// 1,000: autotracking invalidation is all-or-nothing at the granularity of the computation, so
+// changing ONE field re-runs the whole projection and re-derives every cell of every row.
+//
+// The middle ground (1k-50k rows) is a per-row `@cached` view model -- one object per record whose
+// getter reads only that record's tracked fields:
+//
+//     class PersonRow {
+//         constructor(readonly person: Person) {}
+//         @cached get cells() { return [this.person.name, this.person.email /* ... */]; }
+//     }
+//     @cached get rowVMs() { return this.store.all.map(p => new PersonRow(p)); }  // stable
+//     get flatRows() { return this.rowVMs.map(r => r.cells); }                    // eager read
+//
+// Editing one field then invalidates exactly one row's cache: the outer `.map()` still runs, but
+// it is 999 cache hits plus 1 real recompute rather than 1,000 recomputes. The load-bearing detail
+// is that `rowVMs` must be keyed on the *records array* identity -- if it is rebuilt when a field
+// changes, every `@cached` resets and you are back to full recomputation with extra steps.
+//
+// This is deliberately NOT done here: at 8 rows it would be ceremony that obscures the one thing
+// this file exists to demonstrate. It belongs in the Phase 8 `recordsSource` layer, where it can be
+// written once instead of copied per consumer -- see PHASES.md's Phase 8 section.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
