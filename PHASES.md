@@ -78,10 +78,11 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 2 | Ember canvas host layer | **Done, browser-verified, committed** |
 | 3 | Interaction layer (selection, copy/paste, sort menu, DnD resize/reorder, hover anim) | **Done, browser-verified, committed** (3a selection+clicks, 3b keyboard nav, 3c copy/paste, 3d resize/reorder DnD) |
 | 4 | Core cell types + overlay editors | **Done, browser-verified, committed** (4a text/number/boolean/loading/protected/row-id + overlay editor framework; 4b uri/markdown, `marked` dependency added; 4c bubble/drilldown, both confirmed display-only; 4d image cell + trailing blank row/"add row" affordance, including a real `activateCell` overlay-gating bugfix surfaced by image-cell) |
-| 5 | Extra cell types incl. sparklines | Pending |
+| 5 | Extra cell types incl. sparklines | In progress (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator: **done, browser-verified**; 5b tags/dropdown/multi-select/links and 5c date-picker/button/tree-view/user-profile/article: see PORTING-NOTES.md for their own status if not reflected here yet) |
 | 6 | Theming system | Pending |
 | 7 | Demo app matching glideapps.com + browser verification | Pending |
 | 8 | Async/streaming data + real-time updates demo | Pending |
+| 9 | Backlog — deferred features (**not auto-scheduled**, see detail below) | Not scheduled |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
 in a fresh session, this table is the source of truth; recreate the tracked tasks from it if
@@ -146,6 +147,55 @@ large dataset. Don't claim "done" on this phase without actually driving it in a
 an Ember-idiomatic equivalent) and build a demo exercising `GridHostController.updateCells()` at
 high frequency, matching the source's "hundreds of thousands of updates per second" claim and its
 `docs/04-streaming-data.stories.tsx`/`rapid-updates.stories.tsx` examples.
+
+**Phase 9 — Backlog (deferred features, NOT part of the auto-continue sequence).** Unlike Phases
+0–8, this is not something to pick up automatically when the prior phase finishes — it exists so
+the real, accumulated list of "known gaps vs source" lives in one auditable place instead of being
+scattered across code comments and `PORTING-NOTES.md`, where it's easy to silently lose track of.
+Work on any of these only when explicitly asked. Audited against `PORTING-NOTES.md` on 2026-08-07
+(user asked "is there a lot still not ported?" — this list is the honest answer, not a reassurance).
+
+*Interaction/selection:*
+- **Row reordering** (dragging rows via the row-marker column) — column resize/reorder landed in
+  Phase 3d, row reorder did not (`onRowMoved` isn't ported at all).
+- **Fill-handle drag-to-fill** — `DEFAULT_FILL_HANDLE` exists as ported static data, but the actual
+  drag-to-replicate-values interaction was never built.
+- **Controlled-selection mode** — `GridHostController` always owns `selection` internally; there's
+  no `GridHostArgs.selection` prop for a consumer to pass in/manage it externally.
+- **Span/merged-cell selection growth** (`expandSelection`) — not ported; no cell type uses
+  `GridCell.span` yet so there was nothing to exercise it against.
+- **`onSelect` renderer hook** — cell renderers can't intercept/suppress a click's selection
+  (`onClick` is wired, `onSelect` is not).
+- **Keybinding remapping** — only the hardcoded default keybindings work; source's remappable
+  string-based `ConfigurableKeybinds` DSL isn't ported.
+- Assorted nav variants: Tab/Shift+Tab aliasing, alt+Arrow "free move," primary+shift jump-to-edge
+  selection, row/column space-bar select shortcuts.
+
+*Rendering:*
+- **Column/row grouping** — `ENABLE_GROUPS` is hardcoded `false` throughout; group headers don't
+  render even though `groupHeaderHeight` is accepted as a prop.
+- **Real column auto-sizing** — auto-width columns get a fixed fallback width
+  (`DEFAULT_AUTO_COLUMN_WIDTH`), not source's actual text-measurement-based auto-sizing.
+
+*Sort* — still just `onHeaderMenuClick`'s hit-test + callback (Phase 3). No menu UI, no sort state,
+no sort logic anywhere. This was in the **original explicit requirements list** and is currently the
+single biggest gap between "what was asked for" and "what exists" — Phase 7 is where this is
+supposed to land (building the demo's header-click menu), don't let it slip further.
+
+*Architecture / extensibility:*
+- **`renderComponent`-based cell editors** — editors are currently hand-built DOM factories
+  (`CellEditorProps` → `{element, focus(), destroy()}`), not real `.gts` components, because
+  `GridHostController` has zero Ember context (no `owner`) by design. `@ember/renderer`'s
+  `renderComponent(Component, {into, owner, args})` (confirmed present in this project's pinned
+  `ember-source@6.12.0`, synchronous, returns `{destroy()}`) is a viable alternative that would let
+  per-cell editors be genuine templated components instead — worth revisiting specifically if/when
+  this addon exposes a public "bring your own cell type" API, where forcing consumers to hand-write
+  DOM would be a real DX regression vs. source's `provideEditor: () => <Component />` pattern. Not
+  worth the `owner`-threading migration for the cells already built on the current contract.
+
+Known-and-already-scheduled (restated here only so this list is a complete picture, not because
+they're forgotten): theming consumer API (Phase 6), the actual grid.glideapps.com demo replication
++ 6 feature cards (Phase 7), async/streaming real-time-updates demo (Phase 8).
 
 ## How to resume cold (fresh session, no memory of this conversation)
 

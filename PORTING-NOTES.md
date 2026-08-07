@@ -11,6 +11,16 @@ agent's effort.
 Source repo (read-only reference): `/Users/jxhui/Developer/glide-data-grid`
 Target repo (this workspace): `/Users/jxhui/Developer/glide-data-grid-ember`
 
+**Live upstream references (user-supplied, 2026-08-07, general reference — see PHASES.md's Phase 9
+for the context this was given in)**: useful for checking the *public API surface* and *actual
+visual/interaction behavior* of a given cell/feature without reading through source `.tsx`, e.g.
+when verifying a Phase 5/6 port looks/behaves right or resolving an ambiguity source's code alone
+doesn't answer. Not the Phase 7 demo target itself — that's specifically the front page at
+https://grid.glideapps.com/ (fancy example grid + 6 feature cards), already documented in
+`PHASES.md`'s original-requirements section; don't conflate the two.
+- API docs: https://docs.grid.glideapps.com/api
+- Storybook (interactive, every cell type + feature has a live story): https://glideapps.github.io/glide-data-grid/
+
 ## Workspace layout
 
 pnpm workspace. `glide-data-grid-ember/` = the v2 addon (TypeScript, `.gts`-ready, builds via
@@ -1440,3 +1450,182 @@ screenshot showing the last real row highlighted and the "Add row" row directly 
 highlighted); a normal cell click-select-activate-edit-Cmd+A-retype-Enter-commit cycle on an
 unrelated text column (column 9) still works and correctly moves the selection down one row after
 commit. No console errors at any point in this session.
+
+## Phase 5 — Extra cell types + sparklines (research, 2026-08-07)
+
+**Different source package, different registration pattern than Phase 4.** Phase 4's cells live in
+`packages/core/src/cells/*.tsx` and register as built-in `GridCellKind` variants
+(`InternalCellRenderer<T>`, dispatched by a `switch (cell.kind)`). Phase 5's cells live in a
+**separate source package**, `packages/cells/src/cells/*.tsx` (14 files: `article-cell`,
+`button-cell`, `date-picker-cell`, `dropdown-cell`, `links-cell`, `multi-select-cell`, `range-cell`,
+`sparkline-cell`, `spinner-cell`, `star-cell`, `tags-cell`, `tree-view-cell`, `user-profile-cell` —
+13 renderers, `article-cell` splits its type into a separate `article-cell-types.ts`), and every one
+of them is a **`CustomRenderer<T>`** (`kind: GridCellKind.Custom`, an `isMatch: (cell: CustomCell) =>
+cell is T` predicate, `CustomCell<Props>` data shape with a `kind: "some-string-id"` discriminant
+inside `data`) — **not** a new `GridCellKind` enum member. This is source's actual, intentional
+"extension" mechanism: `packages/core`'s own `getCellRenderer` (`data-editor.tsx:1112`) does
+`additionalRenderers?.find(x => x.isMatch(cell))` as a fallback after checking built-in kinds, where
+`additionalRenderers` comes from a consumer-supplied `DataEditorProps.customRenderers?: readonly
+CustomRenderer<any>[]` prop — `packages/cells`' `index.ts` exports exactly this: an `allCells` array
+of all 13 renderers, meant to be passed straight into that prop.
+
+**Port implication — good news, near-zero `GridHostController` changes needed.** Unlike Phase 4d's
+trailing-row work, this port's `getCellRenderer` was already a fully consumer-suppliable plain
+function (`GridHostArgs.getCellRenderer`, existing since Phase 2/4a) — there's no `customRenderers`
+array + built-in-merge machinery to port, because this port never had the built-in/custom split
+source has in the first place (the Phase 4a-4d registry is just one function). So Phase 5 needs:
+(1) port each cell as a `CustomRenderer<CustomCell<Props>>` (same `InternalCellRenderer`-adjacent
+shape already in `src/rendering/cell-types.ts` from Phase 1 -- `CustomRenderer`/`CustomCell` are
+already-ported types, verify but don't re-derive), (2) a small combinator helper --
+e.g. `createCombinedCellRenderer(base: GetCellRendererCallback, extras: readonly CustomRenderer<any>[]):
+GetCellRendererCallback` that tries `base(cell)` first, then `extras.find(r => r.isMatch(cell))` --
+exported from wherever these land (e.g. `src/rendering/extra-cells/index.ts`), (3) wire the demo app
+to build its `getCellRenderer` via this combinator instead of using the Phase 4 registry directly.
+**No `GridHostController` source changes are anticipated for this phase** -- if a subagent finds one
+is actually needed, that's a real finding to document, not something to assume upfront.
+
+**Heavier dependencies in source's `packages/cells/package.json` -- do NOT port these, simplify
+instead, matching the markdown-cell/Phase-4b precedent (which correctly skipped ProseMirror for a
+plain textarea + `marked`)**:
+- `@toast-ui/editor`/`@toast-ui/react-editor` -- used by `article-cell`'s editor for full WYSIWYG
+  rich-text editing. Port `article-cell`'s **draw** function faithfully, but give its editor a plain
+  `GrowingEntry`-based textarea (same pattern as `text-cell`/`markdown-cell`), not a toast-ui port --
+  this is squarely the same class of simplification already established and accepted in this
+  project, don't re-litigate it, just apply it.
+- `react-select` -- likely used by `dropdown-cell`/`multi-select-cell`'s editors for a searchable/
+  multi-select dropdown UI. Simplify to a plain native `<select>` (single) / a set of checkboxes or
+  a multi-`<select>` (multi) via plain DOM, no dependency -- same reasoning as above.
+- `@linaria/react` -- a CSS-in-JS styling lib used throughout `packages/cells` for component
+  styling; irrelevant to a port that already uses inline `style` object assignment throughout
+  (`GrowingEntry`, `markdown-div.ts`, etc.) -- ignore entirely, use the same inline-style pattern.
+
+**Priority**: `sparkline-cell` is an explicit user requirement (the "📈 Inline charts (sparklines)"
+feature card from grid.glideapps.com, called out in the original request) -- prioritize porting it
+correctly and browser-verifying it looks like a real inline chart (line/bar/area graph rendering
+from a `values: readonly number[]` array) over the other 12, which are "nice to have full parity"
+but not individually named requirements. If time/budget pressure forces a cut, sparkline must not be
+the cut.
+
+**Suggested sub-phase split** (mirrors Phase 4's a/b/c/d pattern -- independent files, safe to
+parallelize):
+- **5a — sparkline + star + range + spinner**: drawing-focused cells, simple or no editors (`star`
+  is a click-to-set-rating control much like boolean's click-toggle pattern; `range` is a numeric
+  slider; `spinner` is a loading-indicator, likely no editor at all, similar to Phase 4a's
+  `loading-cell`). Do the combinator helper here too, since sparkline needs it to be usable at all.
+- **5b — tags + dropdown + multi-select + links**: list/selection-style editors (`tags` similar
+  to `bubble-cell`'s display but editable; `dropdown`/`multi-select` need the `react-select`
+  simplification above; `links` is a list of clickable URLs, similar to a multi-value `uri-cell`).
+- **5c — date-picker + button + tree-view + user-profile + article**: the remaining, more bespoke
+  ones. `date-picker` likely needs a native `<input type="date">` (check source first -- don't
+  assume). `button` is a clickable in-cell action trigger. `tree-view` has expand/collapse state per
+  row (check how it stores that -- likely in the cell's own `data`, since this port has no separate
+  per-row UI state store anywhere). `user-profile` is likely draw-only (avatar + name), no editor.
+  `article` gets the toast-ui simplification above.
+
+Each sub-phase should register its cells in a shared `src/rendering/extra-cells/index.ts` (or
+similar -- whoever runs first establishes the file, later ones extend it, same coordination approach
+that worked for Phase 4b/4c's `cells/index.ts` when running concurrently) and extend the demo app
+with at least one column per new cell type so everything is browser-testable end to end.
+
+## Phase 5a — sparkline/star/range/spinner + the extra-cells combinator (COMPLETE, browser-verified)
+
+**Delivered**: `src/rendering/extra-cells/{sparkline,star,range,spinner}-cell.ts` (each a
+`CustomRenderer<CustomCell<Props>>`) + `src/rendering/extra-cells/index.ts` establishing
+`allExtraCells`/`createCombinedCellRenderer` (the shared Phase 5 combinator infra described in the
+research section above -- ran concurrently with 5b/5c, which extended the same `index.ts`, see
+"Concurrent-editing note" below). `createCombinedCellRenderer`'s final, settled API (5b/5c/anything
+downstream should treat this as ground truth, matches what was asked for exactly):
+```ts
+export function createCombinedCellRenderer(
+    base: GetCellRendererCallback,
+    extras: readonly CustomRenderer<any>[]
+): GetCellRendererCallback
+```
+Tries `base(cell)` first; if `undefined` and `cell.kind === GridCellKind.Custom`, falls back to
+`extras.find(r => r.isMatch(cell))`. Also added `createCombinedCellRenderer`/`allExtraCells` to the
+top-level `src/rendering/index.ts` barrel (right after the existing `getCellRenderer` export), so
+consumers don't need a deep import into `extra-cells/`.
+
+**Demo wiring** (`test-app/app/components/demo-grid.gts`): this is the **first time** `<GlideDataGrid>`
+was given an explicit `@getCellRenderer`, built once at module scope as
+`createCombinedCellRenderer(defaultGetCellRenderer, allExtraCells)` (where `defaultGetCellRenderer`
+is Phase 4's `getCellRenderer`). Demo columns 8-11 (`test-app/app/utils/demo-data.ts`) exercise
+sparkline/star/range/spinner respectively -- re-check current column indices before adding more in
+a later phase, 5b/5c added columns 12+ concurrently in the same file (tags/dropdown/multi-select/
+links, then date-picker/button/tree-view/user-profile/article).
+
+**Per-cell notes**:
+- **`sparkline-cell`** (the priority cell, see research section above) -- `draw()` ported verbatim:
+  line (quadratic-curve smoothed)/bar/area modes, zero-line, hover crosshair + nearest-value label
+  (`displayValues`). Browser-confirmed all three graph kinds render as real, visually distinct
+  charts (not blank, not raw numbers) and the hover crosshair value label works. No editor (source
+  has none either -- display-only, like `bubble-cell`/`drilldown-cell` in Phase 4c).
+- **`star-cell`** -- **deliberately deviates from source's editor-based interaction**: source opens
+  a small React overlay (5 clickable star `<svg>`s) that requires activating the cell first.
+  Per this port's established `boolean-cell.ts` click-toggle convention (and per this sub-phase's
+  own task brief), ported as a **single-click-to-rate** `onClick` hook instead -- no overlay at all,
+  `allowOverlay: false` in demo data. Click position is converted to a star index using the exact
+  same layout constants `draw()` uses (`STAR_START_OFFSET`/`STAR_SPACING`/`STAR_SIZE`, kept as named
+  constants specifically so the two stay in sync). Browser-confirmed: clicking further right along
+  the star row increases the rating and immediately redraws (verified 1 star -> 4 stars from one
+  click at the right x-offset).
+- **`range-cell`** -- `draw()` (gradient-filled rounded track + optional trailing label) ported
+  verbatim, reusing `roundedRect`/`measureTextCached`/`getMiddleCenterBias`/`getEmHeight`. One
+  correctness fix vs source: `fillRatio` is clamped to `[0,1]` before being used as a
+  `CanvasGradient.addColorStop` offset -- source passes it through unclamped, which throws a
+  DOMException if `value` is ever outside `[min, max]` (invalid gradient stop). Editor: source's
+  native `<input type="range">` (React-rendered) ported to the plain-DOM `CellEditorProps`/
+  `CellEditorHandle` factory contract established in Phase 4a -- a `<label>` wrapping a real
+  `<input type="range">` + a live value `<span>`, built with `Object.assign(el.style, {...})` like
+  `GrowingEntry` (no `@linaria/react`, per the research section's simplification guidance).
+  Browser-confirmed end to end: second-click activation opens the editor showing the real native
+  slider (screenshotted), setting the input's value via a real `input` event (both a
+  `left_click_drag` on the thumb -- which did NOT register, native range inputs don't reliably
+  respond to synthesized drag events in this automation environment, use the JS-dispatched-`input`-
+  event approach instead, matching this project's established "single-script raw-event dispatch"
+  pattern for anything a plain click/drag can't reliably drive) updates the live in-editor value
+  label immediately, and clicking outside commits the new value into the cell (redrawn fill width
+  updated correctly, confirmed via zoomed before/after screenshots). **Known demo-only quirk, not a
+  cell bug**: the demo seeds `label: "N%"` once at cell-creation time; since neither source's nor
+  this port's editor `onChange` recomputes `label` from the new `value` (source's own editor has the
+  identical omission -- `label` and `value` are independently supplied fields, matching a design
+  where a consumer can show a custom label unrelated to the raw percentage), the label text goes
+  stale after an edit while the fill-bar width (driven by `value`, not `label`) updates correctly.
+  This is faithful to source, not a porting defect -- noted here so nobody "fixes" it as a bug later.
+- **`spinner-cell`** -- trivial arc-sweep animation, `draw()` ported verbatim. Confirmed this port's
+  existing `requestAnimationFrame`/`AnimationQueue` plumbing (`render/data-grid-render.cells.ts`'s
+  `animRequest` + `enqueue?.(allocatedItem)` when `animationFrameRequested` is true, wired since
+  Phase 1/2) already fully supports a cell self-re-enqueuing every draw with **zero
+  `GridHostController` changes needed** -- exactly what the Phase 5 research section predicted.
+  Browser-confirmed animating: two zoomed screenshots 0.35s apart show the arc at visibly different
+  rotation angles. (One easy mistake made and corrected during verification: comparing screenshots
+  exactly ~1.0s apart showed the *same* angle both times -- not a bug, just an artifact of the
+  spinner's progress cycling `performance.now() % 1000`, i.e. exactly period-1000ms, so a ~1-second
+  sampling gap aliases back to nearly the same phase. Use a non-integer-second gap when eyeballing
+  this kind of animation.)
+
+**Concurrent-editing note (real, not hypothetical -- happened live during this sub-phase)**: 5b's
+subagent overwrote `extra-cells/index.ts` with its own from-scratch version (tags/dropdown/multi-
+select/links only) partway through this sub-phase's work, silently dropping the sparkline/star/
+range/spinner entries that had just been written. Caught via the file-changed system notification
+this harness surfaces on an out-of-band edit; re-read the file and hand-merged both sets of imports/
+exports/`allExtraCells` entries back together (tagged with `// 5a`/`// 5b` comments for clarity).
+5c's subagent later did the same (added its own imports/exports but initially forgot to also add its
+5 renderers to the `allExtraCells` array) -- this was **not** fixed by this sub-phase (out of scope,
+"don't touch their files"), and self-resolved: a later re-read showed 5c had completed its own
+`allExtraCells` entries. **Lesson for future concurrent shared-file work on this project**: this
+kind of last-write-wins collision on a shared coordination file is real and will keep happening
+under true concurrency -- always re-read the shared file (not just trust your own last-known
+content) immediately before every write to it, and expect to merge, not just append.
+
+**Verification**: `npx tsc --noEmit -p tsconfig.json` clean (both in isolation and after 5b/5c's
+concurrent changes landed in the same shared files). `pnpm --filter glide-data-grid-ember build`
+(rollup + glint declarations) and `pnpm --filter test-app exec vite build` (442 modules) both
+succeed. **Browser-verified** (Chrome, dev server on :4200 -- note multiple *other* Chrome tabs
+appeared during this session on :4211/:4301, each a **different concurrent agent's own dev server**
+doing its own browser verification in the same shared Chrome instance -- left untouched, not this
+sub-phase's tabs to manage): sparkline column shows real, visually distinct line/bar/area charts
+with a working hover-crosshair value label; star column click-to-rate works; range column's editor
+opens a real native slider whose drag-via-JS-`input`-event updates live and persists on commit;
+spinner column visibly animates. No console errors at any point (checked via
+`read_console_messages` after a fresh reload).
