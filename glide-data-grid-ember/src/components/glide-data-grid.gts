@@ -10,9 +10,17 @@
 import Component from "@glimmer/component";
 import { registerDestructor } from "@ember/destroyable";
 import { modifier } from "ember-modifier";
-import { GridHostController, type GridHostArgs } from "../-private/grid-host-controller.ts";
+import { GridHostController, type GridHostArgs, type RowMarkerKind } from "../-private/grid-host-controller.ts";
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/-temp-text-cell-renderer.ts";
-import type { GridColumn, GridCell, Item, Theme, GetCellRendererCallback } from "../rendering/index.ts";
+import type {
+    GridColumn,
+    GridCell,
+    GridSelection,
+    Item,
+    Rectangle,
+    Theme,
+    GetCellRendererCallback,
+} from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
 export interface GlideDataGridApi {
@@ -35,6 +43,25 @@ export interface GlideDataGridSignature {
         // section for the rationale. Defaults to the temp text-only renderer.
         getCellRenderer?: GetCellRendererCallback;
         onReady?: (api: GlideDataGridApi) => void;
+
+        // Selection / interaction config + callbacks (Phase 3a/3c/3d) -- forwarded straight
+        // through to `GridHostArgs`; see that interface's doc comments (`grid-host-controller.ts`)
+        // for exact semantics, especially the "consumer owns the data, controller only notifies"
+        // contract that `onCellsEdited`/`onColumnResize*`/`onColumnMoved` all share.
+        rowMarkers?: RowMarkerKind;
+        rowMarkerWidth?: number;
+        rowSelect?: "none" | "single" | "multi";
+        columnSelect?: "none" | "single" | "multi";
+        rangeSelect?: "none" | "cell" | "rect" | "multi-cell" | "multi-rect";
+        rangeSelectionColumnSpanning?: boolean;
+        onSelectionChanged?: (selection: GridSelection) => void;
+        onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
+        onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
+        onColumnResizeStart?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+        onColumnResize?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+        onColumnResizeEnd?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+        onColumnProposeMove?: (startIndex: number, endIndex: number) => boolean;
+        onColumnMoved?: (startIndex: number, endIndex: number) => void;
     };
 }
 
@@ -60,6 +87,20 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         theme: this.args.theme,
         freezeColumns: this.args.freezeColumns,
         getCellRenderer: this.args.getCellRenderer ?? defaultGetCellRenderer,
+        rowMarkers: this.args.rowMarkers,
+        rowMarkerWidth: this.args.rowMarkerWidth,
+        rowSelect: this.args.rowSelect,
+        columnSelect: this.args.columnSelect,
+        rangeSelect: this.args.rangeSelect,
+        rangeSelectionColumnSpanning: this.args.rangeSelectionColumnSpanning,
+        onSelectionChanged: this.args.onSelectionChanged,
+        onHeaderMenuClick: this.args.onHeaderMenuClick,
+        onCellsEdited: this.args.onCellsEdited,
+        onColumnResizeStart: this.args.onColumnResizeStart,
+        onColumnResize: this.args.onColumnResize,
+        onColumnResizeEnd: this.args.onColumnResizeEnd,
+        onColumnProposeMove: this.args.onColumnProposeMove,
+        onColumnMoved: this.args.onColumnMoved,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s

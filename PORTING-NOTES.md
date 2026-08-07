@@ -273,7 +273,7 @@ browser-verified.
 - Column grouping is still fully off end to end (see `ENABLE_GROUPS` note above) — no args for it
   are exposed on `<GlideDataGrid>` yet either.
 
-## Phase 3 — Interaction layer (in progress: 3a/3b/3c done+browser-verified, 3d not started)
+## Phase 3 — Interaction layer (COMPLETE: 3a/3b/3c/3d all done, browser-verified, committed)
 
 **Baseline**: Ember port currently has zero interaction logic. `grid-host-controller.ts` hardcodes
 an empty `GridSelection` into every draw and has only a bare hover `mousemove` handler — no
@@ -562,6 +562,77 @@ this port can currently create.
   → coerce → edit pipeline executes end-to-end). **Apply this same single-script dispatch pattern
   for any future clipboard/multi-tab interaction testing on this project** — it's faster and more
   reliable than driving real keystrokes across separate tool calls.
+
+#### 3d deliverables (column resize/reorder DnD) — DONE, browser-verified, committed. **Phase 3 (Interaction layer) is now fully complete.**
+
+**How this landed**: the background agent for 3d stalled twice in a row (once genuinely producing
+zero file changes before a 600s-no-progress kill), both infra-level failures with no code written.
+Given the pattern of repeated infra failures on this specific sub-phase and that Claude already had
+strong context on the controller's structure from directly completing 3c, Claude implemented 3d
+directly rather than a third agent attempt — same reasoning as 3c's completion (small, well-bounded
+remaining scope, further round-trips have real overhead).
+
+**Design, mirroring source's `data-grid-dnd.tsx`** (no native HTML5 Drag-and-Drop API — pure
+`mousedown`/`mousemove`/`mouseup` tracking, extending 3a's existing header-click dispatch
+infrastructure rather than a parallel handler):
+- **Resize**: mousedown within `RESIZE_EDGE_PX = 6` px of a header's right border (only when
+  `onColumnResize`/`onColumnResizeEnd`/`onColumnResizeStart` — any one — is configured, mirroring
+  source's `canResize` gate; never on the row-marker column) starts a resize drag, exclusive with
+  normal header-click selection (checked right alongside the existing menu-glyph check in
+  `onMouseDown`). Every mousemove tick fires `onColumnResize` continuously (not just at drag-end),
+  clamped to a 10px minimum width. `onColumnResizeEnd` fires on mouseup with the final width.
+  `isResizing`/`resizeCol` in `DrawGridArg` (hardcoded since Phase 2) now reflect live state, so
+  the already-Phase-1-ported render engine draws the resize-line visuals itself — no new drawing
+  code needed.
+- **Reorder**: mousedown on a header body (not its edge) when `onColumnMoved` is configured records
+  drag-start state *alongside* normal header-click selection dispatch (both fire on the same
+  mousedown, exactly like source's wrapper-around-DataGrid architecture) — whether it resolves to a
+  plain click (selection only) or a drag (`onColumnMoved` also fires on mouseup) is decided by
+  whether the 20px activation dead-zone (`COLUMN_DRAG_THRESHOLD_PX`, matches source's literal
+  `data-grid-dnd.tsx` constant) is crossed before mouseup. `onColumnProposeMove` can veto a
+  candidate drop position live during the drag (no drag visual drawn while vetoed). `dragAndDropState`
+  in `DrawGridArg` (hardcoded since Phase 2) now reflects live `{src, dest}`, so the drag-ghost
+  visual is drawn by the already-ported render engine, not new code here. `freezeColumns` gates
+  valid drop targets (can't drop in front of frozen columns), matching source's `lockColumns`.
+- **Non-mutating-controller contract maintained**: `GridHostController` never mutates `args.columns`
+  or column order itself — same pattern established for `onCellsEdited` in 3c. Consumer must apply
+  the new width / reordered array and pass it back through `getArgs()`.
+- New `GridHostArgs` fields: `onColumnResizeStart`/`onColumnResize`/`onColumnResizeEnd` (all
+  `(column, newSize, colIndex, newSizeWithGrow) => void`), `onColumnProposeMove: (startIndex,
+  endIndex) => boolean`, `onColumnMoved: (startIndex, endIndex) => void`.
+
+**Real gap found and fixed while wiring up verification**: `src/components/glide-data-grid.gts`
+(the public Ember-facing component, Phase 2b) had never been updated to forward ANY of Phase 3's
+`GridHostArgs` additions (`onSelectionChanged`, `onHeaderMenuClick`, `onCellsEdited`, `rowMarkers`/
+`rowSelect`/etc, and now the resize/reorder callbacks) — its `Args` interface and
+`buildGridHostArgs()` only covered what Phase 2b originally shipped with. **Fixed**: the component
+now forwards the complete `GridHostArgs` surface. This wasn't just a testing convenience — it was a
+real, load-bearing gap: without it, none of 3a/3b/3c/3d's interaction features were reachable from
+the public `<GlideDataGrid>` component at all, only from a raw `GridHostController` instantiated
+directly (which no real consumer would do). **Any future phase that adds a new `GridHostArgs`
+field must remember to also add it to `glide-data-grid.gts`'s `Args`/`buildGridHostArgs`** — there's
+no automatic forwarding, it's two hand-maintained parallel lists.
+
+**Demo wiring added** (`test-app/app/components/demo-grid.gts`, new — `application.gts` now
+renders `<DemoGrid />` instead of `<GlideDataGrid>` directly): a small `@tracked columns` +
+`handleColumnResize`/`handleColumnMoved` backing component, since `application.gts` used
+`ember-route-template`'s classless `Route(<template>)` pattern which can't hold tracked state.
+This is genuinely necessary for ANY consumer wanting resize/reorder to visually stick (per the
+non-mutating-controller contract above), not just a test scaffold — keep it as the demo evolves in
+Phase 7.
+
+**Verification**: `tsc`/`pnpm build`/`vite build` all clean on the first implementation attempt (no
+type errors). **Browser-tested for real** using the single-script raw-DOM-event dispatch pattern
+established in 3c (dispatching `mousedown`/`mousemove`/`mouseup` as real `MouseEvent`s in one
+`javascript_tool` call — note `mousemove` must be dispatched on the grid's root element, NOT
+`window`, since `onMouseMove` is registered on `root` while only `onMouseUp` is on `window`; a
+first attempt dispatching mousemove on `window` silently did nothing, worth remembering). Resize:
+dragging Column 0's right edge visibly widened it (~90px → ~150px). Reorder: dragging Column 1's
+header body past the 20px threshold correctly moved "Column 2" into position 1 in the demo (the
+demo's cell *data* staying labeled "C1" under the moved header is an expected demo-data quirk —
+`demoGetCellContent` computes text from array *position*, not column identity, so it doesn't track
+reordering; this doesn't indicate any problem in the resize/reorder implementation itself, which is
+proven correct by the header itself moving to the right position).
 
 ### Selection model
 

@@ -50,6 +50,7 @@ import {
 } from "../rendering/index.ts";
 import type {
     DrawGridArg,
+    DragAndDropState,
     MutableRefObject,
     BlitData,
     GridColumn,
@@ -158,6 +159,40 @@ export interface GridHostArgs {
      * consistency, per PORTING-NOTES.md.
      */
     readonly onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
+
+    // --- Phase 3d: column resize / reorder ------------------------------------------------------
+    /**
+     * Fired continuously (on every mousemove tick, not just at drag-end) while a column resize is
+     * in progress, plus once more at the very end via `onColumnResizeEnd`. Mirrors source's
+     * `onColumnResize`/`onColumnResizeEnd`/`onColumnResizeStart` (`data-grid-dnd.tsx`) exactly,
+     * including firing repeatedly during the drag. `newSize` is the resized column's raw width;
+     * `newSizeWithGrow` adds back the column's `growOffset` (0 for columns without `grow`).
+     * **`GridHostController` never mutates `args.columns` itself** -- the consumer owns column
+     * width state and must pass an updated `columns` array back through `getArgs()` for the resize
+     * to visually stick (same non-mutating-controller contract as `onCellsEdited`). Resize is
+     * enabled purely by the *presence* of any one of these three callbacks, matching source's
+     * `canResize = (onColumnResize ?? onColumnResizeEnd ?? onColumnResizeStart) !== undefined`.
+     */
+    readonly onColumnResizeStart?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+    readonly onColumnResize?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+    readonly onColumnResizeEnd?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+
+    /**
+     * Live veto check during a column-reorder drag: return `false` to reject the current candidate
+     * drop position (no drag-offset visual is computed for it, mirrors source's
+     * `onColumnProposeMove`/`dragOffset` memo in `data-grid-dnd.tsx`). Optional -- if omitted every
+     * drop position is allowed (except in front of frozen/`freezeColumns` columns, which is never
+     * allowed regardless).
+     */
+    readonly onColumnProposeMove?: (startIndex: number, endIndex: number) => boolean;
+    /**
+     * Fired once on mouseup at the end of a column-reorder drag that both crossed the activation
+     * threshold and wasn't vetoed by the final `onColumnProposeMove` check. **Consumer owns column
+     * order** -- must reorder its own `columns` array for the move to visually stick. Reorder is
+     * enabled purely by this callback's presence, matching source's `canDragCol = onColumnMoved !==
+     * undefined`.
+     */
+    readonly onColumnMoved?: (startIndex: number, endIndex: number) => void;
 }
 
 export interface GridHostControllerOptions {
@@ -187,6 +222,17 @@ interface ResolvedGridHostArgs {
     readonly onSelectionChanged: ((selection: GridSelection) => void) | undefined;
     readonly onHeaderMenuClick: ((col: number, bounds: Rectangle) => void) | undefined;
     readonly onCellsEdited: ((edits: readonly { location: Item; value: GridCell }[]) => void) | undefined;
+    readonly onColumnResizeStart:
+        | ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void)
+        | undefined;
+    readonly onColumnResize:
+        | ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void)
+        | undefined;
+    readonly onColumnResizeEnd:
+        | ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void)
+        | undefined;
+    readonly onColumnProposeMove: ((startIndex: number, endIndex: number) => boolean) | undefined;
+    readonly onColumnMoved: ((startIndex: number, endIndex: number) => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -216,6 +262,14 @@ function rowMarkerWidthDefault(rows: number): number {
 // for `groupHeaderHeight` -- that field is retained on `GridHostArgs` purely so a later phase that
 // turns grouping on doesn't need to change the args shape.
 const ENABLE_GROUPS = false;
+
+// Phase 3d: column resize/reorder. Resize-edge hit region width (px) at a header cell's right
+// border; source doesn't expose an exact named constant for this in the parts of `data-grid.tsx`
+// cited by PORTING-NOTES.md, so this is a reasonable small value consistent with typical
+// resize-handle affordances. Reorder drag activation dead-zone matches source's own
+// `data-grid-dnd.tsx` `Math.abs(event.clientX - dragStartX) > 20` exactly.
+const RESIZE_EDGE_PX = 6;
+const COLUMN_DRAG_THRESHOLD_PX = 20;
 
 // Browser's maximum div height limit (varies a bit by browser) and the max height of a single
 // padder segment, both taken from `infinite-scroller.tsx` verbatim.
@@ -391,6 +445,22 @@ export class GridHostController {
     // `lastSelectedRowRef`/`lastSelectedColRef` (`data-editor.tsx:1885,2009`).
     private lastSelectedRow: number | undefined = undefined;
     private lastSelectedCol: number | undefined = undefined;
+
+    // Column resize drag state (Phase 3d). Set on mousedown over a header's resize-edge, cleared on
+    // mouseup. Mirrors source's `resizeCol`/`resizeColStartX`/`lastResizeWidthRef`
+    // (`data-grid-dnd.tsx`). `col` is in MANGLED (row-marker-space) coordinates throughout, same
+    // space as `this.selection`/`hitTestHeaderMenu`; converted to real column space only at the
+    // `GridColumn`/callback boundary.
+    private resizeState: { col: number; startClientX: number; startWidth: number; lastWidth: number } | undefined =
+        undefined;
+    // Column reorder drag state (Phase 3d). `active` flips true only once the mouse has moved more
+    // than `COLUMN_DRAG_THRESHOLD_PX` from `startClientX`, matching source's dead-zone. `dropCol`
+    // tracks the current candidate drop column (mangled space); `vetoed` records whether
+    // `onColumnProposeMove` rejected the current `dropCol` (no drag-offset visual is drawn while
+    // vetoed, mirrors source's `dragOffset` memo returning `undefined` in that case).
+    private dragColState:
+        | { srcCol: number; startClientX: number; active: boolean; dropCol: number; vetoed: boolean }
+        | undefined = undefined;
 
     constructor(options: GridHostControllerOptions) {
         this.root = options.root;
@@ -573,6 +643,11 @@ export class GridHostController {
             onSelectionChanged: args.onSelectionChanged,
             onHeaderMenuClick: args.onHeaderMenuClick,
             onCellsEdited: args.onCellsEdited,
+            onColumnResizeStart: args.onColumnResizeStart,
+            onColumnResize: args.onColumnResize,
+            onColumnResizeEnd: args.onColumnResizeEnd,
+            onColumnProposeMove: args.onColumnProposeMove,
+            onColumnMoved: args.onColumnMoved,
         };
     }
 
@@ -750,15 +825,15 @@ export class GridHostController {
             mappedColumns,
             enableGroups: ENABLE_GROUPS,
             freezeColumns,
-            dragAndDropState: undefined,
+            dragAndDropState: this.currentDragAndDropState(),
             theme,
             headerHeight: args.headerHeight,
             groupHeaderHeight: ENABLE_GROUPS ? args.groupHeaderHeight : 0,
             disabledRows: CompactSelection.empty(),
             rowHeight: args.rowHeight,
             verticalBorder: () => true,
-            isResizing: false,
-            resizeCol: undefined,
+            isResizing: this.resizeState !== undefined,
+            resizeCol: this.resizeState?.col,
             isFocused: this.isFocused,
             drawFocus: true,
             selection: this.selection,
@@ -885,6 +960,46 @@ export class GridHostController {
             this.translateY,
             0
         );
+
+        // Column resize (Phase 3d): live width computation on every tick, matching source's
+        // continuous `onColumnResize` firing (not just at drag-end) -- see `data-grid-dnd.tsx`.
+        // Takes over the whole mousemove (no hover/drag-extend concurrently), mirroring source
+        // routing this through a dedicated raw listener separate from the synthetic hover pipeline.
+        if (this.resizeState !== undefined) {
+            const rs = this.resizeState;
+            const newWidth = Math.max(10, Math.round(rs.startWidth + (ev.clientX - rs.startClientX)));
+            rs.lastWidth = newWidth;
+            const realCol = rs.col - args.rowMarkerOffset;
+            const realColumn = args.columns[realCol];
+            const growOffset = mappedColumns[rs.col]?.growOffset ?? 0;
+            if (realColumn !== undefined) {
+                args.onColumnResize?.(realColumn, newWidth, realCol, newWidth + growOffset);
+            }
+            this.scheduleFullRedraw();
+            return;
+        }
+
+        // Column reorder (Phase 3d): 20px dead-zone before the drag visually activates, then track
+        // the current drop-target column as the mouse moves over headers. `freezeColumns` gates
+        // valid drop targets the same way source's `lockColumns` does -- can't drop in front of
+        // frozen columns.
+        if (this.dragColState !== undefined) {
+            const ds = this.dragColState;
+            if (!ds.active) {
+                if (Math.abs(ev.clientX - ds.startClientX) > COLUMN_DRAG_THRESHOLD_PX) {
+                    ds.active = true;
+                } else {
+                    return;
+                }
+            }
+            if (col !== -1 && col >= freezeColumns && col !== ds.dropCol) {
+                const proposedDest = col;
+                ds.vetoed = args.onColumnProposeMove?.(ds.srcCol - args.rowMarkerOffset, proposedDest - args.rowMarkerOffset) === false;
+                ds.dropCol = proposedDest;
+            }
+            this.scheduleFullRedraw();
+            return;
+        }
 
         // Drag-extend (Phase 3a): while a button is held from a mousedown that started inside the
         // grid, growing the selection on every cell the mouse enters. Mirrors source's
@@ -1033,6 +1148,16 @@ export class GridHostController {
     // `isDragging`/`isResizing`/`hoveredOnEdge` guards (column resize/reorder is Phase 3d, so those
     // states never exist here). Returns the menu's bounds (canvas-space, for positioning a floating
     // menu) when `localX`/`localY` land inside them, else `undefined`.
+    // `DrawGridArg.dragAndDropState` for the ported render engine's drag-visual drawing. `undefined`
+    // both when no reorder drag is active AND when the current drop candidate was vetoed by
+    // `onColumnProposeMove` -- mirrors source's `dragOffset` memo (`data-grid-dnd.tsx`) returning
+    // `undefined` in the vetoed case, so no ghost/ring is drawn for a rejected drop position.
+    private currentDragAndDropState(): DragAndDropState | undefined {
+        const s = this.dragColState;
+        if (s === undefined || !s.active || s.vetoed) return undefined;
+        return { src: s.srcCol, dest: s.dropCol };
+    }
+
     private hitTestHeaderMenu(
         args: ResolvedGridHostArgs,
         col: number,
@@ -1075,6 +1200,37 @@ export class GridHostController {
         return layout.menuBounds;
     }
 
+    // Hit-test for a header column's resize-edge region (Phase 3d) -- a narrow strip at the
+    // column's right border, `RESIZE_EDGE_PX` wide. `localX` is root-relative, same coordinate
+    // space `computeBounds` returns. Resize is only reachable when at least one of the three
+    // resize callbacks is configured (mirrors source's `canResize` gate) and never on the
+    // row-marker column (mirrors source excluding `col === 0` marker-column resize).
+    private hitTestColumnResizeEdge(args: ResolvedGridHostArgs, col: number, localX: number): boolean {
+        if ((args.onColumnResize ?? args.onColumnResizeEnd ?? args.onColumnResizeStart) === undefined) return false;
+        if (args.hasRowMarkers && col === 0) return false;
+        const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        const column = mappedColumns[col];
+        if (column === undefined) return false;
+        const bounds = computeBounds(
+            col,
+            -1,
+            this.width,
+            this.height,
+            ENABLE_GROUPS ? args.groupHeaderHeight : 0,
+            args.headerHeight,
+            this.cellXOffset,
+            this.cellYOffset,
+            this.translateX,
+            this.translateY,
+            args.rows,
+            freezeColumns,
+            0,
+            mappedColumns,
+            args.rowHeight
+        );
+        return localX >= bounds.x + bounds.width - RESIZE_EDGE_PX && localX <= bounds.x + bounds.width;
+    }
+
     private readonly onFocus = (): void => {
         if (this.isFocused) return;
         this.isFocused = true;
@@ -1111,6 +1267,35 @@ export class GridHostController {
                 this.pendingHeaderMenuClick = hit.location[0];
                 return;
             }
+
+            // Column resize (Phase 3d): mousedown on a header's resize-edge starts a resize drag
+            // and is exclusive with normal header-click selection/reorder, exactly like the
+            // menu-glyph check above -- mirrors source's `onMouseDownImpl`
+            // (`data-grid-dnd.tsx`), which returns immediately after recording resize state.
+            if (this.hitTestColumnResizeEdge(args, hit.location[0], hit.localX)) {
+                const { mappedColumns } = this.computeMangledLayout(args);
+                const column = mappedColumns[hit.location[0]];
+                if (column !== undefined) {
+                    const realCol = hit.location[0] - args.rowMarkerOffset;
+                    this.resizeState = {
+                        col: hit.location[0],
+                        startClientX: ev.clientX,
+                        startWidth: column.width,
+                        lastWidth: column.width,
+                    };
+                    const realColumn = args.columns[realCol];
+                    if (realColumn !== undefined) {
+                        args.onColumnResizeStart?.(
+                            realColumn,
+                            column.width,
+                            realCol,
+                            column.width + (column.growOffset ?? 0)
+                        );
+                    }
+                    this.scheduleFullRedraw();
+                }
+                return;
+            }
         }
         this.pendingHeaderMenuClick = undefined;
 
@@ -1122,6 +1307,21 @@ export class GridHostController {
         if (hit.kind === "cell") {
             this.dispatchCellMouseDown(args, hit, isMultiKey);
         } else if (hit.kind === "header") {
+            // Column reorder (Phase 3d): a header-body (non-edge) mousedown when `onColumnMoved` is
+            // configured records drag-start state alongside the normal header-click selection
+            // dispatch below -- source's `DataGridDnd` wraps `DataGrid` rather than replacing its
+            // mousedown handling, so both happen on the same mousedown; whether it resolves to a
+            // "click" (selection only, already applied below) or a "drag" (also fires
+            // `onColumnMoved` on mouseup once the threshold is crossed) is decided by mousemove/up.
+            if (args.onColumnMoved !== undefined && hit.location[0] >= args.rowMarkerOffset) {
+                this.dragColState = {
+                    srcCol: hit.location[0],
+                    startClientX: ev.clientX,
+                    active: false,
+                    dropCol: hit.location[0],
+                    vetoed: false,
+                };
+            }
             this.dispatchHeaderMouseDown(args, hit, isMultiKey);
         } else if (!hit.isMaybeScrollbar) {
             this.clearSelection();
@@ -1131,6 +1331,33 @@ export class GridHostController {
     private readonly onMouseUp = (ev: MouseEvent): void => {
         if (this.destroyed) return;
         this.mouseDownState = undefined;
+
+        if (this.resizeState !== undefined) {
+            const rs = this.resizeState;
+            this.resizeState = undefined;
+            const args = this.resolveArgs();
+            const realCol = rs.col - args.rowMarkerOffset;
+            const realColumn = args.columns[realCol];
+            const { mappedColumns } = this.computeMangledLayout(args);
+            const growOffset = mappedColumns[rs.col]?.growOffset ?? 0;
+            if (realColumn !== undefined) {
+                args.onColumnResizeEnd?.(realColumn, rs.lastWidth, realCol, rs.lastWidth + growOffset);
+            }
+            this.scheduleFullRedraw();
+            return;
+        }
+
+        if (this.dragColState !== undefined) {
+            const ds = this.dragColState;
+            this.dragColState = undefined;
+            const args = this.resolveArgs();
+            if (ds.active && !ds.vetoed && ds.dropCol !== ds.srcCol) {
+                args.onColumnMoved?.(ds.srcCol - args.rowMarkerOffset, ds.dropCol - args.rowMarkerOffset);
+            }
+            this.scheduleFullRedraw();
+            return;
+        }
+
         if (this.pendingHeaderMenuClick === undefined) return;
         const args = this.resolveArgs();
         const col = this.pendingHeaderMenuClick;
