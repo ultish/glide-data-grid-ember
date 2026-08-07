@@ -78,7 +78,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 2 | Ember canvas host layer | **Done, browser-verified, committed** |
 | 3 | Interaction layer (selection, copy/paste, sort menu, DnD resize/reorder, hover anim) | **Done, browser-verified, committed** (3a selection+clicks, 3b keyboard nav, 3c copy/paste, 3d resize/reorder DnD) |
 | 4 | Core cell types + overlay editors | **Done, browser-verified, committed** (4a text/number/boolean/loading/protected/row-id + overlay editor framework; 4b uri/markdown, `marked` dependency added; 4c bubble/drilldown, both confirmed display-only; 4d image cell + trailing blank row/"add row" affordance, including a real `activateCell` overlay-gating bugfix surfaced by image-cell) |
-| 5 | Extra cell types incl. sparklines | In progress (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator: **done, browser-verified**; 5b tags/dropdown/multi-select/links: **done, browser-verified**; 5c date-picker/button/tree-view/user-profile/article: see PORTING-NOTES.md for its own status if not reflected here yet) |
+| 5 | Extra cell types incl. sparklines | **Done, browser-verified, committed** (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator; 5b tags/dropdown/multi-select/links; 5c date-picker/button/tree-view/user-profile/article, incl. a shared `pasteValueIntoCell` fix so paste dispatches to `CustomRenderer.onPaste` for all 13 extra cells — see PORTING-NOTES.md for full per-cell detail) |
 | 6 | Theming system | Pending |
 | 7 | Demo app matching glideapps.com + browser verification | Pending |
 | 8 | Async/streaming data + real-time updates demo | Pending |

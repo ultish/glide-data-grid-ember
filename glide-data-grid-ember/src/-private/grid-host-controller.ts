@@ -2509,12 +2509,11 @@ export class GridHostController {
     }
 
     // Coerces a parsed paste buffer entry into a replacement `GridCell` matching `existing`'s kind.
-    // Source dispatches this to each cell renderer's own `onPaste` (or a `coercePasteValue` prop);
-    // neither exists yet in this port (real cell renderers are Phase 4), so this is a direct,
-    // minimal equivalent covering the data kinds Phase 1's data model supports -- inverse of
-    // `copy-paste.ts`'s `convertCellToBuffer` for the same kinds. Phase 4 should replace this with
-    // real per-renderer `onPaste` dispatch once cell renderers exist, for consistency with source.
-    private pasteValueIntoCell(existing: GridCell, buf: CellBuffer): GridCell | undefined {
+    // Source dispatches this to each cell renderer's own `onPaste` (or a `coercePasteValue` prop).
+    // This port now does the same for `GridCellKind.Custom` (added Phase 5c -- see below); the
+    // built-in kinds below remain a direct, minimal equivalent covering the data kinds Phase 1's
+    // data model supports, inverse of `copy-paste.ts`'s `convertCellToBuffer` for the same kinds.
+    private pasteValueIntoCell(args: ResolvedGridHostArgs, existing: GridCell, buf: CellBuffer): GridCell | undefined {
         const raw = Array.isArray(buf.rawValue)
             ? buf.rawValue.join(", ")
             : (buf.rawValue?.toString() ?? buf.formatted.toString());
@@ -2544,12 +2543,27 @@ export class GridHostController {
                 return { ...existing, data: raw };
             case GridCellKind.Markdown:
                 return { ...existing, data: raw };
+            case GridCellKind.Custom: {
+                // Phase 5c fix: `isReadWriteCell` (checked by this method's only caller, `onPaste`
+                // below) DOES include `GridCellKind.Custom` (`readonly !== true`) -- the old comment
+                // here claiming Custom was "not writable via isReadWriteCell anyway" was stale/wrong
+                // for this kind specifically, and this `default` branch's unconditional `undefined`
+                // silently made paste into every `CustomRenderer` cell (Phase 5a/5b/5c's extra
+                // cells) a no-op. Dispatches to the matching `CustomRenderer.onPaste` (source's own
+                // mechanism, `CustomRenderer<T>["onPaste"]`, `cell-types.ts`), same as every other
+                // kind above dispatches to its own paste-coercion rule.
+                const renderer = args.getCellRenderer(existing) as CustomRenderer<CustomCell> | undefined;
+                if (renderer?.onPaste === undefined) return undefined;
+                const newData = renderer.onPaste(raw, existing.data);
+                if (newData === undefined) return undefined;
+                return { ...existing, data: newData };
+            }
             default:
-                // Custom/Image/Bubble/Drilldown/RowID/Loading/Protected: not writable via
-                // `isReadWriteCell` anyway (this method is only called for cells that already
-                // passed that check), so `default` is unreachable for those kinds in practice --
-                // returned as a safe no-op rather than asserted, since new GridCell kinds could be
-                // added upstream without this switch being updated in lockstep.
+                // Image/Bubble/Drilldown/RowID/Loading/Protected: not writable via `isReadWriteCell`
+                // anyway (this method is only called for cells that already passed that check), so
+                // `default` is unreachable for those kinds in practice -- returned as a safe no-op
+                // rather than asserted, since new GridCell kinds could be added upstream without
+                // this switch being updated in lockstep.
                 return undefined;
         }
     }
@@ -2647,7 +2661,7 @@ export class GridHostController {
                 if (cellBuf === undefined) continue;
                 const existing = args.getCellContent([targetCol, targetRow]);
                 if (!isReadWriteCell(existing)) continue;
-                const value = this.pasteValueIntoCell(existing, cellBuf);
+                const value = this.pasteValueIntoCell(args, existing, cellBuf);
                 if (value !== undefined) edits.push({ location: [targetCol, targetRow], value });
             }
         }

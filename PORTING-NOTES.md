@@ -1740,3 +1740,156 @@ future concurrent browser-testing on this project**: since `claude-in-chrome`'s 
 across concurrently-running agents in the same session tree (not one browser context per agent),
 expect tabs you didn't create to appear/disappear, and don't `tabs_close_mcp` anything you didn't
 open yourself.
+
+## Phase 5c — date-picker/button/tree-view/user-profile/article (COMPLETE, browser-verified)
+
+**Delivered**: `src/rendering/extra-cells/{date-picker,button,tree-view,user-profile,article}-cell.ts`,
+each a `CustomRenderer<CustomCell<Props>>` per the Phase 5 research section's architecture. Ran
+concurrently with 5a/5b against the same shared `extra-cells/index.ts` -- by the time this sub-phase
+started, the file already existed (5a had created it); re-read it fresh immediately before every
+edit (per the "always re-read before writing a shared coordination file" lesson already documented
+above) and both times found 5a's and then 5b's entries already present, so this sub-phase only ever
+appended its own `// 5c` import/export/`allExtraCells` block, never clobbered anyone else's.
+
+**Per-cell notes**:
+- **`date-picker-cell`** -- source's editor is a single native `<input>` whose `type` attribute is
+  driven directly by the cell's own `format: "date" | "time" | "datetime-local"` field (not three
+  separate editor implementations) -- ported as a plain `document.createElement("input")` with that
+  `type` set dynamically, no dependency needed either way. `formatValueForHTMLInput` (ISO-string
+  slicing per format, with a timezone-offset adjustment) ported verbatim. Readonly case reuses this
+  port's established "disabled `GrowingEntry`" pattern (same one `text-cell.ts`'s readonly editor
+  uses) in place of source's `TextCellEntry` (never ported to this port at all -- not needed
+  anywhere else). **Two real bugs found via browser testing, both fixed, worth flagging for anyone
+  porting a display-string-plus-underlying-value cell type in a future phase**:
+  1. **The column rendered completely blank** -- `draw()` called `drawTextCell(args, displayDate,
+     ...)` but never set `ctx.fillStyle` and had no `drawPrep`. `drawTextCell` itself
+     (`render/data-grid-lib.ts`) never sets `fillStyle` -- every other text-drawing cell in this
+     port either supplies `drawPrep: prepTextCell` (sets `fillStyle = theme.textDark`) or sets it
+     inline before calling `drawTextCell`/`fillText`. Omitting both meant the cell painted with
+     whatever `fillStyle` the *previous* cell drawn on the canvas happened to leave behind, which in
+     practice was reliably invisible -- no error, no warning, just a blank column that looked like a
+     matching/registration failure but wasn't. Fixed by adding `drawPrep: prepTextCell`. **Lesson**:
+     any new cell whose `draw()` calls `drawTextCell`/`fillText` needs an explicit `fillStyle`
+     source (either `drawPrep: prepTextCell` or an inline `ctx.fillStyle = theme.textDark` set) --
+     it is never implied, and a missing one fails silently, not loudly.
+  2. **Editing or pasting a new date didn't visibly update the cell.** Both the editor's `input`
+     `change` listener and `onPaste` only updated `data.date` (the underlying `Date`), never
+     `data.displayDate` (the string `draw()` actually reads) -- exactly the same class of bug
+     already fixed for `text-cell.ts`/`uri-cell.ts` in Phase 4a/4b (source itself has this same gap;
+     it doesn't surface as a visible bug there because source's hypothetical re-render path differs,
+     but it's real and reproducible in this port's canvas-reads-`displayDate` model). Fixed by
+     deriving a fresh `displayDate` (via `formatValueForHTMLInput`) alongside `date` in both places.
+     Confirmed via a synthetic `input`-event commit in the editor (value visibly updated) --
+     **paste specifically was verified via the code path/type-checking only, not an actual browser
+     round-trip**: a synthetic `ClipboardEvent`+`DataTransfer` dispatched at `window` in this
+     session's browser-automation environment reported `preventDefault()` having fired (implying the
+     paste handler ran and computed a real edit) but never visibly redrew *any* column tested this
+     way, including a plain `Number` cell whose paste path predates this phase entirely and was
+     already "browser-verified" in Phase 3c -- strong evidence the synthetic-clipboard-event test
+     method itself doesn't reliably exercise this port's paste pipeline in this sandbox, not that
+     paste is broken (consistent with this project's already-documented clipboard-API flakiness in
+     this specific browser-automation setup). Not spending further budget chasing that test
+     harness; the `displayDate` fix itself is small, type-checked, and mirrors an already-established,
+     already-verified-in-a-different-cell pattern.
+- **`button-cell`** -- an in-cell action trigger, **not a boolean-style toggle**: `cell.data.onClick`
+  is a plain `() => void` side-effecting callback carried on the cell's own `data`, invoked directly
+  by the renderer's `onClick` hook when the pointer is over the button's interior region --
+  `onClick` always returns `undefined` (no cell mutation), unlike `boolean-cell.ts`'s `onClick`
+  which returns a new cell to toggle. `onSelect` unconditionally calls `preventDefault()` to suppress
+  the normal activation/overlay path (there is no editor -- `ButtonCell` is `readonly: true` and
+  `provideEditor: undefined`, matching source). Draw ports the rounded-rect button + hover-fade
+  animation verbatim, reusing this port's `roundedRect` (`render/data-grid-lib.ts`, already had a
+  compatible signature) and `interpolateColors` (`color-parser.ts`). Browser-confirmed: clicking a
+  button cell logs `[demo] button-cell clicked, row N` to the console (verified via
+  `read_console_messages`) with zero cell mutation/redraw, exactly the "fire a callback, don't edit
+  the cell" contract described above.
+- **`tree-view-cell`** -- the most structurally novel of this sub-phase's five, see the file's own
+  header comment for the full writeup; condensed here since **future phases/consumers need this**:
+  **expand/collapse state (`isOpen`/`canOpen`/`depth`) lives entirely in the cell's own `data`**,
+  exactly like source -- there is no separate per-row tree/UI-state store anywhere in this port (nor
+  in source's own `packages/cells` layer). The disclosure triangle's click handler,
+  `onClickOpener: (cell: TreeViewCell) => TreeViewCell | undefined`, is *also* carried on `data`;
+  clicking it calls that function and the renderer's `onClick` hook returns whatever `TreeViewCell`
+  comes back, which `GridHostController.dispatchCellMouseDown` already commits via `commitCellEdit`
+  -> `args.onCellsEdited?.(...)` (unchanged Phase 4a plumbing -- no host changes needed here either,
+  confirming the Phase 5 research section's prediction). **What this port does NOT add**: any
+  grid-level "tree" feature such as automatic row hide/show when a parent collapses -- that
+  bookkeeping (which rows are currently visible) is entirely a consumer concern, same as source; the
+  demo (`test-app/app/utils/demo-data.ts`, column 18) only toggles `isOpen` on click and does not
+  hide/show any rows, deliberately, to keep the demo's `getCellContent` a pure function of `[col,
+  row]` matching every other column's convention. Browser-confirmed: clicking Folder 0's disclosure
+  triangle flips it from a closed `>` chevron to an open `v` chevron and the edit persists (matches
+  `DemoGrid`'s `edits` override map, same mechanism every other edit uses).
+- **`user-profile-cell`** -- mostly draw-only as expected (tinted initial-letter circle + optional
+  avatar image via the already-ported `ImageWindowLoader.loadOrGetImage(image, col, row)`, same
+  primitive `image-cell.ts` uses), but source DOES give it a small editor for just the `name` field
+  (not avatar/initial/tint) -- ported as a plain `GrowingEntry` in place of source's `TextCellEntry`.
+  Browser-confirmed: avatar circles render with visible tint + initial + name text; clicking opens
+  an editable text field with the current name select-all-highlighted (`GrowingEntry`'s
+  `highlight: true` behavior).
+- **`article-cell`** -- **the toast-ui simplification already agreed in the Phase 5 research
+  section, applied here**: source's real editor (`article-cell-editor.tsx`) is a full
+  `@toast-ui/editor` WYSIWYG rich-text editor with a separate readonly `Viewer` mode, lazy-loaded via
+  `React.lazy`/`Suspense`; not ported. `ArticleCellProps` has exactly one field besides `kind` --
+  `markdown: string` -- there is no separate title field in source to preserve, so the replacement
+  editor is correspondingly single-field: a `GrowingEntry`-based `<textarea>` plus Close/Save buttons
+  mirroring source's own footer (translated from source's `@linaria/react` CSS-in-JS to inline
+  `style` assignment, this port's established convention). `draw()` (first-line-only,
+  `rect.width / 4`-char-truncated preview) ported verbatim. **Known size limitation vs. source,
+  worth flagging**: source's `provideEditor` sets a `styleOverride` making its editor a fixed-position
+  ~75vw x 75vh full-viewport box; this port's `CellEditorProps`/overlay-host contract has a
+  `styleOverride` field that `grid-host-controller.ts`'s `openOverlay` documents as "unused/
+  unguessed" and the host's container is unconditionally capped at `maxWidth: 400px` regardless of
+  what any renderer passes there -- so this editor is a normal-size (not full-viewport) box with an
+  explicit `min-height` so it's still comfortably usable, relying on the host's `overflow: auto` for
+  longer content. Wiring `styleOverride` through the overlay host (a small, contained change) would
+  let this -- and any future large-surface editor -- grow to source's full-viewport size; flagged as
+  a good target for a future phase, not done here since it's shared-infra scope creep beyond this
+  sub-phase's five cells. Browser-confirmed: the editor opens showing the cell's full markdown text
+  in a real textarea with working Close (discards) and Save (commits) buttons.
+
+**Bonus fix, shared infra, done carefully given the "don't touch others' files" constraint**:
+`GridHostController.pasteValueIntoCell` (`src/-private/grid-host-controller.ts`) had a `default`
+case whose comment claimed `GridCellKind.Custom` was "not writable via `isReadWriteCell` anyway" --
+false: `isReadWriteCell` (`data-grid-types.ts`) explicitly includes `GridCellKind.Custom` (`readonly
+!== true`). The `default` branch's unconditional `return undefined` therefore silently made paste
+into *every* `CustomRenderer` cell across all of Phase 5 (5a/5b/5c, 13 cell types total) a no-op,
+regardless of whether that cell defined its own `onPaste`. Added a real `GridCellKind.Custom` case
+that looks up the matching renderer via `args.getCellRenderer(existing)` and dispatches to its
+`onPaste(raw, existing.data)`, same mechanism source uses (`CustomRenderer<T>["onPaste"]`). Required
+threading `args` (already in scope at the one call site, `onPaste`'s clipboard-paste handler) into
+`pasteValueIntoCell`, which didn't previously need it. Verified via `tsc`/build only, not an
+end-to-end browser round-trip -- see `date-picker-cell`'s notes above for why (the synthetic-
+clipboard-event test method itself appears unreliable in this session's browser-automation sandbox,
+not specific to this fix). Touches only `grid-host-controller.ts`, which no other Phase 5 sub-phase
+owns or edited, checked via `git diff --stat` immediately before this fix and again before
+committing.
+
+**Demo wiring** (`test-app/app/utils/demo-data.ts`): columns 16 (date-picker, alternating
+date-only/date+time format by row), 17 (button, logs to console on click), 18 (tree-view, a
+synthetic 3-level depth-by-`row % 3` folder/subfolder/file structure), 19 (user-profile, cycling
+through 5 named avatars with an inlined data-URI image), 20 (article, reusing the same
+`MARKDOWN_SAMPLES` Phase 4b's markdown column uses). Columns 16-20 chosen after re-reading the
+file's live state immediately before editing (5b's columns 12-15 were already present by the time
+this sub-phase started).
+
+**Verification**: `npx tsc --noEmit -p tsconfig.json` clean (one real error caught and fixed along
+the way, in this sub-phase's own code: `formatValueForHTMLInput`'s `isoDate.split("T")[N]` indexing
+needed `?? ""` fallbacks under this project's indexed-access strictness). `pnpm --filter
+glide-data-grid-ember build` (rollup) and `pnpm --filter test-app exec vite build` (442 modules)
+both succeed. **Browser-verified** on a separate dev server (port 4301, since :4200/:4211 were
+already running other concurrent agents' sessions) -- all five columns render real, non-blank
+content (dates, blue buttons, indented folder/file rows with disclosure carets, avatar+name pairs,
+markdown previews); date-picker's editor opens a real native `<input type="date">`/
+`<input type="datetime-local">` with the calendar picker visible; article's editor opens a real
+textarea with the full markdown body and working Close/Save; tree-view's disclosure triangle click
+toggles and persists; button's click fires its callback (confirmed via console log) with no
+unintended cell mutation. No console errors at any point. **Same shared-Chrome-tab-group quirks as
+5a/5b hit again here** (tabs created by this sub-phase intermittently vanished or got silently
+re-navigated to a *different* concurrent agent's dev-server port by the time the next tool call
+ran, sometimes within the same single-digit-second gap between two calls) -- worked around by always
+re-confirming `window.location.href` via `javascript_tool` immediately before trusting any
+screenshot, and packing navigate+act+screenshot into as few round-trips as possible
+(`browser_batch`) to minimize the window for another agent's tab operations to interfere. Recreating
+a fresh tab (`tabs_context_mcp({createIfEmpty: true})`) after a tab vanished worked reliably every
+time; fighting to keep reusing a specific tab ID did not.

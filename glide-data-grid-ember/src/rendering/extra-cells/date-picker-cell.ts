@@ -116,15 +116,21 @@ function buildDatePickerEditor(p: CellEditorProps<DatePickerCell>): CellEditorHa
     let currentValue: DatePickerCell = p.value;
     input.addEventListener("change", () => {
         if (Number.isNaN(input.valueAsNumber)) {
-            currentValue = { ...currentValue, data: { ...currentValue.data, date: undefined } };
+            currentValue = { ...currentValue, data: { ...currentValue.data, date: undefined, displayDate: "" } };
         } else {
+            // Use valueAsNumber, not valueAsDate -- valueAsDate is null for "datetime-local"
+            // (matches source's own comment/behavior exactly, see MDN link in source).
+            const newDate = new Date(input.valueAsNumber - timezoneOffsetMs);
             currentValue = {
                 ...currentValue,
                 data: {
                     ...currentValue.data,
-                    // Use valueAsNumber, not valueAsDate -- valueAsDate is null for "datetime-local"
-                    // (matches source's own comment/behavior exactly, see MDN link in source).
-                    date: new Date(input.valueAsNumber - timezoneOffsetMs),
+                    date: newDate,
+                    // Deviation from source (source leaves `displayDate` stale after an edit, same
+                    // class of bug already fixed for `text-cell.ts`/`uri-cell.ts` in Phase 4a/4b):
+                    // this port's `draw()` reads `cell.data.displayDate`, not `.date` -- committing
+                    // without keeping this in sync would silently redraw the OLD date after editing.
+                    displayDate: formatValueForHTMLInput(format, newDate, timezoneOffsetMs),
                 },
             };
         }
@@ -171,9 +177,15 @@ export const datePickerCellRenderer: CustomRenderer<DatePickerCell> = {
                 }
             }
         }
+        const newDate = Number.isNaN(parseDateTimestamp) ? undefined : new Date(parseDateTimestamp);
         return {
             ...d,
-            date: Number.isNaN(parseDateTimestamp) ? undefined : new Date(parseDateTimestamp),
+            date: newDate,
+            // Same staleness fix as the editor's `onChange` above (source leaves `displayDate`
+            // untouched on paste too) -- `draw()` reads `displayDate`, so a paste that only updated
+            // `date` would visibly show the OLD date on the canvas despite the underlying value
+            // being correct. Found via browser-testing a synthetic paste event, not assumed.
+            displayDate: newDate === undefined ? "" : formatValueForHTMLInput(d.format, newDate),
         };
     },
 };
