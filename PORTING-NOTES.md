@@ -1629,3 +1629,114 @@ with a working hover-crosshair value label; star column click-to-rate works; ran
 opens a real native slider whose drag-via-JS-`input`-event updates live and persists on commit;
 spinner column visibly animates. No console errors at any point (checked via
 `read_console_messages` after a fresh reload).
+
+## Phase 5b — tags/dropdown/multi-select/links (COMPLETE, browser-verified)
+
+**Delivered**: `src/rendering/extra-cells/{tags,dropdown,multi-select,links}-cell.ts`, each a
+`CustomRenderer<CustomCell<Props>>` per the Phase 5 research section's architecture. Ran
+concurrently with 5a/5c against the same shared `extra-cells/index.ts` -- see 5a's "Concurrent-
+editing note" above for what actually happened (this sub-phase's own first write to that file
+clobbered 5a's just-landed sparkline/star/range/spinner entries; caught via the file-changed
+notification and hand-merged all three sub-phases' imports/exports/`allExtraCells` entries back
+together, tagged `// 5a`/`// 5b`/`// 5c`). **Lesson reinforced**: on a shared coordination file
+under true concurrency, always re-read immediately before every write, never assume your last-known
+content is still current -- this happened twice more later in the session (once mid-`Write`, caught
+by the tool's own staleness check; the file kept changing further while this sub-phase worked on
+unrelated cells, and by the time verification ran, `allExtraCells` already contained all 13
+renderers with no further action needed here).
+
+**Per-cell notes**:
+- **`tags-cell`** -- unlike `bubble-cell.ts` (Phase 4c, read-only), this one IS genuinely editable,
+  and source's own editor for it is *already* a plain checkbox list (no `react-select` involved at
+  all for this particular cell) -- so this is a near-verbatim port, not a simplification. Editor:
+  one `<label>` per `possibleTags` entry with a real `<input type="checkbox">` (skipped when
+  `readonly`) + a colored pill `<div>` that fills with the tag's configured color only when
+  selected (matching source's `gdg-selected`/`gdg-unselected` opacity treatment). Draw reused
+  `roundedRect`/`measureTextCached`/`getMiddleCenterBias`, same primitives `bubble-cell.ts`/
+  `drilldown-cell.ts` already established. Browser-confirmed: opening the editor shows real
+  checkboxes matching the cell's current tags; checking "bug" live-recolors its pill from gray to
+  its configured orange inside the still-open editor (`onChange` wiring), and committing (click
+  outside) redraws the cell with both "urgent" and "bug" pills.
+- **`dropdown-cell`** -- **deliberate simplification per the Phase 5 research section**: source's
+  editor uses `react-select` for a searchable single-value dropdown; this port uses a plain native
+  `<select>` populated with `<option>`s (a leading blank option represents "no selection", since
+  source's `allowedValues` can include `undefined`/`null`). `focus()` calls the native
+  `showPicker()` where supported as a best-effort "open on focus" affordance (source's
+  `openMenuOnFocus`) -- not universally supported, harmless no-op fallback otherwise. Draw is a
+  near-verbatim port (plain text of the selected option's label, no dropdown chrome drawn on
+  canvas -- matches source, the native `<select>`'s own arrow only appears once editing).
+  Committing selects immediately via the `<select>`'s native `change` event -> `onFinishedEditing`
+  (no separate "confirm" step, matching source's own `onChange` -> immediate
+  `onFinishedEditing` in its `react-select` version). Browser-confirmed: editor opens showing a
+  real `<select>` (verified via `tagName === "SELECT"` and its `<option>` list matches
+  `allowedValues`), selecting a new value via a dispatched `change` event closes the editor and the
+  cell redraws with the new value.
+- **`multi-select-cell`** -- **deliberate simplification per the Phase 5 research section**:
+  source's editor uses `react-select`/`react-select/creatable` (searchable multi-select + optional
+  free-text creation, plus an internal value-prefixing scheme purely for react-select's own
+  duplicate-key handling when `allowDuplicates` is set). This port uses a plain native
+  `<select multiple>` (ctrl/cmd-click or drag to multi-select, no search) plus, when
+  `allowCreation` is set, a small text input + "Add" button appending values outside the configured
+  `options` list. **Known simplification, not reachable via this editor's UI**: a native
+  multi-`<select>` cannot represent the same option selected twice, so `allowDuplicates` is honored
+  by `onPaste` (which parses a plain comma-separated string, duplicates and all) but not by this
+  editor -- low-risk, rarely-hit edge case, noted rather than silently dropped. Draw/measure are
+  near-verbatim ports of source's canvas drawing (colored pills, `getLuminance`-based black/white
+  text contrast against custom option colors). Browser-confirmed: editor opens showing a real
+  `<select multiple>` with "Chrome" pre-selected; programmatically multi-selecting "Chrome"+
+  "Firefox" plus typing "brave" into the add-input and clicking "Add" all update the live selection
+  (`select.selectedOptions` reflected all three immediately); committing redraws the cell with three
+  pills -- "Chrome"/"Firefox" in their configured colors, "brave" in the default gray (not a
+  configured option), confirming both the draw's color-lookup fallback and the create-new-value
+  flow work end to end.
+- **`links-cell`** -- a list of clickable comma-separated titles in one cell, distinct from
+  `tags-cell`/`multi-select-cell` (plain underlined text on hover, not colored pills) and from
+  `uri-cell.ts` (Phase 4b, single URL) -- holds a `links: {title, href?, onClick?}[]` array.
+  `draw`/hover-hit-test (`needsHover: true`, `needsHoverPosition: true`)/`onClick` dispatch are a
+  near-verbatim port of source, reusing the exact same `onClick`-dispatch wiring `uri-cell.ts`
+  already exercises in this port (see that cell's PORTING-NOTES.md entry for the mechanism).
+  **Same pre-existing gap `uri-cell.ts` already hit, not introduced here**: `GridHostController`'s
+  click dispatch only wires `renderer.onClick`, not `onSelect` -- this cell's `onSelect` is ported
+  for source-fidelity but is dead code in this port, exactly like `uri-cell.ts`'s. Editor: a plain
+  stateful DOM factory porting source's `LinksCellEditorStyle`/`LinkTitleEditor` -- one title+URL
+  `<input>` pair per link (with a delete "✕" button once there's more than one link), an "Add link"
+  button (disabled once `maxLinks` is reached), no `react-select` involved in source for this cell
+  either (only `@linaria/react` styling, dropped in favor of inline `style` assignment per the
+  research section's guidance). Browser-confirmed: hovering the first link's title text draws a
+  real underline (confirming the hover-position hit-test math); clicking opens the editor showing
+  real `<input>` pairs matching `{title, href}` for both links plus a working "Add link" button;
+  editing the first title via a dispatched `input` event and clicking outside commits, redrawing
+  the cell with the new title text (verified via zoomed before/after screenshots).
+
+**Demo wiring** (`test-app/app/utils/demo-data.ts`): columns 12 (tags, 1-3 tags from a 5-tag/color
+pool), 13 (dropdown, cycling 4 status options), 14 (multi-select, 1-3 browser-name pills from a
+4-option/color pool, `allowCreation: true` so the "Add" affordance is exercised), 15 (links, 2
+links per row, deliberately no real click-navigation wired -- same reasoning as column 3's uri cell,
+avoids spawning real browser tabs/navigation during automated click-testing). Columns 12-15 chosen
+after re-reading the file's live state immediately before editing (8-11 were already 5a's).
+
+**Verification**: `npx tsc --noEmit -p tsconfig.json` clean (one real type error caught and fixed
+along the way: `dropdown-cell.ts`'s `optionLabel` helper did `opt?.toString()` inside a branch where
+`opt`'s narrowed type was exactly `null | undefined`, which `noUncheckedIndexedAccess`-adjacent
+strictness flagged as `Property 'toString' does not exist on type 'never'` -- fixed by returning
+`""` directly instead of calling a method through the exhausted union). `pnpm --filter
+glide-data-grid-ember build` (rollup) and `pnpm --filter test-app exec vite build` (442 modules)
+both succeed, re-verified after 5a's and 5c's concurrent changes had also landed in the same shared
+files. **Browser-verified** on a separate dev server (port 4211, since :4200 was already running
+another concurrent agent's session -- per this project's now-recurring pattern of multiple agents
+each running their own dev server against the same shared addon dist in the same Chrome instance):
+all four columns render correctly (colored tag pills, plain dropdown text, colored multi-select
+pills, underlined-on-hover link titles); all four editors open real DOM (checkboxes, native
+`<select>`, native `<select multiple>`, title/URL input pairs) and commit edits that visibly redraw
+the cell. No console errors. **Real, recurring environment quirk hit repeatedly this session**: the
+`computer` tool's `left_click` action intermittently spawned a stray `chrome://newtab/` tab in this
+session's tab group alongside the intended click landing correctly -- closed each one as it
+appeared via `tabs_close_mcp`; did not affect the underlying test correctness (confirmed via
+`javascript_tool` DOM inspection alongside every screenshot), but cost extra round-trips. Also hit:
+the shared browser tab group was auto-removed mid-session when a concurrent agent closed what turned
+out to be the group's last tab (per `tabs_close_mcp`'s own documented behavior) -- recovered by
+calling `tabs_context_mcp({createIfEmpty: true})` again and re-navigating. **Worth flagging for
+future concurrent browser-testing on this project**: since `claude-in-chrome`'s tab group is shared
+across concurrently-running agents in the same session tree (not one browser context per agent),
+expect tabs you didn't create to appear/disappear, and don't `tabs_close_mcp` anything you didn't
+open yourself.

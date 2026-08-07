@@ -80,6 +80,12 @@ export {
 // dispatcher that replaces Phase 2's `-temp-text-cell-renderer.ts` stub.
 export { getCellRenderer, toggleBoolean } from "./cells/index.ts";
 
+// "Extra cells" (Phase 5a+) -- CustomRenderer-based cells ported from source's separate
+// `packages/cells` package (sparkline/star/range/spinner in 5a; more added by later sub-phases),
+// plus the `createCombinedCellRenderer` helper for composing them with the built-in registry
+// above. See `src/rendering/extra-cells/index.ts` for the full architecture note.
+export { createCombinedCellRenderer, allExtraCells } from "./extra-cells/index.ts";
+
 // Cell-drawing contracts consumed by the render engine
 export type {
     BaseDrawArgs,

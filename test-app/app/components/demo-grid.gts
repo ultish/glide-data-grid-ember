@@ -10,7 +10,21 @@ import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 import { demoColumns, demoGetCellContent, DEMO_ROW_COUNT } from "test-app/utils/demo-data";
-import type { GridColumn, GridCell, Item } from "glide-data-grid-ember/rendering/index";
+import {
+    getCellRenderer as defaultGetCellRenderer,
+    createCombinedCellRenderer,
+    allExtraCells,
+    type GridColumn,
+    type GridCell,
+    type Item,
+} from "glide-data-grid-ember/rendering/index";
+
+// Phase 5a: combines the Phase 4 built-in registry (text/number/boolean/uri/markdown/bubble/
+// drilldown/image/etc, dispatched by `cell.kind`) with Phase 5's `CustomRenderer`-based "extra
+// cells" (sparkline/star/range/spinner/..., dispatched via `isMatch` against `GridCellKind.Custom`
+// cells) -- see `glide-data-grid-ember/src/rendering/extra-cells/index.ts` for the combinator's
+// architecture note. Built once at module scope since neither input ever changes.
+const getCellRenderer = createCombinedCellRenderer(defaultGetCellRenderer, allExtraCells);
 
 export default class DemoGrid extends Component {
     @tracked columns: readonly GridColumn[] = demoColumns;
@@ -61,6 +75,7 @@ export default class DemoGrid extends Component {
         <GlideDataGrid
             @columns={{this.columns}}
             @getCellContent={{this.getCellContent}}
+            @getCellRenderer={{getCellRenderer}}
             @rows={{this.rows}}
             @onColumnResize={{this.handleColumnResize}}
             @onColumnMoved={{this.handleColumnMoved}}
