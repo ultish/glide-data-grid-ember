@@ -1,3 +1,10 @@
+// Phase 11: this chapter used to carry the identity-compared arg table and the `updateCells` recipe.
+// Both were narrative, cross-cutting material — they apply to every recipe in this book — so they
+// moved to the **Guide** (chapters 9 and 8 respectively) and there is exactly one copy of each.
+//
+// What remains is the task this chapter is actually looked up for: "the grid feels slow, where do I
+// look?". Keep it a triage list. If an entry here grows an explanation, the explanation belongs in
+// the guide and this entry belongs to be a link to it.
 import type { Section } from "./types.ts";
 
 export const performanceSection: Section = {
@@ -5,65 +12,24 @@ export const performanceSection: Section = {
     title: "Performance rules",
     blocks: [
         {
-            kind: "note",
-            text: "This is not an appendix. **The identity-stability rule is the single biggest silent footgun this addon has** — it has no error, no warning and no visual symptom.",
-        },
-        {
             kind: "p",
-            text: "The render engine has a fast path: when only the scroll offsets changed, it *blits* the previous frame instead of repainting. To decide that, it compares about eighteen fields **by identity**. A freshly allocated value in any of them makes the check fail permanently, and the grid quietly repaints from scratch every frame.",
+            text: "**Row count is not a performance problem.** The grid is virtualised and pulls cells as it paints them, so 200,000 rows cost about what 20 do. If something feels slow, it is one of three things, and none of them is the row count.",
         },
         {
-            kind: "p",
-            text: "These args are identity-compared. Each must be a `@cached` getter, a module-scope constant, or a stable instance field — never an inline arrow or object literal in the template:",
-        },
-        {
-            kind: "table",
-            head: ["Arg", "Notes"],
-            rows: [
-                ["`@getCellContent`", "the big one — a getter returning a fresh closure defeats it"],
-                ["`@theme`", "build it once; `getDataEditorDarkTheme()` at module scope"],
-                ["`@getRowThemeOverride`", "a plain function reference, not `{{fn this.x}}`"],
-                ["`@getCellRenderer` / `@extraCells`", "pass `allExtraCells`, or a `@cached` combination"],
-                ["`@prelightCells`", "pass `undefined` for \"none\", not `[]`"],
-                ["`@highlightRegions`", "same"],
-                ["`@columns`", "replaced wholesale on resize/reorder — just don't rebuild it per render"],
+            kind: "list",
+            items: [
+                "**An identity-compared arg is being reallocated.** The scroll fast path compares about eighteen inputs by identity; one fresh allocation disables it permanently, with no error and **no visual difference**. Usually `@getCellContent` or `@theme`. → **Guide 9, *The identity rules*** has the full list and the fixes.",
+                "**There is real work inside `getCellContent`.** It runs in the draw loop — formatting, date parsing and nested-object walks belong in `toCell`, which is memoized. → **Guide 2, *The pull model***.",
+                "**The records array is being reallocated on every change.** `recordsSource` keys its per-row caches on that identity, so a `.map()`/`.filter()` upstream turns every edit into a full re-projection. → **Guide 4, *Wiring real data***.",
             ],
         },
         {
-            kind: "code",
-            text: `// ✗ a fresh closure every render — blit path silently off
-get getCellContent() {
-  return ([col, row]) => this.project(col, row);
-}
-
-// ✓ stable
-getCellContent = ([col, row]) => this.project(col, row);
-
-// ✓ also stable, and re-derived only when \`records\` changes
-@cached get gridArgs() { return recordsSource({ records: this.records, columns: COLUMNS, toCell }); }`,
+            kind: "note",
+            text: "**How to tell them apart.** There is no runtime warning, so take a Performance profile while scrolling with nothing else happening. A healthy grid does very little per scroll frame. A full paint on every frame is the first item; a paint that is slow *once* is the second; a full re-projection on every keystroke is the third.",
         },
         {
             kind: "p",
-            text: "That is also why every handler in this cookbook is a **class-field arrow** rather than an `@action` method. Ember 6+ no longer recommends the decorator — but the arrow is not merely the modern spelling, it is the identity-stable one: it is created **once per instance**, at construction, so `this.handleReady` is the same reference on every render. The Ember 6 idiom and the identity rule point the same way, which is the only reason a mechanical-looking style choice is safe here.",
-        },
-        {
-            kind: "p",
-            text: "**The reactivity rule.** Autotracking only records reads made *during* the tracking frame. A `@getCellContent` closure that reads tracked state lazily — later, when the grid calls it — never registers a dependency, so mutating that state repaints nothing. The *Using the grid in Ember* chapter has the mechanism and the two patterns that work; `recordsSource` packages the safe one.",
-        },
-        {
-            kind: "p",
-            text: "**High-frequency updates.** A `@tracked` change triggers a full-viewport redraw, which is cheap because the grid is virtualised. For genuinely high-frequency streams — thousands of cells a second — bypass tracking and use the imperative damage API:",
-        },
-        {
-            kind: "code",
-            text: `handleReady = api => { this.api = api; };
-
-// ...later, from a websocket tick:
-this.api.updateCells([{ cell: [3, 91] }, { cell: [4, 91] }]);`,
-        },
-        {
-            kind: "p",
-            text: "That repaints exactly those cells. It is how the upstream library gets its numbers, and it is not something `@tracked` should be made to do on a large dataset. The **Streaming updates** tab measures it.",
+            text: "For genuinely high-frequency updates — thousands of cells a second from a socket — bypass tracking entirely with the imperative damage API (`updateCells` from `@onReady`). That is **Guide 8, *When the data isn't in memory***, and the **Streaming updates** tab measures it. It is not a fallback for a tracked grid that isn't repainting; that is a different bug, and it is **Guide 3**.",
         },
     ],
 };

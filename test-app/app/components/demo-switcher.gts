@@ -13,8 +13,14 @@
 //                          throughput and repaint timings.
 //   - "DaisyUI theme"  -> `<DaisyDemo>`: Phase 9's CSS-variable theming bridge -- DaisyUI 5's
 //                          oklch() palette driving the canvas, switching live via `data-theme`.
-//   - "Cookbook"       -> `<CookbookPage>`: Phase 10b's consumer guide, as a live page rather than
-//                          a markdown file, so it deploys with the demos it describes.
+//   - "Guide"          -> `<GuidePage>`: Phase 11's narrative document -- zero to a working
+//                          integration, in order, one running example carried end to end. The
+//                          Ember-idioms material (pull model, tracking frame, `@cached`, identity
+//                          stability) lives here because it is cross-cutting rather than recipe-
+//                          shaped: it applies to every recipe, so it cannot be one of them.
+//   - "Cookbook"       -> `<CookbookPage>`: Phase 10b's task-indexed recipes, as a live page rather
+//                          than a markdown file, so it deploys with the demos it describes. It links
+//                          into the guide rather than restating it -- exactly one copy of everything.
 //   - "Async paging"   -> `<AsyncDemo>`: Phase 8's `AsyncRecordsSource` -- 100k rows that aren't in
 //                          memory, fetched a page at a time as `@onVisibleRegionChanged` reports
 //                          what's on screen, each arrival repainted by damage.
@@ -28,9 +34,17 @@ import StreamingDemo from 'test-app/components/streaming-demo';
 import AsyncDemo from 'test-app/components/async-demo';
 import DaisyDemo from 'test-app/components/daisy-demo';
 import CookbookPage from 'test-app/components/cookbook-page';
+import GuidePage from 'test-app/components/guide-page';
 
 type DemoTab =
-  'full-grid' | 'tracking' | 'glide' | 'streaming' | 'async' | 'daisy' | 'cookbook';
+  | 'full-grid'
+  | 'tracking'
+  | 'glide'
+  | 'streaming'
+  | 'async'
+  | 'daisy'
+  | 'guide'
+  | 'cookbook';
 
 export default class DemoSwitcher extends Component {
   @tracked tab: DemoTab = 'full-grid';
@@ -59,6 +73,10 @@ export default class DemoSwitcher extends Component {
     this.tab = 'daisy';
   };
 
+  showGuide = (): void => {
+    this.tab = 'guide';
+  };
+
   showCookbook = (): void => {
     this.tab = 'cookbook';
   };
@@ -85,6 +103,10 @@ export default class DemoSwitcher extends Component {
 
   get isAsync(): boolean {
     return this.tab === 'async';
+  }
+
+  get isGuide(): boolean {
+    return this.tab === 'guide';
   }
 
   get isCookbook(): boolean {
@@ -150,6 +172,14 @@ export default class DemoSwitcher extends Component {
           DaisyUI theming
         </button>
         <button
+          class="btn btn-xs btn-ghost {{if this.isGuide 'btn-active'}}"
+          type="button"
+          data-test-show-guide
+          {{on "click" this.showGuide}}
+        >
+          Guide
+        </button>
+        <button
           class="btn btn-xs btn-ghost {{if this.isCookbook 'btn-active'}}"
           type="button"
           data-test-show-cookbook
@@ -169,6 +199,8 @@ export default class DemoSwitcher extends Component {
           <AsyncDemo />
         {{else if this.isDaisy}}
           <DaisyDemo />
+        {{else if this.isGuide}}
+          <GuidePage />
         {{else if this.isCookbook}}
           <CookbookPage />
         {{else}}

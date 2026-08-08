@@ -53,5 +53,9 @@ function getCellContent([col, row]) {
                 "**The addon imports its own CSS.** There is no stylesheet to add and none to forget.",
             ],
         },
+        {
+            kind: "note",
+            text: "**Starting from nothing? Read the Guide tab instead.** It begins with this same first render and then walks the rest in order — the pull model, the reactivity rules, wiring a real store, editing, theming, and the identity rules. These recipes assume all of it.",
+        },
     ],
 };

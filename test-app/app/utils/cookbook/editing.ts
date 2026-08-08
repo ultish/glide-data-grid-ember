@@ -50,11 +50,11 @@ export default class PeopleTable extends Component {
         },
         {
             kind: "p",
-            text: "**Why that repaints, spelled out**, because it is the one piece of this that is not obvious. The `@cached get gridArgs` getter calls `recordsSource`, which projects **every row during the call** — so `person.name` was read *inside* the tracking frame and is a dependency of that getter. Assigning `person.name = value.data` dirties it. The getter invalidates, the grid's modifier re-runs, `getCellContent` comes back with a fresh identity, and the render engine repaints. Every link in that chain is load-bearing, and the per-record memoization means only the edited row is re-projected.",
+            text: "Writing a tracked field is what repaints the row — there is no imperative step and nothing to flush. The chain that makes that true has five links and every one is load-bearing; it is spelled out once, in **Guide 7, *Editing: you own the data***.",
         },
         {
             kind: "note",
-            text: "**The failure mode is silence.** Write the same edit into a plain (untracked) object, or read your data lazily inside `@getCellContent` instead of eagerly inside a tracked getter, and nothing repaints — no error, no warning. The previous chapter's *what actually repaints* table is the whole model in one place.",
+            text: "**The failure mode is silence.** Write the same edit into a plain (untracked) object, or read your data lazily inside `@getCellContent` instead of eagerly inside a tracked getter, and nothing repaints — no error, no warning. **Guide 3**'s *what actually repaints* table is the whole model in one place.",
         },
         {
             kind: "p",

@@ -1,4 +1,7 @@
-// The cookbook's content model. See `app/components/cookbook-page.gts` for the renderer.
+// The content model shared by **both** documentation tabs — the Cookbook (`app/utils/cookbook/`) and
+// the Guide (`app/utils/guide/`). It lives here rather than in a neutral third directory only because
+// moving it would have renamed an import in fifteen files for no gain; treat it as page-agnostic.
+// The renderer for both is `app/components/docs-page.gts`.
 //
 // Content is plain data rather than markup for two reasons: code samples containing `{{ }}` would
 // otherwise be parsed as Glimmer, and keeping prose as data means editing a recipe is editing one

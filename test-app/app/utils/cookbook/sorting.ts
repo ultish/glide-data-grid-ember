@@ -26,7 +26,7 @@ get gridArgs() {
         },
         {
             kind: "note",
-            text: "**Bind the `onCellsEdited` the decorator hands back, not your own.** A decorator that remaps rows for reading must remap them for writing too, or an edit on a sorted grid silently lands on the wrong record. `withColumnSort` does that translation — but only if the edit handler passes *through* it, which the spread above arranges. (`getOriginalIndex` remains as an escape hatch; you shouldn't need it.)",
+            text: "**Bind the `onCellsEdited` the decorator hands back, not your own.** A decorator that remaps rows for reading must remap them for writing too, or an edit on a sorted grid silently lands on the wrong record — and you will not see it until the next re-sort. `withColumnSort` does that translation, but only if the edit handler passes *through* it, which the spread above arranges. (`getOriginalIndex` remains as an escape hatch; you shouldn't need it.) `@onSelectionChanged` deliberately reports **displayed** rows, since that is what is visually selected — see **Guide 7** for the general rule this is an instance of.",
         },
         {
             kind: "code",

@@ -1,193 +1,45 @@
-// Phase 10b: the consumer cookbook, as a real page rather than a markdown file.
+// The **Cookbook** tab: task-indexed recipes, each one standing alone.
 //
 // It lives in the test-app on purpose: this app is what gets deployed, so the cookbook ships with
 // the demos it describes, and the "one-line render" recipe at the top is an actual live grid rather
-// than a screenshot of one. The addon's README covers install and the minimal render and links
-// here. As of 2026-08-09 this is the *only* consumer guide: the addon's `DATA.md` and `THEMING.md`
-// were migrated into chapters here and deleted, so there is exactly one copy of each.
+// than a screenshot of one.
 //
-// Content is a plain data model rendered by a small template, for two reasons: code samples
-// containing `{{ }}` would otherwise be parsed as Glimmer, and keeping prose as data means editing
-// a recipe is editing one string rather than surgery on markup. **The chapters live one-per-file in
-// `app/utils/cookbook/`** and are ordered by that directory's `index.ts`; this file is only the
-// renderer plus the live grid recipe 1 shows.
+// Phase 11 gave it a sibling. The **Guide** tab (`app/components/guide-page.gts`) is the *narrative*
+// document — zero to a working integration, in order, one running example. This one is the *index*:
+// you arrive knowing what you want and jump to it. The rule between them, and the whole reason the
+// split happened, is **exactly one copy of everything**: where a recipe here needs the mechanism
+// explained, it links into the guide rather than restating it.
+//
+// The chapters live one-per-file in `app/utils/cookbook/`, ordered by that directory's `index.ts`.
+// Rendering is `<DocsPage>`, shared with the guide.
 import Component from "@glimmer/component";
-import { tracked } from "@glimmer/tracking";
-import { htmlSafe } from "@ember/template";
-import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
-import { GridCellKind, type GridCell, type GridColumn, type Item } from "glide-data-grid-ember/rendering/index";
-import { SECTIONS, type Block } from "../utils/cookbook/index.ts";
+import DocsPage from "test-app/components/docs-page";
+import { SECTIONS } from "../utils/cookbook/index.ts";
 
-// --- the live example at the top of the page ---------------------------------------------------
-// Deliberately the exact code the first recipe shows, so the two cannot drift.
-const LIVE_COLUMNS: readonly GridColumn[] = [
-    { id: "name", title: "Name", width: 190 },
-    { id: "email", title: "Email", width: 240 },
-    { id: "role", title: "Role", width: 150 },
-];
+const TITLE = "Recipes for `<GlideDataGrid>`";
 
-const LIVE_PEOPLE = [
-    { name: "Ada Lovelace", email: "ada@example.com", role: "Mathematician" },
-    { name: "Grace Hopper", email: "grace@example.com", role: "Rear Admiral" },
-    { name: "Alan Turing", email: "alan@example.com", role: "Cryptanalyst" },
-    { name: "Katherine Johnson", email: "katherine@example.com", role: "Aerospace" },
-    { name: "Margaret Hamilton", email: "margaret@example.com", role: "Engineer" },
-];
+const LEDE =
+    "Task-indexed and copy-pasteable: find the thing you want to do, take the recipe, move on. " +
+    "They are lifted from the demos in the other tabs — so if a recipe here stops working, a demo " +
+    "stops working. If you are starting from nothing, read the **Guide** tab first instead; it is " +
+    "the same material in narrative order, and these recipes assume it.";
 
-function text(value: string): GridCell {
-    return { kind: GridCellKind.Text, data: value, displayData: value, allowOverlay: true };
-}
-
-// --- tiny inline formatter ----------------------------------------------------------------------
-// Escapes first, then applies a deliberately small markdown subset: `code`, **bold**, and nothing
-// else. Escaping before substitution is what makes the `htmlSafe` below safe; the content is
-// module-scope constants in this file either way.
-function escapeHtml(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function inline(s: string): ReturnType<typeof htmlSafe> {
-    const escaped = escapeHtml(s)
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        // Bold before italic: `**x**` would otherwise be eaten by the single-asterisk rule.
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    return htmlSafe(escaped);
-}
-
-// Flattened for rendering: one uniform shape with `is*` booleans, rather than a discriminated union.
-// Glimmer templates cannot narrow a union, so this is what keeps the template both type-checkable
-// and free of helper gymnastics.
-interface RenderBlock {
-    readonly isP: boolean;
-    readonly isCode: boolean;
-    readonly isNote: boolean;
-    readonly isList: boolean;
-    readonly isTable: boolean;
-    readonly isLive: boolean;
-    readonly html: ReturnType<typeof htmlSafe> | undefined;
-    readonly text: string;
-    readonly htmlItems: readonly ReturnType<typeof htmlSafe>[];
-    readonly head: readonly string[];
-    readonly htmlRows: readonly (readonly ReturnType<typeof htmlSafe>[])[];
-}
-
-function toRenderBlock(block: Block): RenderBlock {
-    return {
-        isP: block.kind === "p",
-        isCode: block.kind === "code",
-        isNote: block.kind === "note",
-        isList: block.kind === "list",
-        isTable: block.kind === "table",
-        isLive: block.kind === "live",
-        html: block.kind === "p" || block.kind === "note" ? inline(block.text) : undefined,
-        text: block.kind === "code" ? block.text : "",
-        htmlItems: block.kind === "list" ? block.items.map(inline) : [],
-        head: block.kind === "table" ? block.head : [],
-        htmlRows: block.kind === "table" ? block.rows.map(row => row.map(inline)) : [],
-    };
-}
+const TOC_NOTE =
+    "Reading order lives in the **Guide** tab — the pull model, the reactivity rules, wiring real " +
+    "data, and the identity rules that have no error message. This tab does not restate any of it; " +
+    "it links there. Every other tab above is a working demo of something described in one of the two.";
 
 export default class CookbookPage extends Component {
-    // Chapter numbers come from position, not from the titles themselves — see
-    // `app/utils/cookbook/types.ts` for why.
-    readonly sections = SECTIONS.map((section, i) => ({
-        id: section.id,
-        title: `${i + 1}. ${section.title}`,
-        blocks: section.blocks.map(toRenderBlock),
-    }));
-
-    readonly liveColumns = LIVE_COLUMNS;
-    readonly liveRows = LIVE_PEOPLE.length;
-
-    @tracked private liveEdits: ReadonlyMap<string, GridCell> = new Map();
-
-    getCellContent = ([col, row]: Item): GridCell => {
-        const edited = this.liveEdits.get(`${col},${row}`);
-        if (edited !== undefined) return edited;
-        const person = LIVE_PEOPLE[row];
-        if (person === undefined) return text("");
-        return text([person.name, person.email, person.role][col] ?? "");
-    };
-
-    // A class-field arrow, not `@action`: Ember 6+ no longer recommends the decorator, and an arrow
-    // field is identity-stable, which is what the grid's identity-compared args need anyway.
-    handleCellsEdited = (edits: readonly { location: Item; value: GridCell }[]): void => {
-        const next = new Map(this.liveEdits);
-        for (const e of edits) next.set(`${e.location[0]},${e.location[1]}`, e.value);
-        this.liveEdits = next;
-    };
+    readonly sections = SECTIONS;
 
     <template>
-        <div class="gdg-cookbook">
-            <nav class="gdg-cookbook__toc">
-                <div class="gdg-cookbook__toc-title">Cookbook</div>
-                {{#each this.sections as |chapter|}}
-                    <a href="#{{chapter.id}}">{{chapter.title}}</a>
-                {{/each}}
-                <div class="gdg-cookbook__toc-note">
-                    This is the whole guide — the addon's former
-                    <code>DATA.md</code>
-                    and
-                    <code>THEMING.md</code>
-                    now live here as chapters, so there is exactly one copy of each. Every other tab
-                    above is a working demo of something described here.
-                </div>
-            </nav>
-
-            <article class="gdg-cookbook__body">
-                <header class="gdg-cookbook__intro">
-                    <h1>Using <code>&lt;GlideDataGrid&gt;</code> in an Ember app</h1>
-                    <p>
-                        Task-oriented recipes, each one copy-pasteable. They are lifted from the demos in
-                        the other tabs — so if a recipe here stops working, a demo stops working.
-                    </p>
-                </header>
-
-                {{! `section` would shadow the `<section>` element in a strict-mode template --
-                    any lowercase tag matching an in-scope binding resolves to that binding. }}
-                {{#each this.sections as |chapter|}}
-                    <section id={{chapter.id}} class="gdg-cookbook__section">
-                        <h2>{{chapter.title}}</h2>
-                        {{#each chapter.blocks as |block|}}
-                            {{#if block.isP}}
-                                <p>{{block.html}}</p>
-                            {{else if block.isCode}}
-                                <pre class="gdg-cookbook__code"><code>{{block.text}}</code></pre>
-                            {{else if block.isNote}}
-                                <p class="gdg-cookbook__note">{{block.html}}</p>
-                            {{else if block.isList}}
-                                <ul>
-                                    {{#each block.htmlItems as |item|}}<li>{{item}}</li>{{/each}}
-                                </ul>
-                            {{else if block.isTable}}
-                                <table class="gdg-cookbook__table">
-                                    <thead>
-                                        <tr>{{#each block.head as |h|}}<th>{{h}}</th>{{/each}}</tr>
-                                    </thead>
-                                    <tbody>
-                                        {{#each block.htmlRows as |row|}}
-                                            <tr>{{#each row as |cell|}}<td>{{cell}}</td>{{/each}}</tr>
-                                        {{/each}}
-                                    </tbody>
-                                </table>
-                            {{else if block.isLive}}
-                                <div class="gdg-cookbook__live" data-test-cookbook-live-grid>
-                                    <GlideDataGrid
-                                        @columns={{this.liveColumns}}
-                                        @rows={{this.liveRows}}
-                                        @getCellContent={{this.getCellContent}}
-                                        @onCellsEdited={{this.handleCellsEdited}}
-                                    />
-                                </div>
-                                <p class="gdg-cookbook__caption">
-                                    A real grid, not a screenshot — click a cell, type, press Enter.
-                                </p>
-                            {{/if}}
-                        {{/each}}
-                    </section>
-                {{/each}}
-            </article>
-        </div>
+        <DocsPage
+            @title={{TITLE}}
+            @lede={{LEDE}}
+            @tocTitle="Cookbook"
+            @tocNote={{TOC_NOTE}}
+            @sections={{this.sections}}
+            @testId="cookbook"
+        />
     </template>
 }
