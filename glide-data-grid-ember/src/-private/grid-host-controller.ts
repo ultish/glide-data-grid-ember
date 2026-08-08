@@ -54,6 +54,7 @@ import {
     toggleBoolean,
 } from "../rendering/index.ts";
 import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
+import { sizeColumns } from "../rendering/column-sizer.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import type {
     DrawGridArg,
@@ -417,6 +418,13 @@ export interface GridHostArgs {
     // source. That keeps "right-click still works normally" the default and makes taking it over an
     // explicit act.
 
+    /** Lower bound for a measured (auto-sized) column. Ignored by columns that declare a `width`.
+     *  Source's `minColumnWidth`; defaults to 50 as source does. */
+    readonly minColumnWidth?: number;
+    /** Upper bound for a measured column, so one very long value cannot stretch it indefinitely.
+     *  Source's `maxColumnWidth`; defaults to 500 as source does. */
+    readonly maxColumnWidth?: number;
+
     /** Right-click on a data cell. `location` is in your coordinate space (no row-marker column). */
     readonly onCellContextMenu?: (location: Item, event: ContextMenuEventArgs) => void;
     /** Right-click on a column header. `col` is in your coordinate space. */
@@ -525,6 +533,8 @@ interface ResolvedGridHostArgs {
     readonly onSearchResultsChanged: ((results: CellList, navIndex: number) => void) | undefined;
     readonly onSearchStateChange: ((state: SearchState) => void) | undefined;
 
+    readonly minColumnWidth: number;
+    readonly maxColumnWidth: number;
     readonly onCellContextMenu: ((location: Item, event: ContextMenuEventArgs) => void) | undefined;
     readonly onHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
     readonly onGroupHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
@@ -590,16 +600,11 @@ const COLUMN_DRAG_THRESHOLD_PX = 20;
 const BROWSER_MAX_DIV_HEIGHT = 33_554_400;
 const MAX_PADDER_SEGMENT_HEIGHT = 5_000_000;
 
-// `GridColumn` (the public column type) allows `AutoGridColumn` (no `width`), but the render
-// engine's `mapColumns` requires `InnerGridColumn` (`width: number` always present) -- in the real
-// app auto-sized columns get a measured pixel width from `DataEditor` before reaching this layer.
-// That auto-measurement pass is out of scope for this phase, so auto columns are simply given a
-// fixed fallback width here. Revisit when column auto-sizing is ported.
-const DEFAULT_AUTO_COLUMN_WIDTH = 150;
-
-function normalizeColumns(columns: readonly GridColumn[]): InnerGridColumn[] {
-    return columns.map(c => (isSizedGridColumn(c) ? c : { ...c, width: DEFAULT_AUTO_COLUMN_WIDTH }));
-}
+// How many rows an auto-sizing pass samples. Source measures whatever `getCellsForSelection`
+// happens to have; this port picks a fixed sample because measuring is O(rows x auto-columns) and a
+// 200k-row grid must not pay for it. 50 is enough for the outlier filter (which needs >5) to be
+// meaningful while staying trivially cheap.
+const AUTO_SIZE_SAMPLE_ROWS = 50;
 
 function totalRowsHeight(rows: number, rowHeight: number | ((row: number) => number)): number {
     if (typeof rowHeight === "number") return rows * rowHeight;
@@ -946,6 +951,89 @@ export class GridHostController {
         return ctx;
     }
 
+    // --- Phase 9i: column auto-sizing ------------------------------------------------------------
+    // Cache for `sizedColumns`. Keyed on identity of everything a measurement depends on: measuring
+    // per draw would be absurd (it reads `AUTO_SIZE_SAMPLE_ROWS` cells per auto column), and
+    // `computeMangledLayout` runs on every draw, scroll and hover pass.
+    private autoSizeCache:
+        | {
+              readonly columns: readonly GridColumn[];
+              readonly theme: FullTheme;
+              readonly getCellRenderer: GetCellRendererCallback;
+              readonly rows: number;
+              readonly minColumnWidth: number;
+              readonly maxColumnWidth: number;
+              readonly result: InnerGridColumn[];
+          }
+        | undefined;
+
+    /**
+     * Gives every column a concrete width, measuring the ones that declare none.
+     *
+     * Replaces the flat 150px fallback this port used from Phase 2 until 9i. Columns that carry a
+     * `width` are untouched -- auto-sizing is opt-in per column by omitting it.
+     *
+     * The result is **memoized on identity**, and that is not just a speed concern: `mappedColumns`
+     * feeds `computeCanBlit`, so returning freshly-built column objects every draw would make the
+     * blit path's per-column comparison fail continuously. (It already rebuilds the mapped array
+     * each draw -- backlog item 9k -- but there is no reason to add a second source of churn.)
+     */
+    private sizedColumns(args: ResolvedGridHostArgs): InnerGridColumn[] {
+        const cached = this.autoSizeCache;
+        if (
+            cached !== undefined &&
+            cached.columns === args.columns &&
+            cached.theme === this.mergedTheme(args) &&
+            cached.getCellRenderer === args.getCellRenderer &&
+            cached.rows === args.rows &&
+            cached.minColumnWidth === args.minColumnWidth &&
+            cached.maxColumnWidth === args.maxColumnWidth
+        ) {
+            return cached.result;
+        }
+
+        const theme = this.mergedTheme(args);
+        const hasAuto = args.columns.some(c => !isSizedGridColumn(c));
+
+        let result: InnerGridColumn[];
+        if (!hasAuto) {
+            // Nothing to measure -- a grid that never uses auto columns pays nothing at all.
+            result = args.columns as InnerGridColumn[];
+        } else {
+            const sampleRows = Math.min(AUTO_SIZE_SAMPLE_ROWS, args.rows);
+            // Sampled in the consumer's coordinate space; `sizeColumns` indexes by the same column
+            // index it is iterating, so the two must agree -- hence sampling `args.columns`, not the
+            // mangled set.
+            const sample =
+                sampleRows > 0
+                    ? this.cellsForSelectionSync(args, { x: 0, y: 0, width: args.columns.length, height: sampleRows })
+                    : [];
+            result = sizeColumns(
+                args.columns,
+                this.canvasEl.getContext("2d") ?? undefined,
+                theme,
+                sample ?? [],
+                args.getCellRenderer,
+                {
+                    minColumnWidth: args.minColumnWidth,
+                    maxColumnWidth: args.maxColumnWidth,
+                    removeOutliers: true,
+                }
+            );
+        }
+
+        this.autoSizeCache = {
+            columns: args.columns,
+            theme,
+            getCellRenderer: args.getCellRenderer,
+            rows: args.rows,
+            minColumnWidth: args.minColumnWidth,
+            maxColumnWidth: args.maxColumnWidth,
+            result,
+        };
+        return result;
+    }
+
     private resolveArgs(): ResolvedGridHostArgs {
         const args = this.getArgsFn();
         const headerHeight = args.headerHeight ?? DEFAULT_HEADER_HEIGHT;
@@ -1001,11 +1089,14 @@ export class GridHostController {
             onSearchResultsChanged: args.onSearchResultsChanged,
             onSearchStateChange: args.onSearchStateChange,
 
+            minColumnWidth: args.minColumnWidth ?? 50,
+            maxColumnWidth: args.maxColumnWidth ?? 500,
             onCellContextMenu: args.onCellContextMenu,
             onHeaderContextMenu: args.onHeaderContextMenu,
             onGroupHeaderContextMenu: args.onGroupHeaderContextMenu,
         };
     }
+
 
     // --- Phase 6: theming ------------------------------------------------------------------------
     // The global theme: base theme + the consumer's `@theme` overlay. This is what the render
@@ -1127,7 +1218,7 @@ export class GridHostController {
     // logic (`render/data-grid-render.header.ts:433-455`), driven purely by
     // `InnerGridColumn.rowMarker`/`rowMarkerChecked` -- only the body cells are a known gap.
     private mangledColumns(args: ResolvedGridHostArgs): InnerGridColumn[] {
-        const inner = normalizeColumns(args.columns);
+        const inner = this.sizedColumns(args);
         if (!args.hasRowMarkers) return inner;
         const numSelectedRows = this.selection.rows.length;
         const rowMarkerChecked = numSelectedRows === 0 ? false : numSelectedRows === args.rows ? true : undefined;

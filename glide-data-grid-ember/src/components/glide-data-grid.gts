@@ -217,6 +217,11 @@ export interface GlideDataGridSignature {
         // Context menus (Phase 9d). The grid ships no menu UI, only the events -- same precedent as
         // `@onHeaderMenuClick`. The browser's native menu is NOT suppressed unless you call the
         // event's `preventDefault()`.
+        // Column auto-sizing (Phase 9i). Bounds for columns that omit `width`; ignored by columns
+        // that declare one. Default 50 / 500, as source does.
+        minColumnWidth?: number;
+        maxColumnWidth?: number;
+
         onCellContextMenu?: (location: Item, event: ContextMenuEventArgs) => void;
         onHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
         onGroupHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
@@ -308,6 +313,8 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         searchResults: this.args.searchResults,
         onSearchResultsChanged: this.args.onSearchResultsChanged,
         onSearchStateChange: this.handleSearchStateChange,
+        minColumnWidth: this.args.minColumnWidth,
+        maxColumnWidth: this.args.maxColumnWidth,
         onCellContextMenu: this.args.onCellContextMenu,
         onHeaderContextMenu: this.args.onHeaderContextMenu,
         onGroupHeaderContextMenu: this.args.onGroupHeaderContextMenu,

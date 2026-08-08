@@ -93,7 +93,14 @@ export default class DaisyDemo extends Component {
     @tracked theme: Partial<Theme> | undefined;
     @tracked activeTheme = "light";
 
-    readonly columns: readonly GridColumn[] = demoColumns.slice(0, 10);
+    // Phase 9i: these columns deliberately omit `width`, making them `AutoGridColumn`s that the
+    // grid measures from their content and header instead of falling back to a flat 150px. This is
+    // the only demo exercising auto-sizing, so it is also the regression surface for it -- if every
+    // column here comes out the same width, measurement has stopped working.
+    readonly columns: readonly GridColumn[] = demoColumns.slice(0, 10).map(c => {
+        const { width: _width, ...rest } = c as { width?: number } & GridColumn;
+        return rest as GridColumn;
+    });
     readonly rows = DEMO_ROW_COUNT;
     readonly themes = THEMES;
 
