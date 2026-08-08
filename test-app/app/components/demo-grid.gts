@@ -13,6 +13,7 @@ import GlideDataGrid, { type GlideDataGridApi } from "glide-data-grid-ember/comp
 import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";
 import type { SearchState } from "glide-data-grid-ember/components/glide-search-bar";
 import { demoColumns, demoGetCellContent, demoGetRowThemeOverride, DEMO_ROW_COUNT } from "test-app/utils/demo-data";
+import { formatSearchStatus } from "glide-data-grid-ember/rendering/index";
 import { cached } from "@glimmer/tracking";
 import {
     allExtraCells,
@@ -118,11 +119,69 @@ export default class DemoGrid extends Component {
         return this.showDrawHooks ? DEMO_PRELIGHT_CELLS : undefined;
     }
 
-    // Phase 9e: search. The grid owns the engine; this demo only holds the API object and the
-    // latest state snapshot, and hands both to the opt-in `<GlideSearchBar>`. Press Cmd/Ctrl+F in
-    // the grid to open it.
+    // --- Phase 9e: search, demonstrated BOTH ways -------------------------------------------------
+    // The grid owns the engine; a UI is just something that calls `setSearchValue`/`searchNext`/
+    // `searchPrev` on the API and renders from the state snapshot. This demo shows the two supported
+    // shapes at once, deliberately, so the difference is visible rather than described:
+    //
+    //   1. `<GlideSearchBar>` -- the addon's opt-in bar. Floats over the grid at its top-right,
+    //      hidden until Cmd/Ctrl+F opens it. Zero UI code here.
+    //   2. A plain `<input>` in this component's own toolbar -- always visible, styled by the app,
+    //      living entirely outside the grid's DOM.
+    //
+    // Both drive the *same* engine, so typing in either updates the other: both render their value
+    // from the same `searchState`. That is the point of showing them together.
+    //
+    // The external input needs `@showSearch={{true}}`, because result highlighting is gated on
+    // search being open -- otherwise it would set the query and nothing would light up. Passing that
+    // arg also takes control of visibility, so Escape and Cmd/Ctrl+F can no longer close search
+    // while external mode is on, and `<GlideSearchBar>` is therefore pinned open too.
     @tracked gridApi: GlideDataGridApi | undefined;
     @tracked searchState: SearchState | undefined;
+    @tracked useExternalSearch = false;
+
+    /** `true` pins search open for the external input; `undefined` leaves the grid uncontrolled,
+     *  so Cmd/Ctrl+F toggles `<GlideSearchBar>` as normal. */
+    get showSearch(): boolean | undefined {
+        return this.useExternalSearch ? true : undefined;
+    }
+
+    get searchValue(): string {
+        return this.searchState?.value ?? "";
+    }
+
+    get hasSearchResults(): boolean {
+        return (this.searchState?.results.length ?? 0) > 0;
+    }
+
+    /** Source's exact wording, reused from the addon so the two UIs read identically. */
+    get searchStatusText(): string {
+        const state = this.searchState;
+        if (state?.status === undefined) return "Type to search";
+        return formatSearchStatus(state.status, state.selectedIndex);
+    }
+
+    @action
+    toggleExternalSearch(): void {
+        this.useExternalSearch = !this.useExternalSearch;
+        // Leaving a stale query behind when switching modes just looks broken.
+        this.gridApi?.setSearchValue("");
+    }
+
+    @action
+    handleExternalSearchInput(ev: Event): void {
+        this.gridApi?.setSearchValue((ev.target as HTMLInputElement).value);
+    }
+
+    @action
+    searchNext(): void {
+        this.gridApi?.searchNext();
+    }
+
+    @action
+    searchPrev(): void {
+        this.gridApi?.searchPrev();
+    }
 
     @action
     handleReady(api: GlideDataGridApi): void {
@@ -194,7 +253,36 @@ export default class DemoGrid extends Component {
                 <button type="button" data-test-draw-hooks-toggle {{on "click" this.toggleDrawHooks}}>
                     {{if this.showDrawHooks "Hide draw hooks" "Show draw hooks"}}
                 </button>
+                <button type="button" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
+                    {{if this.useExternalSearch "Hide external search input" "Show external search input"}}
+                </button>
             </div>
+
+            {{#if this.useExternalSearch}}
+                {{! UI #2: an ordinary app-owned input, outside the grid entirely. Note there is no
+                    addon component here at all -- just `setSearchValue` and the state snapshot. }}
+                <div
+                    style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px;"
+                    data-test-external-search
+                >
+                    <label for="external-search">Search (app-owned input):</label>
+                    <input
+                        id="external-search"
+                        type="text"
+                        placeholder="Try &quot;Row note&quot; or &quot;items/4&quot;"
+                        value={{this.searchValue}}
+                        style="width: 260px;"
+                        {{on "input" this.handleExternalSearchInput}}
+                    />
+                    <button type="button" disabled={{unless this.hasSearchResults "disabled"}} {{on "click" this.searchPrev}}>
+                        Prev
+                    </button>
+                    <button type="button" disabled={{unless this.hasSearchResults "disabled"}} {{on "click" this.searchNext}}>
+                        Next
+                    </button>
+                    <span data-test-external-search-status>{{this.searchStatusText}}</span>
+                </div>
+            {{/if}}
             <div style="flex: 1 1 auto; min-height: 0;">
                 <GlideDataGrid
                     @columns={{this.columns}}
@@ -212,11 +300,12 @@ export default class DemoGrid extends Component {
                     @drawHeader={{this.drawHeader}}
                     @prelightCells={{this.prelightCells}}
                     @highlightRegions={{this.highlightRegions}}
+                    @showSearch={{this.showSearch}}
                     @onReady={{this.handleReady}}
                     @onSearchStateChange={{this.handleSearchStateChange}}
-                    {{! Phase 9e: the block renders inside the grid's own root, which is where the
-                        bar's `.gdg-root`-scoped CSS and `--gdg-*` theme variables live. Both values
-                        come from the block, so no `@onReady` plumbing is needed for the bar itself. }}
+                    {{! UI #1: the addon's own bar. The block renders inside the grid's own root,
+                        which is where its `.gdg-root`-scoped CSS and `--gdg-*` theme variables live.
+                        Both values come from the block, so no `@onReady` plumbing is needed for it. }}
                     as |grid|
                 >
                     <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
