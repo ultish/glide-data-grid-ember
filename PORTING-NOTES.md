@@ -4657,12 +4657,30 @@ columns get plausible headings and values.
 - **Markdown samples are one short line each.** The markdown cell draws its *raw source* on the
   canvas (source does too), so a multi-line sample renders as a clipped fragment of syntax.
 
-### Open: cell images do not paint here
+### Browser-testing lesson: a stale dev environment can fake a defect for hours
 
-The Photo column and the drilldown chip avatars are blank; the column *header glyphs* render fine,
-which is an easy thing to mistake for success. Full investigation state, including what is already
-ruled out and the instrumentation trap, is in PHASES.md's queue item 1 — read it before touching
-this.
+The images work. They were reported as broken — Photo cells blank, chip avatars missing — and that
+report was **wrong**, from the assistant's own browser, and it survived every check applied to it:
+a fresh page load, a cache-busting query string, and finally **opening a brand-new tab**. It was
+retracted only when the user sent a screenshot showing every portrait rendering correctly.
+
+The cause was environmental: by that point the session had restarted the dev server about a dozen
+times, wiped `node_modules/.vite` on each restart, and patched and reverted `dist/` several times to
+instrument the loader. Something in that sequence left Chrome serving an inconsistent mix.
+
+Three things to take from it, all of which cost an hour each here:
+
+- **Patching `dist/` to instrument the addon produced false readings.** Logs placed in
+  `loadOrGetImage` recorded nothing *even for the demo that was visibly rendering images* — a result
+  that is impossible if the patched module is the one executing. That was the moment to stop and
+  distrust the environment; instead it was read as evidence about the code. **Instrument the source
+  and rebuild.**
+- **"I opened a fresh tab" is not a clean environment** when the dev server and its caches have been
+  churned repeatedly. Restart the server once, cleanly, and reload — or better, check against a
+  second observer before believing a defect that only you can see.
+- **A second pair of eyes settled in one screenshot** what an hour of instrumentation could not.
+  When a user's observation contradicts yours about something as concrete as "is there an image in
+  this cell", the environment is the far likelier culprit.
 
 ## CI, Pages and npm publishing (2026-08-09)
 

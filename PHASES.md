@@ -330,11 +330,11 @@ unproven without them):
    call per column, reused across rows) rather than rebuilding it per cell; that is the single
    biggest cost in the naive form. This example is what makes the "accessor function, not path
    string" contract concrete for anyone reading the addon cold.
-2. **Rewire `tracking-demo.gts` onto `recordsSource`** once it exists, so the per-row `@cached`
+1. **Rewire `tracking-demo.gts` onto `recordsSource`** once it exists, so the per-row `@cached`
    memoization lives in the addon layer rather than in a comment. That file currently carries a long
    "SCALING: don't copy this projection verbatim" note describing the per-row `@cached` pattern it
    deliberately does not implement — that note should shrink to a pointer once the real thing exists.
-3. **The test-app must actually run DATA.md's recommended pattern, and prove it is incremental.**
+2. **The test-app must actually run DATA.md's recommended pattern, and prove it is incremental.**
    This is the point of items 1–2, stated as its own requirement so it can't be quietly skipped.
    DATA.md tells every consumer to write the per-row `@cached` view model, but **as of Phase 6 that
    half has only been reasoned about, never executed** — the Phase 6 tracking demo browser-proved
@@ -345,7 +345,7 @@ unproven without them):
    recomputes **one** row rather than all of them. Until that has been run, DATA.md's central
    recommendation is an untested claim in the addon's own consumer documentation, which is worse
    than no recommendation. Record the measured result in PORTING-NOTES.md.
-4. **A high-frequency `updateCells()` demo** (the original Phase 8 requirement above), which is also
+3. **A high-frequency `updateCells()` demo** (the original Phase 8 requirement above), which is also
    what proves the O(1)-`getCellContent` contract holds under load.
 
 ## Phase 9 — Backlog (deferred features, NOT part of the auto-continue sequence)
@@ -1028,63 +1028,51 @@ context menus, 9i column auto-sizing, **9h** (autoscroll + row reorder + fill ha
 defects) and **all of Phase 10** (the fully-featured `<DemoGrid>`, the cookbook as a live page, a
 user-facing README, plus the auto-sizing font defect). Vitest suite: **589**.
 
-### ⚠️ UNCOMMITTED WORK IN THE TREE (2026-08-09)
+### Landed 2026-08-09 in `6aa9b83`
 
-Two independent bodies of work are staged in the working tree and **not committed**, held back
-pending the user's call. Check `git status` first; both type-check and build clean.
-
-1. **The demo-fixture overhaul** (`test-app/app/utils/demo-data.ts`, the new
-   `demo-fixtures.ts`, `glide-demo-data.ts`, `demo-grid.gts`). Answers a direct user observation —
-   "the glide demo grid has nicer looking cells than the full grid demo". See PORTING-NOTES.md's
-   "Demo fixtures" section. **Carries one open defect: item 1 below.**
-2. **The whole CI/publish pipeline** (`.github/workflows/*`, `test-app/config/ember-try.js`,
-   `ROOT_URL` support, the addon's `repository` field, three test-app devDeps). Self-contained and
-   landable on its own. See PORTING-NOTES.md's "CI, Pages and npm publishing" section.
+- **The demo-fixture overhaul** (`test-app/app/utils/demo-data.ts`, the new `demo-fixtures.ts`,
+  `glide-demo-data.ts`, `demo-grid.gts`). Answers a direct user observation — *"the glide demo grid
+  has nicer looking cells than the full grid demo"*. See PORTING-NOTES.md's "Demo fixtures" section.
+- **The CI/publish pipeline** (`.github/workflows/*`, `test-app/config/ember-try.js`, `ROOT_URL`
+  support, the addon's `repository` field, three test-app devDeps). See PORTING-NOTES.md's
+  "CI, Pages and npm publishing" section.
 
 ### The work queue, in the order it was agreed
 
-Items 1–7 all came from the user reviewing the demo and the cookbook on 2026-08-09.
+Items 1–6 all came from the user reviewing the demo and the cookbook on 2026-08-09.
 
-1. **Cell images don't paint in `<DemoGrid>`** — the Photo column and the drilldown chip avatars.
-   *Column header glyphs render fine; it is the cell content that is blank.* Exactly one of the
-   twelve generated palette URLs ever loads, consistently and reproducibly. **What is already ruled
-   out** (don't redo): the URLs are valid — all twelve were pulled out of the running page and
-   loaded as 48×48 `Image`s with no error; the same generation path works in `<GlideDemo>`; it is
-   not multiple-vs-single URL, not lazy-vs-eager generation, and not the pooled-`Image` `src`-reuse
-   hazard in `ImageWindowLoader` (tried, made it *worse*, reverted). Suspicion points at the
-   `cancel()` / `imgPool` / `clearOutOfWindow` interaction. **Instrument the SOURCE and rebuild** —
-   patching `dist/` to instrument the loader produced *false readings* (it logged nothing even for
-   the demo that visibly works), which cost an hour.
+> **Retracted 2026-08-09:** this queue briefly carried a "cell images don't paint" defect as item 1.
+> **There is no such defect** — the user's screenshot shows every Photo cell rendering a distinct
+> portrait, the second thumbnail appearing on exactly the rows that should have one, and the
+> Projects chips carrying their avatars. The assistant's own browser was serving a stale render
+> after a dozen dev-server restarts, Vite cache wipes and `dist/` patch/revert cycles. See
+> PORTING-NOTES.md's browser-testing note — the failure survived opening a brand-new tab, which is
+> what made it convincing.
 
-   **⚠️ CONFIRM THE SYMPTOM BEFORE CHASING IT.** The user reported seeing a person image in every
-   Photo cell; the assistant reproduced blank cells in a brand-new tab on a fresh load. Both grids
-   now have a column titled **"Photo"** (`<GlideDemo>`'s renders a portrait per row and is
-   healthy), so the two observations may simply be of different tabs — establish which grid is
-   being looked at before spending anything on this.
-2. **Ember 6+ idioms.** The user targets Ember 6+, where **`@action` is no longer recommended**. The
+1. **Ember 6+ idioms.** The user targets Ember 6+, where **`@action` is no longer recommended**. The
    cookbook and every test-app demo use it throughout. Move to class-field arrows
    (`onEdit = () => {}`) — and say in the cookbook that a class-field arrow is *also*
    identity-stable, which is exactly what the identity-compared args need. The two rules reinforce
    each other; that is worth stating rather than leaving as coincidence.
-3. **Editing recipes should write to a model, not a `Map`.** The cookbook's `@onCellsEdited` recipe
+2. **Editing recipes should write to a model, not a `Map`.** The cookbook's `@onCellsEdited` recipe
    keys edits into a `Map` by `"col,row"`. It works and teaches nothing. Show the real shape: an
    `onEdit` class-field arrow mutating a tracked field on an Ember Data model or tracked class, and
    why that repaints.
-4. **A new cookbook page: using the grid in Ember.** The one the user actually asked for. Fetching
+3. **A new cookbook page: using the grid in Ember.** The one the user actually asked for. Fetching
    from an Ember Data store *and* from GraphQL; turning a result into cells with and without
    `object-scan` (`<ScaleProof>` already has a worked `object-scan` example to lift); how reactivity
    holds when a GQL query refetches or the store updates; and the performance/identity rules in
    context rather than as a closing chapter.
-5. **Migrate `DATA.md` + `THEMING.md` into the cookbook, then delete them.** ~900 lines that hold
+4. **Migrate `DATA.md` + `THEMING.md` into the cookbook, then delete them.** ~900 lines that hold
    detail the cookbook only summarises, so they are still needed — but they belong in the deployed
-   test-app cookbook, not the addon directory. `DATA.md` is the spine of item 4; `THEMING.md`
+   test-app cookbook, not the addon directory. `DATA.md` is the spine of item 3; `THEMING.md`
    becomes its own page (precedence chain, full `Theme` field reference, `--gdg-*` properties, the
    CSS-variable bridge). Update every link (README, cookbook, PHASES, PORTING-NOTES) and delete
    both. **Keep exactly one copy** — a half-migration is worse than either end state.
-6. **The theming chapter must show the real DaisyUI code.** It currently mentions DaisyUI and shows
+5. **The theming chapter must show the real DaisyUI code.** It currently mentions DaisyUI and shows
    none. Lift the working integration from `<DaisyDemo>`: `CssThemeWatcher` setup, the `data-theme`
    wiring, and the non-obvious Tailwind 4 bit (written up in PORTING-NOTES.md).
-7. **Demo/addon interaction gaps, found by the user driving `<DemoGrid>`.** Mixed causes — do not
+6. **Demo/addon interaction gaps, found by the user driving `<DemoGrid>`.** Mixed causes — do not
    assume all six are addon bugs:
    - *Files* (tree-view): expand/collapse does nothing. The demo cell is `readonly: true`; suspect
      the controller drops the renderer's committed cell. Likely a real gap.
@@ -1098,11 +1086,11 @@ Items 1–7 all came from the user reviewing the demo and the cookbook on 2026-0
      non-navigating handler instead.
    - *Skills* / *Projects*: display-only **by design** — source ships no bubble/drilldown editor
      (Phase 4c). Not a bug; say so in the demo rather than leaving it a mystery.
-8. **Make CI green.** `.github/workflows/ci.yml` and `release.yml` both run `pnpm lint`, which
+7. **Make CI green.** `.github/workflows/ci.yml` and `release.yml` both run `pnpm lint`, which
    currently fails on **117 eslint + 65 prettier**. This was parked by explicit user preference
    ("id prefer doing feature than fixing linting for now") — **that parking is now void**: it is a
    prerequisite for the pipeline, not a tidiness task.
-9. **Release prerequisites**, before any first publish:
+8. **Release prerequisites**, before any first publish:
    - the addon version is still `0.0.0` — pick a real first version;
    - no git remote is configured in this repo yet;
    - one-time npm Trusted Publisher setup on npmjs.com (org `ultish`, repo
