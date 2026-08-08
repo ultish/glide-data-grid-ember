@@ -26,6 +26,29 @@ import {
 export const DEMO_ROW_COUNT = 200_000;
 export const DEMO_COLUMN_COUNT = 50;
 
+// --- the demo's activity channel ----------------------------------------------------------------
+// Several cell kinds carry a *callback* on the cell itself -- `ButtonCell`'s `onClick`,
+// `UriCell`'s `onClickUri`, `LinksCell`'s per-link `onClick`. Those are the only way those cells do
+// anything, and until 2026-08-09 this demo either logged them to the console (invisible) or omitted
+// them entirely, so three of its columns read as broken rather than as wired.
+//
+// The awkwardness is that `demoGetCellContent` is a pure module-scope function of `[col, row]` (by
+// design -- see the header), so it cannot reach `<DemoGrid>`'s tracked state directly. A single
+// module-scope listener slot is the smallest thing that bridges the two: the component registers
+// one in its constructor and renders whatever arrives into its status line.
+export type DemoActivityListener = (message: string) => void;
+
+let activityListener: DemoActivityListener | undefined;
+
+/** Registered by `<DemoGrid>`. Pass `undefined` to unregister. */
+export function setDemoActivityListener(listener: DemoActivityListener | undefined): void {
+    activityListener = listener;
+}
+
+function reportActivity(message: string): void {
+    activityListener?.(message);
+}
+
 // --- per-row derived fields ---------------------------------------------------------------------
 // Each takes a distinct `salt` so fields vary independently -- without it every column in a row
 // would move together and the table would look like a pattern rather than data.
@@ -137,6 +160,33 @@ export const demoColumns: readonly GridColumn[] = Array.from({ length: DEMO_COLU
         icon: "headerString",
     };
 });
+
+// --- what each interactive column actually does --------------------------------------------------
+// Rendered by `<DemoGrid>` for whichever column is selected. Added 2026-08-09 after a run through
+// the demo produced six "this looks broken" reports, two of which were **by-design behaviour** with
+// nowhere to say so: a canvas cell can only advertise what it does by drawing it, and a chip list
+// cannot draw "there is deliberately no editor for me".
+//
+// Only columns whose behaviour is genuinely non-obvious are listed; the rest fall through to
+// `undefined` and the note area stays empty.
+// Kept to one line each -- a note that wraps changes the height of the bar above the grid, which
+// moves every row underneath it.
+const COLUMN_NOTES: Readonly<Record<number, string>> = {
+    3: "Uri cell -- click the link TEXT to fire onClickUri; click elsewhere in the cell to edit.",
+    4: "Markdown cell -- opens a rendered preview; the pencil edits, the checkmark commits.",
+    6: "Bubble chips: DISPLAY-ONLY BY DESIGN -- source ships no bubble editor either. Not a gap.",
+    7: "Drilldown chips: DISPLAY-ONLY BY DESIGN -- source's overlay only re-shows them, uneditable.",
+    8: "Sparkline -- display-only in source too. Hover for the crosshair and nearest value.",
+    9: "Star cell -- click a star to rate; hovering previews, faintly, what that click would set.",
+    11: "Spinner -- self-animating, no data and no interaction.",
+    15: "Links cell -- click a link TITLE to fire its onClick; click elsewhere to edit the list.",
+    17: "Button cell -- fires a callback and never edits the cell. Watch 'Last action' above.",
+    18: "Tree view -- only the chevron is clickable, and it flips isOpen only: no rows are hidden.",
+};
+
+export function demoColumnNote(col: number): string | undefined {
+    return COLUMN_NOTES[col];
+}
 
 // Phase 6: zebra striping via `getRowThemeOverride`. **Module scope on purpose** -- the render
 // engine's blit fast path compares this callback by identity across draws
@@ -260,13 +310,15 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 3) {
-        // `hoverEffect: true` alone is enough to exercise the link-colored/underline-on-hover
-        // rendering and the editor open/commit path. Deliberately no `onClickUri` handler: setting
-        // one makes a real in-bounds click on the link text short-circuit to `window.open(...)`
-        // (see `uri-cell.ts`'s `onClick`/`isOverLinkText`) instead of the normal select/activate
-        // flow, which would spawn a real new browser tab during automated click-testing -- not
-        // worth the risk for a demo. The renderer's click-to-open affordance is still fully
-        // implemented and would work for any real consumer that supplies `onClickUri`.
+        // `onClickUri` is what makes the link *clickable* -- without it `uri-cell.ts`'s
+        // `isOverLinkText` returns `false` unconditionally, so clicking the link text does nothing
+        // at all (and this demo shipped exactly that until 2026-08-09, which read as a broken
+        // affordance rather than as a deliberate omission).
+        //
+        // It is deliberately **not** a `window.open(...)`: the handler is the consumer's, and a
+        // demo that spawns a real browser tab is a demo that cannot be click-tested by automation.
+        // Reporting into the status line keeps the whole click path -- hover hit-test, cursor,
+        // underline, dispatch -- genuinely exercised while staying inside the page.
         const uri = `https://example.com/u/${slug(row)}`;
         return {
             kind: GridCellKind.Uri,
@@ -274,6 +326,7 @@ export function demoGetCellContent(item: Item): GridCell {
             displayData: uri,
             hoverEffect: true,
             allowOverlay: true,
+            onClickUri: () => reportActivity(`Opened profile ${uri} (row ${row}) -- no real tab spawned`),
         };
     }
 
@@ -436,13 +489,20 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 15) {
-        // Deliberately no real `href`/`onClick` navigation wired up (same reasoning as col 3's uri
-        // cell -- avoids spawning real browser tabs/navigation during automated click-testing), but
-        // the draw/hover-underline and editor's add/remove/edit-title-and-url affordances are all
-        // fully real and exercised.
+        // `links-cell` dispatches a click to the hovered link's own `onClick` and never navigates
+        // by itself, so a link with only an `href` is inert. Same treatment as col 3's uri cell:
+        // a real handler, reporting into the status line rather than opening a tab.
         const links = [
-            { title: `Issue #${1000 + (fieldHash(row, 23) % 8999)}`, href: `https://example.com/issues/${row}` },
-            { title: "Handbook", href: "https://example.com/handbook" },
+            {
+                title: `Issue #${1000 + (fieldHash(row, 23) % 8999)}`,
+                href: `https://example.com/issues/${row}`,
+                onClick: () => reportActivity(`Opened issue link for row ${row} -- no real tab spawned`),
+            },
+            {
+                title: "Handbook",
+                href: "https://example.com/handbook",
+                onClick: () => reportActivity("Opened the handbook link -- no real tab spawned"),
+            },
         ];
         return {
             kind: GridCellKind.Custom,
@@ -496,8 +556,11 @@ export function demoGetCellContent(item: Item): GridCell {
                 backgroundColor: "accentColor",
                 color: "accentFg",
                 borderRadius: 6,
-                // eslint-disable-next-line no-console
-                onClick: () => console.log(`[demo] button-cell clicked, row ${row}`),
+                // `button-cell` never mutates its cell -- the entire feature is "call this callback"
+                // (see `extra-cells/button-cell.ts`). This used to `console.log`, which meant the
+                // column looked inert to anyone driving the demo. Reporting into the status line is
+                // the same contract, made visible.
+                onClick: () => reportActivity(`Ran report for ${personName(row)} (row ${row})`),
             },
         };
     }
@@ -522,10 +585,19 @@ export function demoGetCellContent(item: Item): GridCell {
                 isOpen: false,
                 canOpen: depth < 2,
                 depth,
-                onClickOpener: (cell: CustomCell<{ kind: "tree-view-cell"; isOpen: boolean }>) => ({
-                    ...cell,
-                    data: { ...cell.data, isOpen: !cell.data.isOpen },
-                }),
+                // Only the disclosure triangle is clickable (`tree-view-cell.ts`'s `isOverIcon`,
+                // ported verbatim from source) -- clicking the row text does nothing but select,
+                // which is why this column reads as inert until you find the ~22px target. The
+                // activity report is here to make a successful toggle unmistakable, and to say the
+                // part the glyph cannot: **no rows are hidden or revealed**. Row visibility is a
+                // consumer concern in source too -- `packages/cells` ships no grid-level tree --
+                // and this demo deliberately keeps `getCellContent` a pure function of `[col, row]`
+                // over 200,000 rows, which a real collapse would have to break.
+                onClickOpener: (cell: CustomCell<{ kind: "tree-view-cell"; isOpen: boolean }>) => {
+                    const nowOpen = !cell.data.isOpen;
+                    reportActivity(`${nowOpen ? "Expanded" : "Collapsed"} "${text}" (row ${row}) -- isOpen only, no rows hidden`);
+                    return { ...cell, data: { ...cell.data, isOpen: nowOpen } };
+                },
             },
         };
     }

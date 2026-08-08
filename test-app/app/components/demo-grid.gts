@@ -34,7 +34,14 @@ import GlideDataGrid, {
 } from "glide-data-grid-ember/components/glide-data-grid";
 import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";
 import type { SearchState } from "glide-data-grid-ember/components/glide-search-bar";
-import { demoColumns, demoGetCellContent, demoGetRowThemeOverride, DEMO_ROW_COUNT } from "test-app/utils/demo-data";
+import {
+    demoColumns,
+    demoColumnNote,
+    demoGetCellContent,
+    demoGetRowThemeOverride,
+    setDemoActivityListener,
+    DEMO_ROW_COUNT,
+} from "test-app/utils/demo-data";
 import { formatSearchStatus } from "glide-data-grid-ember/rendering/index";
 import { cached } from "@glimmer/tracking";
 import {
@@ -179,6 +186,26 @@ const RANGE_SELECT_MODES = ["rect", "multi-rect", "cell", "multi-cell", "none"] 
 const FILL_DIRECTIONS: readonly FillHandleDirection[] = ["orthogonal", "vertical", "horizontal", "any"];
 
 export default class DemoGrid extends Component {
+    constructor(...args: ConstructorParameters<typeof Component>) {
+        super(...args);
+        // Cell-carried callbacks (`ButtonCell.onClick`, `UriCell.onClickUri`, `LinksCell`'s
+        // per-link `onClick`) are the only way those three cell kinds do anything, and they are
+        // built inside `demoGetCellContent`, a module-scope pure function of `[col, row]` with no
+        // route to this component. `setDemoActivityListener` is that route -- see `demo-data.ts`.
+        setDemoActivityListener(message => {
+            this.lastActivity = message;
+        });
+    }
+
+    willDestroy(): void {
+        super.willDestroy();
+        setDemoActivityListener(undefined);
+    }
+
+    /** Whatever a cell-carried callback last reported. Arrow field, not `@action`: Ember 6 idiom,
+     *  and identity-stable, which every arg the grid identity-compares wants anyway. */
+    @tracked lastActivity: string | undefined;
+
     @tracked columns: readonly GridColumn[] = buildDemoColumns();
     // Phase 4a: cell edits (from the overlay editor / boolean toggle / delete) land here rather
     // than mutating `demoGetCellContent`'s output directly -- `GridHostController` never owns cell
@@ -476,13 +503,29 @@ export default class DemoGrid extends Component {
     @tracked selectionSummary = "none";
     @tracked visibleRegionSummary = "-";
     @tracked lastFill: string | undefined;
+    /** Column of the selected cell, in the consumer's own space. Drives the per-column note. */
+    @tracked selectedColumn: number | undefined;
+
+    /** `undefined` for every column whose behaviour is self-evident. See `demo-data.ts`. */
+    get columnNote(): string | undefined {
+        return this.selectedColumn === undefined ? undefined : demoColumnNote(this.selectedColumn);
+    }
+
+    /** `@onSelectionChanged` reports the grid's **internal** column space, which includes the
+     *  row-marker column when one exists -- unlike `@onCellsEdited` and the context-menu callbacks,
+     *  which subtract it. Everything below therefore corrects for it before showing a column
+     *  number or looking a column up. */
+    private get rowMarkerOffset(): number {
+        return this.rowMarkers === "none" ? 0 : 1;
+    }
 
     @action
     handleSelectionChanged(selection: GridSelection): void {
         const current = selection.current;
         const parts: string[] = [];
+        this.selectedColumn = current === undefined ? undefined : current.cell[0] - this.rowMarkerOffset;
         if (current !== undefined) {
-            const r = current.range;
+            const r = { ...current.range, x: current.range.x - this.rowMarkerOffset };
             parts.push(r.width * r.height === 1 ? `cell ${r.x},${r.y}` : `range ${r.width}x${r.height} at ${r.x},${r.y}`);
         }
         if (selection.rows.length > 0) parts.push(`${selection.rows.length} row(s)`);
@@ -577,9 +620,43 @@ export default class DemoGrid extends Component {
                 <span>Selection: <b data-test-selection-summary>{{this.selectionSummary}}</b></span>
                 <span>Visible: <b data-test-visible-region>{{this.visibleRegionSummary}}</b></span>
                 {{#if this.lastFill}}<span>Last fill: <b data-test-last-fill>{{this.lastFill}}</b></span>{{/if}}
+                {{! Cell-carried callbacks (button / uri / links) have no other way to be seen. }}
                 <span class="gdg-full__hint">
                     Drag a row by its marker to reorder &middot; drag the selection's corner handle to fill
                     &middot; right-click a cell, header or group header &middot; {{if this.isMac "Cmd" "Ctrl"}}+F to search
+                </span>
+            </div>
+
+            {{! Two things a canvas grid cannot say for itself, on one always-present row.
+
+                LEFT -- what a cell-carried callback just did. `ButtonCell.onClick`,
+                `UriCell.onClickUri` and `LinksCell`'s per-link `onClick` produce no cell edit and
+                no selection change, so without this they are indistinguishable from nothing
+                happening. That is exactly how three of this demo's columns came to be reported as
+                broken.
+
+                RIGHT -- what the selected column actually does. A canvas cell cannot draw "I am
+                deliberately display-only", which is why the bubble and drilldown columns read as a
+                mystery rather than as a documented design decision.
+
+                Both halves are rendered unconditionally and clamped to one line: this row sits
+                ABOVE the grid, so anything that appears, disappears or wraps here moves every row
+                underneath it -- and a click already aimed at a row then lands on its neighbour. }}
+            <div class="gdg-full__status" style="align-items: baseline;">
+                <span style="min-width: 0; flex: 1 1 40%;">Last action:
+                    <b
+                        data-test-last-activity
+                        title={{this.lastActivity}}
+                        style="display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;"
+                    >{{if this.lastActivity this.lastActivity "-"}}</b>
+                </span>
+                <span
+                    class="gdg-full__hint"
+                    data-test-column-note
+                    title={{this.columnNote}}
+                    style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                >
+                    {{#if this.columnNote}}{{this.columnNote}}{{else}}Select a cell to see what that column does.{{/if}}
                 </span>
             </div>
 

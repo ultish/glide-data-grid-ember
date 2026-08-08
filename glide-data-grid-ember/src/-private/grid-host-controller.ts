@@ -115,6 +115,7 @@ import { pointInRect } from "../rendering/common/math.ts";
 import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
 import { browserIsSafari, browserIsOSX } from "../rendering/common/browser-detect.ts";
+import { isGridSurfaceTarget } from "./grid-event-target.ts";
 
 // Public args this controller is driven by. `getArgs()` is called fresh on every draw/scroll/hover
 // pass -- the controller never caches the result across calls, per the calling convention: the
@@ -799,6 +800,14 @@ export class GridHostController {
     private readonly stackEl: HTMLDivElement;
     private readonly spacerEl: HTMLDivElement;
 
+    /**
+     * The nodes a pointer event is allowed to have originated on for the grid to treat it as its
+     * own. Everything else inside `root` -- an open overlay editor, `<GlideSearchBar>`, any
+     * consumer chrome rendered into the yielded block -- must NOT be dispatched as a grid click.
+     * See `grid-event-target.ts` for the full rationale and the source citation.
+     */
+    private readonly gridSurfaces: readonly unknown[];
+
     private readonly bufferAEl: HTMLCanvasElement;
     private readonly bufferBEl: HTMLCanvasElement;
 
@@ -961,6 +970,20 @@ export class GridHostController {
         this.scrollerEl.append(this.scrollInnerEl);
 
         this.root.append(this.underlayEl, this.scrollerEl);
+
+        // Built once, right after the scaffolding exists: none of these nodes is ever replaced for
+        // the controller's lifetime. `root` itself is included because a click can land on it
+        // directly (e.g. the gap past the last column when the scroller does not cover it).
+        this.gridSurfaces = [
+            this.root,
+            this.underlayEl,
+            this.canvasEl,
+            this.headerCanvasEl,
+            this.scrollerEl,
+            this.scrollInnerEl,
+            this.stackEl,
+            this.spacerEl,
+        ];
 
         // --- offscreen double-buffer canvases -------------------------------------------------
         this.bufferAEl = document.createElement("canvas");
@@ -2531,6 +2554,9 @@ export class GridHostController {
      */
     private readonly onContextMenu = (ev: MouseEvent): void => {
         if (this.destroyed) return;
+        // Same guard as `onMouseDown` below, for the same reason: a right-click inside an open
+        // editor or on consumer chrome is not a right-click on a cell.
+        if (!isGridSurfaceTarget(ev.target, this.gridSurfaces)) return;
         const args = this.resolveArgs();
         if (
             args.onCellContextMenu === undefined &&
@@ -2574,6 +2600,12 @@ export class GridHostController {
 
     private readonly onMouseDown = (ev: MouseEvent): void => {
         if (this.destroyed || ev.button !== 0) return;
+        // The listener is on `root`, which also contains the open overlay editor and anything the
+        // consumer rendered into the yielded block -- so a mousedown that did not originate on the
+        // grid's own surface is not a grid click and must be left entirely alone. Mirrors source's
+        // `onPointerDown` identity guard (`data-grid.tsx:1076-1080`); see `grid-event-target.ts`
+        // for why a `root.contains(...)` test is exactly the wrong shape here.
+        if (!isGridSurfaceTarget(ev.target, this.gridSurfaces)) return;
         // Click-to-focus, matching source's grid being a normal focusable element that gains focus
         // on interaction. Most browsers already do this automatically for a `tabIndex`-bearing
         // element on mousedown, but this makes it explicit/deterministic rather than relying on
