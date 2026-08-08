@@ -4560,3 +4560,75 @@ scripts per the standing rule:
   eyeballing a screenshot: dispatch `contextmenu` and read the demo's own menu label
   (`Cell <col>, <row>`). A binary search over x found a column's exact right edge in seconds, after
   eyeball estimates from zoomed screenshots had been wrong by ~30px twice.
+
+## Phase 10 — the fully-featured demo, the cookbook page, and a user-facing README (COMPLETE, browser-verified, 2026-08-08)
+
+### 10a — `<DemoGrid>` is now the single fully-featured reference grid
+
+Every shipped `<GlideDataGrid>` arg is switched on there, with a **cycling toggle** wherever two
+settings are mutually exclusive (`@rowMarkers`, `@rangeSelect`, `@allowedFillDirections`,
+`@freezeColumns`, `@fillHandle`, draw hooks, app-owned search) and a **live status line** rendering
+`@onSelectionChanged` / `@onVisibleRegionChanged` / `@onFillPattern`, which turns three
+otherwise-invisible callbacks into something a regression can break loudly.
+
+Newly switched on here for the first time anywhere: column groups, header icons (including a custom
+glyph via `@headerIcons`), an auto-sized column, `@freezeColumns`, `@onColumnProposeMove`,
+`@onHeaderMenuClick`, `@minColumnWidth`/`@maxColumnWidth`.
+
+**It immediately paid for itself — a real defect, found within minutes of turning auto-sizing on:**
+
+> **Column auto-sizing measured every column in the wrong font.** `sizeColumns` never set
+> `ctx.font = theme.baseFontFull` before running the per-cell `measure()` calls (source does, at
+> `use-column-sizer.ts:184`), so measurement used *whatever font the previous draw left on the live
+> render context* — the canvas default `10px sans-serif` on the very first pass. The symptom is not
+> "auto-sizing is off": columns came out at varying, plausible, **wrong** widths with long text
+> clipped, which is exactly why `<DaisyDemo>`'s Phase 9i check ("if every column comes out the same
+> width, measurement has stopped working") passed anyway. Fixed in `sizeColumns`, which now also
+> **restores** the caller's font — it is handed the live rendering context, not a scratch one — with
+> three regression tests including one that asserts the font survives a throwing `measure()`.
+
+Two things that looked like bugs during verification and were not, recorded so nobody re-chases them:
+
+- The row-marker column fires **no** context-menu event. `onContextMenu` bails on `col < 0` after
+  subtracting `rowMarkerOffset`, which is consistent with every other callback: the marker column is
+  not one of the consumer's columns.
+- With `@freezeColumns` set, the **group header renders twice** for a group that spans the frozen
+  boundary. That is the frozen region being drawn as its own strip, and source behaves the same.
+
+Column 3 (the uri column) is the auto-sized one, deliberately: its values are far wider than its
+nominal width, so a working measurement is obvious at a glance. **Do not pick a `Custom` cell for
+this** — auto-sizing runs through each renderer's `measure()`, and most custom renderers have none,
+so such a column silently takes the flat 150px fallback and demonstrates nothing.
+
+### 10b — the cookbook is a **page in the test-app**, not a markdown file
+
+Written first as `glide-data-grid-ember/COOKBOOK.md`, then **moved** (user instruction, mid-phase)
+to `test-app/app/components/cookbook-page.gts` and the `.md` deleted — the test-app is what gets
+deployed to GitHub Pages, so the cookbook now ships next to the demos it describes, and recipe 1's
+"one-line render" is a **live grid** rather than a screenshot of one.
+
+Implementation notes worth reusing:
+
+- **Content is a data model (`SECTIONS`), not markup.** Two reasons, and the first is not optional:
+  code samples containing `{{ }}` are parsed as Glimmer if they appear in template position, so they
+  have to arrive as JS strings rendered through `{{block.text}}`.
+- **Blocks are flattened to a uniform `RenderBlock` with `is*` booleans** rather than left as a
+  discriminated union. Glimmer templates cannot narrow a union, so a union forces either helper
+  gymnastics or `@ts-expect-error`.
+- **`<section>` cannot be used as a tag while `section` is an in-scope block param.** In a
+  strict-mode template any lowercase tag matching a binding in scope resolves to that binding, so
+  `{{#each this.sections as |section|}}<section>` type-errors with a baffling "No overload matches
+  this call". Renamed the block param to `chapter`.
+- A ~10-line `inline()` applies a deliberately tiny markdown subset (`` `code` ``, `**bold**`,
+  `*italic*`). It **escapes HTML first**, which is what makes the `htmlSafe` at the end safe.
+- Tailwind's preflight resets `list-style` on every `ul`, so bulleted lists need it set explicitly.
+
+### The README is now user-facing, and is the ROOT one
+
+`glide-data-grid-ember/README.md` is a build artifact (gitignored; `rollup.config.mjs` copies
+`../README.md` over it on every build) — the file to edit is the **workspace-root `README.md`**.
+Rewritten for a human evaluating the addon: what you get, install, a complete minimal example, the
+three things that surprise everyone (`@rows` is a count, `[column, row]` ordering, the container
+needs a height), and links out to the deployed demos/cookbook and to `DATA.md`/`THEMING.md`.
+
+The GitHub Pages URL is a placeholder with local-run instructions until the deploy exists.

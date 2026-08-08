@@ -34,9 +34,15 @@ import {
     type CellsForSelectionCallback,
 } from "../-private/grid-host-controller.ts";
 
-// Part of this component's public contract (`@onSearchStateChange`), so re-exported here rather
-// than making consumers import from `-private/`.
-export type { SearchState, ContextMenuEventArgs } from "../-private/grid-host-controller.ts";
+// Part of this component's public contract (`@onSearchStateChange`, `@rowMarkers`,
+// `@getCellsForSelection`), so re-exported here rather than making consumers import from
+// `-private/`.
+export type {
+    SearchState,
+    ContextMenuEventArgs,
+    RowMarkerKind,
+    CellsForSelectionCallback,
+} from "../-private/grid-host-controller.ts";
 
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
 import { createCombinedCellRenderer } from "../rendering/extra-cells/index.ts";

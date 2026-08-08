@@ -1,4 +1,21 @@
-// Demo-app backing component for the `<GlideDataGrid>` smoke-test route.
+// Phase 10a: **the fully-featured reference grid.** This demo's job is coverage -- every arg
+// `<GlideDataGrid>` ships is switched on here, with a toggle wherever two settings are mutually
+// exclusive.
+//
+// That is not tidiness. This project's most expensive recurring lesson is that *a feature no demo
+// has ever switched on is effectively unverified code, however many phases have been
+// "browser-verified"*: turning row markers, column groups and header icons on for the first time in
+// Phase 7 surfaced five latent defects at once, and Phase 9h found two more the moment row markers
+// and `@highlightRegions` were finally enabled together. The toggle row below is part of the
+// deliverable -- it is what makes a regression visible without reading code.
+//
+// The other demos are NOT redundant with this one and must not be deleted: `<StreamingDemo>` proves
+// the damage path under load, `<ScaleProof>` the 1,000-row incremental projection, `<AsyncDemo>`
+// paging, `<TrackingDemo>` autotracking, `<DaisyDemo>` live theme switching, `<GlideDemo>` the
+// grid.glideapps.com replica. This one covers *args*; those cover *behaviours under load*.
+//
+// It is also the source COOKBOOK.md's recipes are lifted from, which is the cheapest way to keep
+// that document true -- if a recipe stops working, this demo stops working.
 //
 // Holds `@tracked columns` so resize/reorder round-trip visually -- `GridHostController` never
 // mutates column state itself (documented "consumer owns the data" contract in
@@ -13,6 +30,7 @@ import { htmlSafe } from "@ember/template";
 import GlideDataGrid, {
     type GlideDataGridApi,
     type ContextMenuEventArgs,
+    type RowMarkerKind,
 } from "glide-data-grid-ember/components/glide-data-grid";
 import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";
 import type { SearchState } from "glide-data-grid-ember/components/glide-search-bar";
@@ -22,14 +40,23 @@ import { cached } from "@glimmer/tracking";
 import {
     allExtraCells,
     getDataEditorDarkTheme,
+    GridColumnIcon,
+    isSizedGridColumn,
+    type AutoGridColumn,
+    type SizedGridColumn,
     type GridColumn,
     type GridCell,
     type Item,
+    type Rectangle,
     type Theme,
     type CellList,
     type DrawCellCallback,
     type DrawHeaderCallback,
+    type FillHandleDirection,
+    type FillPatternEventArgs,
+    type GridSelection,
     type Highlight,
+    type SpriteMap,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -84,8 +111,96 @@ const DEMO_PRELIGHT_CELLS: CellList = [
 // exactly that (the grid does `mergeAndRealizeTheme(getDataEditorTheme(), @theme)` internally).
 const DARK_THEME: Partial<Theme> = getDataEditorDarkTheme();
 
+// --- Phase 10a: column groups, header icons, and one deliberately auto-sized column ------------
+//
+// `demoColumns` (shared with `<DaisyDemo>`) is plain: titles and widths, nothing else. Rather than
+// enrich it there and drag another demo along, this one derives its own columns -- which is also
+// what a real consumer does, since column metadata is presentation and usually belongs next to the
+// grid rather than next to the data.
+//
+// Groups are what make `@onGroupHeaderContextMenu` reachable at all (no groups, no group header to
+// right-click), and header icons were dead code for six phases because nothing ever set
+// `column.icon`. Both are here for that reason.
+const COLUMN_GROUPS = ["Identity", "Content", "Media", "Signals", "Records"] as const;
+
+// Roughly matched to each column's actual cell kind for the first 16 (which are the typed ones --
+// see `demo-data.ts`); after that it just cycles, since those columns are all plain text.
+const COLUMN_ICONS: readonly GridColumnIcon[] = [
+    GridColumnIcon.HeaderRowID,
+    GridColumnIcon.HeaderNumber,
+    GridColumnIcon.HeaderBoolean,
+    GridColumnIcon.HeaderUri,
+    GridColumnIcon.HeaderMarkdown,
+    GridColumnIcon.HeaderImage,
+    GridColumnIcon.HeaderArray,
+    GridColumnIcon.HeaderReference,
+    GridColumnIcon.HeaderMath,
+    GridColumnIcon.HeaderEmoji,
+    GridColumnIcon.HeaderSingleValue,
+    GridColumnIcon.HeaderTime,
+    GridColumnIcon.HeaderArray,
+    GridColumnIcon.HeaderLookup,
+    GridColumnIcon.HeaderJoinStrings,
+    GridColumnIcon.HeaderUri,
+];
+
+// A custom glyph merged **over** the built-in set via `@headerIcons`. The built-ins are always
+// present, so this is only needed to add a glyph of your own or restyle a stock one. The `fg`/`bg`
+// placeholders are substituted by the addon's `SpriteManager` from the current theme, which is why
+// a custom icon themes itself for free.
+const CUSTOM_HEADER_ICONS: SpriteMap = {
+    demoStar: p =>
+        `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="16" height="16" rx="4" fill="${p.bgColor}" />
+            <path d="M10 5.5l1.6 3.2 3.4.5-2.5 2.4.6 3.4-3.1-1.6-3.1 1.6.6-3.4L5 9.2l3.4-.5L10 5.5z"
+                  fill="${p.fgColor}" />
+        </svg>`,
+};
+
+/** Which column-group heading a column belongs to. Only the first 16 columns are grouped; the rest
+ *  are deliberately left ungrouped so the "some columns have no group" rendering path runs too. */
+function groupFor(index: number): string | undefined {
+    if (index >= 16) return undefined;
+    return COLUMN_GROUPS[Math.floor(index / 4)] ?? undefined;
+}
+
+// The one auto-sized column. Omitting `width` makes a column an `AutoGridColumn`, which the addon
+// measures from its content (Phase 9i) instead of falling back to a fixed default.
+//
+// Column 3 is chosen deliberately: it is the uri column, whose values (`https://example.com/items/N`)
+// are far wider than its nominal fixed width, so a working measurement is obvious at a glance -- the
+// column comes out visibly wider than its neighbours and is then clamped by `@maxColumnWidth`. Pick a
+// `Custom` cell instead and you get the flat `DEFAULT_COLUMN_WIDTH` fallback, because auto-sizing
+// works through each renderer's own `measure()` and most custom renderers don't have one.
+const AUTO_SIZED_COLUMN = 3;
+
+function buildDemoColumns(): readonly GridColumn[] {
+    return demoColumns.map((column, i) => {
+        const common = {
+            id: column.id ?? `col-${i}`,
+            title: column.title,
+            group: groupFor(i),
+            themeOverride: column.themeOverride,
+            // `hasMenu` is what draws the chevron and makes `@onHeaderMenuClick` fire. The menu UI
+            // itself is consumer chrome -- the addon ships none, by design.
+            hasMenu: true,
+            icon: i === 0 ? "demoStar" : (COLUMN_ICONS[i % COLUMN_ICONS.length] ?? GridColumnIcon.HeaderString),
+        };
+        // The distinction is exactly this: a column WITH `width` is a `SizedGridColumn`, one
+        // WITHOUT is an `AutoGridColumn` that the grid measures. There is no `width: "auto"`.
+        if (i === AUTO_SIZED_COLUMN) return common satisfies AutoGridColumn;
+        return { ...common, width: isSizedGridColumn(column) ? column.width : 120 } satisfies SizedGridColumn;
+    });
+}
+
+// Cycled by the "Row markers" control. `"none"` is included on purpose: it is the default, and it
+// is the setting that turns row reordering off (there is nothing left to grab).
+const ROW_MARKER_KINDS: readonly RowMarkerKind[] = ["both", "checkbox", "number", "clickable-number", "none"];
+const RANGE_SELECT_MODES = ["rect", "multi-rect", "cell", "multi-cell", "none"] as const;
+const FILL_DIRECTIONS: readonly FillHandleDirection[] = ["orthogonal", "vertical", "horizontal", "any"];
+
 export default class DemoGrid extends Component {
-    @tracked columns: readonly GridColumn[] = demoColumns;
+    @tracked columns: readonly GridColumn[] = buildDemoColumns();
     // Phase 4a: cell edits (from the overlay editor / boolean toggle / delete) land here rather
     // than mutating `demoGetCellContent`'s output directly -- `GridHostController` never owns cell
     // data itself (same "consumer owns the data" contract as columns above), so a real consumer
@@ -252,6 +367,14 @@ export default class DemoGrid extends Component {
     // the render engine compares `getRowThemeOverride` by identity for its blit/scroll fast path.
     readonly getRowThemeOverride = demoGetRowThemeOverride;
 
+    // `@headerIcons` is read once, when the grid's `SpriteManager` is built -- changing it later has
+    // no effect -- so a module-scope constant is both sufficient and correct.
+    readonly headerIcons = CUSTOM_HEADER_ICONS;
+
+    /** Cosmetic: the search shortcut is Cmd+F on macOS and Ctrl+F elsewhere, matching what the
+     *  addon's own keybinding does. */
+    readonly isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+
     @action
     toggleTheme(): void {
         this.isDark = !this.isDark;
@@ -316,6 +439,121 @@ export default class DemoGrid extends Component {
         this.useFillHandle = !this.useFillHandle;
     }
 
+    // --- Phase 10a: the mutually-exclusive settings, as cycling controls -------------------------
+    // Each of these is an arg where only one value can be live at a time, so a toggle is the only
+    // way a demo can cover more than one of them.
+
+    @tracked rowMarkerIndex = 0;
+    @tracked rangeSelectIndex = 0;
+    @tracked fillDirectionIndex = 0;
+    @tracked freezeColumns = 0;
+
+    get rowMarkers(): RowMarkerKind {
+        return ROW_MARKER_KINDS[this.rowMarkerIndex] ?? "both";
+    }
+
+    get rangeSelect(): (typeof RANGE_SELECT_MODES)[number] {
+        return RANGE_SELECT_MODES[this.rangeSelectIndex] ?? "rect";
+    }
+
+    get allowedFillDirections(): FillHandleDirection {
+        return FILL_DIRECTIONS[this.fillDirectionIndex] ?? "orthogonal";
+    }
+
+    /** Row reorder is grabbed from the marker column, so with `@rowMarkers="none"` there is nothing
+     *  to grab. Passing `undefined` then is honest: it also stops the marker cells advertising a
+     *  drag handle they cannot offer. */
+    get onRowMovedIfAvailable(): ((s: number, e: number) => void) | undefined {
+        return this.rowMarkers === "none" ? undefined : this.handleRowMoved;
+    }
+
+    @action
+    cycleRowMarkers(): void {
+        this.rowMarkerIndex = (this.rowMarkerIndex + 1) % ROW_MARKER_KINDS.length;
+    }
+
+    @action
+    cycleRangeSelect(): void {
+        this.rangeSelectIndex = (this.rangeSelectIndex + 1) % RANGE_SELECT_MODES.length;
+    }
+
+    @action
+    cycleFillDirection(): void {
+        this.fillDirectionIndex = (this.fillDirectionIndex + 1) % FILL_DIRECTIONS.length;
+    }
+
+    @action
+    toggleFreezeColumns(): void {
+        this.freezeColumns = this.freezeColumns === 0 ? 2 : 0;
+    }
+
+    // --- Phase 10a: the notification-only args, surfaced as a live status line ------------------
+    // `@onSelectionChanged` and `@onVisibleRegionChanged` are pure notifications. Rendering them
+    // costs nothing and turns two otherwise-invisible callbacks into something a regression can
+    // break loudly.
+    //
+    // Note `@onVisibleRegionChanged` is already deferred to a microtask by the addon precisely so
+    // setting tracked state from it is safe -- see its doc comment.
+    @tracked selectionSummary = "none";
+    @tracked visibleRegionSummary = "-";
+    @tracked lastFill: string | undefined;
+
+    @action
+    handleSelectionChanged(selection: GridSelection): void {
+        const current = selection.current;
+        const parts: string[] = [];
+        if (current !== undefined) {
+            const r = current.range;
+            parts.push(r.width * r.height === 1 ? `cell ${r.x},${r.y}` : `range ${r.width}x${r.height} at ${r.x},${r.y}`);
+        }
+        if (selection.rows.length > 0) parts.push(`${selection.rows.length} row(s)`);
+        if (selection.columns.length > 0) parts.push(`${selection.columns.length} col(s)`);
+        this.selectionSummary = parts.length > 0 ? parts.join(", ") : "none";
+    }
+
+    @action
+    handleVisibleRegionChanged(region: Rectangle): void {
+        this.visibleRegionSummary = `cols ${region.x}-${region.x + region.width - 1}, rows ${region.y}-${region.y + region.height - 1}`;
+    }
+
+    /** Fires just before a fill's edits are computed. Calling `preventDefault()` would hand the
+     *  whole fill over to this component; here it only reports, so the default still runs. */
+    @action
+    handleFillPattern(event: FillPatternEventArgs): void {
+        const d = event.fillDestination;
+        this.lastFill = `${d.width}x${d.height} from ${event.patternSource.x},${event.patternSource.y}`;
+    }
+
+    /** Live veto during a column-reorder drag. Refusing position 0 is arbitrary but visible: the
+     *  drop indicator simply refuses to appear there. */
+    @action
+    handleColumnProposeMove(_startIndex: number, endIndex: number): boolean {
+        return endIndex !== 0;
+    }
+
+    /** `@onHeaderMenuClick` fires only on the chevron glyph, never on the header body -- that is a
+     *  separate, precise hit test. `bounds` is the glyph's rect in **grid-root-relative** pixels,
+     *  which is exactly the space an absolutely-positioned child of the grid's own container is
+     *  laid out in (contrast the context menus below, which get viewport coordinates from the
+     *  event). The menu itself is consumer chrome; the addon ships none, by design. */
+    @tracked headerMenu: { col: number; bounds: Rectangle } | undefined;
+
+    @action
+    handleHeaderMenuClick(col: number, bounds: Rectangle): void {
+        this.headerMenu = { col, bounds };
+    }
+
+    @action
+    closeHeaderMenu(): void {
+        this.headerMenu = undefined;
+    }
+
+    get headerMenuStyle(): ReturnType<typeof htmlSafe> {
+        const menu = this.headerMenu;
+        if (menu === undefined) return htmlSafe("");
+        return htmlSafe(`left: ${menu.bounds.x}px; top: ${menu.bounds.y + menu.bounds.height}px;`);
+    }
+
     // Phase 4d: `demoGetCellContent` is a pure function of `[col, row]` (no upper bound baked in),
     // so simply widening `rows` is enough for the newly-appended row to render real (generated)
     // content immediately -- no separate "seed the new row's data" step needed for this demo.
@@ -325,20 +563,45 @@ export default class DemoGrid extends Component {
     }
 
     <template>
-        <div style="display: flex; flex-direction: column; height: 100%; gap: 8px;">
-            <div style="flex: 0 0 auto;">
-                <button type="button" data-test-theme-toggle {{on "click" this.toggleTheme}}>
-                    {{if this.isDark "Switch to light theme" "Switch to dark theme"}}
+        <div class="gdg-full">
+            {{! Phase 10a: the toggle row is part of the deliverable -- it is what makes a
+                regression in any of these args visible without reading code. }}
+            <div class="gdg-full__controls">
+                <button type="button" class="gdg-full__toggle" data-test-theme-toggle {{on "click" this.toggleTheme}}>
+                    Theme: <b>{{if this.isDark "dark" "light"}}</b>
                 </button>
-                <button type="button" data-test-draw-hooks-toggle {{on "click" this.toggleDrawHooks}}>
-                    {{if this.showDrawHooks "Hide draw hooks" "Show draw hooks"}}
+                <button type="button" class="gdg-full__toggle" data-test-row-markers-toggle {{on "click" this.cycleRowMarkers}}>
+                    Row markers: <b>{{this.rowMarkers}}</b>
                 </button>
-                <button type="button" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
-                    {{if this.useExternalSearch "Hide external search input" "Show external search input"}}
+                <button type="button" class="gdg-full__toggle" data-test-range-select-toggle {{on "click" this.cycleRangeSelect}}>
+                    Range select: <b>{{this.rangeSelect}}</b>
                 </button>
-                <button type="button" data-test-fill-handle-toggle {{on "click" this.toggleFillHandle}}>
-                    {{if this.useFillHandle "Disable fill handle" "Enable fill handle"}}
+                <button type="button" class="gdg-full__toggle" data-test-freeze-toggle {{on "click" this.toggleFreezeColumns}}>
+                    Frozen columns: <b>{{this.freezeColumns}}</b>
                 </button>
+                <button type="button" class="gdg-full__toggle" data-test-fill-handle-toggle {{on "click" this.toggleFillHandle}}>
+                    Fill handle: <b>{{if this.useFillHandle "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-fill-direction-toggle {{on "click" this.cycleFillDirection}}>
+                    Fill axis: <b>{{this.allowedFillDirections}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-draw-hooks-toggle {{on "click" this.toggleDrawHooks}}>
+                    Draw hooks: <b>{{if this.showDrawHooks "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
+                    App-owned search: <b>{{if this.useExternalSearch "on" "off"}}</b>
+                </button>
+            </div>
+
+            {{! Notification-only args, rendered so they are observable rather than merely wired. }}
+            <div class="gdg-full__status">
+                <span>Selection: <b data-test-selection-summary>{{this.selectionSummary}}</b></span>
+                <span>Visible: <b data-test-visible-region>{{this.visibleRegionSummary}}</b></span>
+                {{#if this.lastFill}}<span>Last fill: <b data-test-last-fill>{{this.lastFill}}</b></span>{{/if}}
+                <span class="gdg-full__hint">
+                    Drag a row by its marker to reorder &middot; drag the selection's corner handle to fill
+                    &middot; right-click a cell, header or group header &middot; {{if this.isMac "Cmd" "Ctrl"}}+F to search
+                </span>
             </div>
 
             {{#if this.useExternalSearch}}
@@ -366,7 +629,7 @@ export default class DemoGrid extends Component {
                     <span data-test-external-search-status>{{this.searchStatusText}}</span>
                 </div>
             {{/if}}
-            <div style="flex: 1 1 auto; min-height: 0;">
+            <div class="gdg-full__grid">
                 <GlideDataGrid
                     @columns={{this.columns}}
                     @getCellContent={{this.getCellContent}}
@@ -374,15 +637,25 @@ export default class DemoGrid extends Component {
                     @rows={{this.rows}}
                     @theme={{this.theme}}
                     @getRowThemeOverride={{this.getRowThemeOverride}}
+                    {{! Column groups + header icons (Phase 7b / Phase 1's sprite set). Groups are
+                        also the only way `@onGroupHeaderContextMenu` is reachable. }}
+                    @headerIcons={{this.headerIcons}}
+                    @freezeColumns={{this.freezeColumns}}
                     @onColumnResize={{this.handleColumnResize}}
                     @onColumnMoved={{this.handleColumnMoved}}
+                    @onColumnProposeMove={{this.handleColumnProposeMove}}
+                    @minColumnWidth={{50}}
+                    @maxColumnWidth={{420}}
                     @onCellsEdited={{this.handleCellsEdited}}
                     {{! Phase 9h. Row markers are what a row reorder is grabbed from, so they have to
                         be on for `@onRowMoved` to do anything -- and turning them on here is also
                         what first exercised the row-marker offset in `@highlightRegions`. }}
-                    @rowMarkers="both"
-                    @onRowMoved={{this.handleRowMoved}}
+                    @rowMarkers={{this.rowMarkers}}
+                    @rangeSelect={{this.rangeSelect}}
+                    @onRowMoved={{this.onRowMovedIfAvailable}}
                     @fillHandle={{this.useFillHandle}}
+                    @allowedFillDirections={{this.allowedFillDirections}}
+                    @onFillPattern={{this.handleFillPattern}}
                     @getCellsForSelection={{true}}
                     @showTrailingBlankRow={{true}}
                     @onRowAppended={{this.handleRowAppended}}
@@ -393,6 +666,9 @@ export default class DemoGrid extends Component {
                     @showSearch={{this.showSearch}}
                     @onReady={{this.handleReady}}
                     @onSearchStateChange={{this.handleSearchStateChange}}
+                    @onSelectionChanged={{this.handleSelectionChanged}}
+                    @onVisibleRegionChanged={{this.handleVisibleRegionChanged}}
+                    @onHeaderMenuClick={{this.handleHeaderMenuClick}}
                     @onCellContextMenu={{this.handleCellContextMenu}}
                     @onHeaderContextMenu={{this.handleHeaderContextMenu}}
                     @onGroupHeaderContextMenu={{this.handleGroupHeaderContextMenu}}
@@ -403,6 +679,22 @@ export default class DemoGrid extends Component {
                 >
                     <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
                 </GlideDataGrid>
+
+                {{#if this.headerMenu}}
+                    {{! `bounds` is grid-root-relative, and this div is a child of the grid's own
+                        (positioned) container -- so the coordinates need no translation. }}
+                    <div
+                        class="gdg-demo-sort-menu"
+                        role="menu"
+                        data-test-header-menu
+                        style={{this.headerMenuStyle}}
+                    >
+                        <div class="gdg-demo-sort-menu__title">Column {{this.headerMenu.col}}</div>
+                        <button type="button" class="gdg-demo-sort-menu__item" {{on "click" this.closeHeaderMenu}}>
+                            Close
+                        </button>
+                    </div>
+                {{/if}}
             </div>
 
             {{#if this.contextMenu}}

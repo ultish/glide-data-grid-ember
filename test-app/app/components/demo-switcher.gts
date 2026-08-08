@@ -13,6 +13,8 @@
 //                          throughput and repaint timings.
 //   - "DaisyUI theme"  -> `<DaisyDemo>`: Phase 9's CSS-variable theming bridge -- DaisyUI 5's
 //                          oklch() palette driving the canvas, switching live via `data-theme`.
+//   - "Cookbook"       -> `<CookbookPage>`: Phase 10b's consumer guide, as a live page rather than
+//                          a markdown file, so it deploys with the demos it describes.
 //   - "Async paging"   -> `<AsyncDemo>`: Phase 8's `AsyncRecordsSource` -- 100k rows that aren't in
 //                          memory, fetched a page at a time as `@onVisibleRegionChanged` reports
 //                          what's on screen, each arrival repainted by damage.
@@ -26,9 +28,10 @@ import GlideDemo from 'test-app/components/glide-demo';
 import StreamingDemo from 'test-app/components/streaming-demo';
 import AsyncDemo from 'test-app/components/async-demo';
 import DaisyDemo from 'test-app/components/daisy-demo';
+import CookbookPage from 'test-app/components/cookbook-page';
 
 type DemoTab =
-  'full-grid' | 'tracking' | 'glide' | 'streaming' | 'async' | 'daisy';
+  'full-grid' | 'tracking' | 'glide' | 'streaming' | 'async' | 'daisy' | 'cookbook';
 
 export default class DemoSwitcher extends Component {
   @tracked tab: DemoTab = 'full-grid';
@@ -57,6 +60,10 @@ export default class DemoSwitcher extends Component {
     this.tab = 'daisy';
   }
 
+  @action showCookbook(): void {
+    this.tab = 'cookbook';
+  }
+
   get isDaisy(): boolean {
     return this.tab === 'daisy';
   }
@@ -79,6 +86,10 @@ export default class DemoSwitcher extends Component {
 
   get isAsync(): boolean {
     return this.tab === 'async';
+  }
+
+  get isCookbook(): boolean {
+    return this.tab === 'cookbook';
   }
 
   <template>
@@ -139,6 +150,14 @@ export default class DemoSwitcher extends Component {
         >
           DaisyUI theming
         </button>
+        <button
+          class="btn btn-xs btn-ghost {{if this.isCookbook 'btn-active'}}"
+          type="button"
+          data-test-show-cookbook
+          {{on "click" this.showCookbook}}
+        >
+          Cookbook
+        </button>
       </div>
       <div style="flex: 1 1 auto; min-height: 0;">
         {{#if this.isTracking}}
@@ -151,6 +170,8 @@ export default class DemoSwitcher extends Component {
           <AsyncDemo />
         {{else if this.isDaisy}}
           <DaisyDemo />
+        {{else if this.isCookbook}}
+          <CookbookPage />
         {{else}}
           <DemoGrid />
         {{/if}}

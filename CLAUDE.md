@@ -95,13 +95,22 @@ auditing your own notes only finds what you already knew you skipped. **Both rep
 `codebase-memory` knowledge graph** (`Users-jxhui-Developer-glide-data-grid` and
 `...-glide-data-grid-ember`) — use it before hand-grepping either tree.
 
-**Several Phase 9 items have landed** on branch `phase-9-partial`, all browser-verified — see
-PORTING-NOTES.md for each: the four consumer draw hooks + `@extraCells` ("Phase 9 (partial)"), 9q
-(the addon ships real stylesheets), 9e (search + opt-in `<GlideSearchBar>`), 9d (context menus), 9i
-(column auto-sizing), and **9h (autoscroll + row reorder + fill handle)**. Vitest suite: **586**.
+**Several Phase 9 items and all of Phase 10 have landed** on branch `phase-9-partial`, all
+browser-verified — see PORTING-NOTES.md for each: the four consumer draw hooks + `@extraCells`
+("Phase 9 (partial)"), 9q (the addon ships real stylesheets), 9e (search + opt-in
+`<GlideSearchBar>`), 9d (context menus), 9i (column auto-sizing), **9h (autoscroll + row reorder +
+fill handle)**, and **Phase 10** (see below). Vitest suite: **589**.
 **9b (accessibility) and 9c (touch) are deferred by explicit user decision** — don't propose them as
-next steps. **Next up is Phase 10** (fully-featured demo + `COOKBOOK.md`); see PHASES.md's "THE
-QUEUE".
+next steps. **Next up: deploying the test-app to GitHub Pages**; see PHASES.md's "THE QUEUE".
+
+**Phase 10 changed two things a cold session will otherwise get wrong.** (1) `<DemoGrid>` is now the
+single fully-featured reference grid — every shipped arg switched on, with toggles for the
+mutually-exclusive ones; it found a real auto-sizing defect within minutes of existing (measuring in
+whatever font the last draw left on the canvas). Keep new args wired into it. (2) **The cookbook is
+a live page in the test-app** (`app/components/cookbook-page.gts`, the "Cookbook" tab), *not* a
+markdown file — there is deliberately no `COOKBOOK.md`, because the test-app is what gets deployed.
+The **workspace-root `README.md`** is now user-facing and is the file to edit; the addon's copy is a
+build artifact rollup overwrites.
 
 Phase 9h is worth reading before touching drag/mouse code: `Autoscroller`
 (`src/rendering/autoscroll.ts`) is shared by drag-extend, row reorder and fill-drag, and there is

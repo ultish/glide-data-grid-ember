@@ -96,6 +96,15 @@ export function measureColumn(
  * column, by omitting `width`, which is what distinguishes `AutoGridColumn` from `SizedGridColumn`.
  * When there are no auto columns at all this returns without measuring anything, so a grid that
  * never uses the feature pays nothing.
+ *
+ * **Sets `ctx.font` to the theme's cell font before measuring, and restores it afterwards.** That is
+ * source's `ctx.font = themeRef.current.baseFontFull` (`use-column-sizer.ts:184`), and it was
+ * missing from this port until Phase 10a. Cell renderers' `measure()` implementations call
+ * `ctx.measureText` directly, so without it every column was measured in *whatever font the last
+ * draw happened to leave on the live render context* -- the canvas default `10px sans-serif` on the
+ * very first pass. The symptom is not "no auto-sizing": columns still came out at plausible,
+ * varying, wrong widths, with long text clipped. Restoring the font matters here specifically
+ * because the caller hands over the live rendering context, not a scratch one.
  */
 export function sizeColumns(
     columns: readonly GridColumn[],
@@ -105,11 +114,17 @@ export function sizeColumns(
     getCellRenderer: GetCellRendererCallback,
     options: MeasureColumnOptions
 ): InnerGridColumn[] {
-    return columns.map((c, i) => {
-        if ("width" in c && typeof c.width === "number") return c as InnerGridColumn;
-        // No context available yet (the canvas hasn't been created): fall back rather than
-        // measuring against nothing. The controller re-measures once it can.
-        if (ctx === undefined) return { ...c, width: DEFAULT_COLUMN_WIDTH } as InnerGridColumn;
-        return { ...c, width: measureColumn(ctx, theme, c, i, sample, getCellRenderer, options) } as InnerGridColumn;
-    });
+    const previousFont = ctx?.font;
+    if (ctx !== undefined) ctx.font = theme.baseFontFull;
+    try {
+        return columns.map((c, i) => {
+            if ("width" in c && typeof c.width === "number") return c as InnerGridColumn;
+            // No context available yet (the canvas hasn't been created): fall back rather than
+            // measuring against nothing. The controller re-measures once it can.
+            if (ctx === undefined) return { ...c, width: DEFAULT_COLUMN_WIDTH } as InnerGridColumn;
+            return { ...c, width: measureColumn(ctx, theme, c, i, sample, getCellRenderer, options) } as InnerGridColumn;
+        });
+    } finally {
+        if (ctx !== undefined && previousFont !== undefined) ctx.font = previousFont;
+    }
 }

@@ -83,7 +83,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 7 | Demo app matching glideapps.com + browser verification | **Done, browser-verified, committed** (7a column-sort decorator `src/data-source/withColumnSort`; 7b column group headers enabled; 7c the demo-grid replica + consumer-built sort menu; 7e five addon defects the demo surfaced — see below) |
 | 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path + 8b `recordsSource`; 8c the streaming `updateCells()` demo; 8d the 1,000-row incremental proof + `object-scan` example; 8e `onVisibleRegionChanged` + `AsyncRecordsSource` + two real addon defects + the verification pass. **Those letters match `PORTING-NOTES.md`'s section headers** — go there for the implementation record) |
 | 9 | Backlog — deferred features (**not auto-scheduled**; 15 grouped items 9a–9o, see detail below) | Not scheduled |
-| 10 | Fully-featured demo + consumer cookbook (**schedulable work, not a gap list**) | Not started |
+| 10 | Fully-featured demo + consumer cookbook (**schedulable work, not a gap list**) | **Done, browser-verified, committed** (10a `<DemoGrid>` covers every shipped arg; 10b the cookbook is a live page in the test-app, not a `.md`; plus a user-facing README and one real auto-sizing defect) |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
 in a fresh session, this table is the source of truth; recreate the tracked tasks from it if
@@ -951,6 +951,17 @@ settings are mutually exclusive. Treat the toggle row as part of the deliverable
 regression visible without reading code. Where a feature genuinely cannot coexist with another,
 say so in a comment rather than silently omitting it.
 
+> **DONE 2026-08-08, browser-verified.** Every gap listed above is closed: `<DemoGrid>` now has
+> column groups, header icons (incl. a custom glyph via `@headerIcons`), row markers, an auto-sized
+> column, `@freezeColumns`, `@onColumnProposeMove`, `@onHeaderMenuClick`, `@getCellsForSelection`,
+> row reorder and the fill handle, with cycling toggles for the mutually-exclusive settings and a
+> live status line for `@onSelectionChanged`/`@onVisibleRegionChanged`/`@onFillPattern`.
+>
+> **It found a real defect on its first run**: column auto-sizing measured every column in whatever
+> font the previous draw left on the canvas (source sets `ctx.font = theme.baseFontFull` first; this
+> port didn't). Fixed, with three regression tests. See PORTING-NOTES.md's Phase 10 section — and
+> note *why* `<DaisyDemo>`'s Phase 9i check passed anyway.
+
 **Do not delete the other demos.** They each prove something specific and hard to prove in a
 kitchen-sink grid — `<StreamingDemo>` the damage path under load, `<ScaleProof>` the 1,000-row
 incremental projection, `<AsyncDemo>` paging, `<TrackingDemo>` autotracking, `<DaisyDemo>` live
@@ -988,24 +999,41 @@ Suggested contents, roughly in the order a real integration hits them:
     component, so this is automatic — say so, since consumers will ask).
 
 **Constraints.** The addon's `README.md` is a build artifact — **do not hand-edit it** (established
-in Phase 6). Every recipe must be copy-pasteable and must actually run; the cheapest way to keep
-that true is to lift them from `<DemoGrid>` once 10a exists, which is the other reason these two
-deliverables are one phase.
+in Phase 6); the file to edit is the **workspace-root `README.md`**, which rollup copies over it.
+Every recipe must be copy-pasteable and must actually run; the cheapest way to keep that true is to
+lift them from `<DemoGrid>` once 10a exists, which is the other reason these two deliverables are
+one phase.
+
+> **DONE 2026-08-08, browser-verified — and it is NOT a markdown file.** Written first as
+> `COOKBOOK.md`, then moved mid-phase at the user's instruction to
+> `test-app/app/components/cookbook-page.gts`, a real page behind a **Cookbook** tab, because the
+> test-app is what gets deployed to GitHub Pages. Twelve chapters, a sidebar TOC, and recipe 1's
+> minimal render as a **live editable grid** rather than a screenshot. The `.md` was deleted; there
+> is deliberately only one copy.
+>
+> The root `README.md` was also rewritten for a human audience (what you get / install / a complete
+> minimal example / the three things that surprise everyone), linking out to the deployed demos and
+> to `DATA.md`/`THEMING.md`.
+>
+> **Still open:** the GitHub Pages deploy itself. The README carries a placeholder link plus
+> local-run instructions until it exists; a Pages build will likely need a base-path setting in
+> `test-app`'s vite config.
 
 ## THE QUEUE — start here (accurate as of 2026-08-08, end of session)
 
 **Done on branch `phase-9-partial`**: 9q both halves (the addon's DOM is now fully
 restylable), 9e search (engine + controller + opt-in `<GlideSearchBar>` + an app-owned-input demo),
 the OKLCH parser fix, the CSS-variable theming bridge with a live DaisyUI demo, two real
-overlay-editor defects, 9d context menus, 9i column auto-sizing, and **9h's three items (autoscroll,
-row reorder, fill handle) plus two more real defects**. Test suite 425 -> 586.
+overlay-editor defects, 9d context menus, 9i column auto-sizing, **9h's three items (autoscroll,
+row reorder, fill handle) plus two more real defects**, and **all of Phase 10** (the fully-featured
+`<DemoGrid>`, the cookbook as a live page, a user-facing README, and one more real defect). Test
+suite 425 -> 589.
 
-**All four feature items the user picked are now done.** Next, in agreed order:
+**All four feature items the user picked are done, and so is Phase 10.** Next, in agreed order:
 
-1. **Phase 10 — fully-featured demo + `COOKBOOK.md`** (see the section above). 9h already moved
-   `<DemoGrid>` partway there — it now has row markers, `@onRowMoved`, `@fillHandle` and
-   `@getCellsForSelection` — which is precisely how 9h's `@highlightRegions` defect surfaced. Keep
-   going: `freezeColumns` and column groups are still switched on by no demo.
+1. **Deploy the test-app to GitHub Pages** (user, 2026-08-08). The cookbook and every demo live
+   there, and the README's link to them is a placeholder until it exists. Expect to need a base
+   path in `test-app`'s vite config.
 2. **9p — Playwright.** Deferred by the user in favour of features, but note what it would have
    caught: an earlier session produced a *false negative* where a working search feature was
    declared broken because the automation harness never focused the grid root, and 9h lost several
@@ -1017,12 +1045,10 @@ row reorder, fill handle) plus two more real defects**. Test suite 425 -> 586.
 now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
 deferred by user decision.
 
-**Loose ends** (all cheap, all folded into Phase 10a's checklist). 9h closed two of them:
-`<DemoGrid>` now sets `@rowMarkers` (so 9d's row-marker context-menu offset does run) and
-`@getCellsForSelection={{true}}`, which the fill path drives on every drag — so that arg has now
-been exercised in a browser. **Still open**: 9d's *group-header* context menu (`<DemoGrid>` has no
-column groups), `freezeColumns` (no demo sets it), and 9i auto-sizing (demoed only by
-`<DaisyDemo>`).
+**Loose ends — all closed by Phase 10a.** `<DemoGrid>` now drives row markers,
+`@getCellsForSelection`, column groups (so 9d's group-header context menu runs), `@freezeColumns`
+and an auto-sized column. The last of those is what surfaced the auto-sizing font defect, which is
+the argument for 10a in one sentence.
 
 **9b** (accessibility) and **9c** (touch) remain deferred by explicit user decision; 9b is still the
 item nothing else substitutes for if a consumer ever needs it.

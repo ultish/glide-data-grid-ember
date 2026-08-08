@@ -155,4 +155,50 @@ describe("sizeColumns", () => {
         expect(out[0]!.width).toBe(77);
         expect(out[1]!.width).not.toBe(77);
     });
+
+    // Phase 10a regression. Cell renderers' `measure()` calls `ctx.measureText` directly, so the
+    // font must be the theme's *cell* font before any of them runs. This port shipped without that
+    // line (source has it at `use-column-sizer.ts:184`) and so measured every column in whatever
+    // font the previous draw had left on the live render context -- `10px sans-serif` on the first
+    // pass. Nothing looked broken: columns still came out at varying, plausible, wrong widths.
+    test("measures cells in the theme's cell font, not whatever the context was left in", () => {
+        // Unlike the `renderer` above, this one measures through the context, exactly as every real
+        // cell renderer does -- which is what makes the ambient font load-bearing.
+        const ctxMeasuring = (() => ({
+            measure: (c: MeasureContext, cell: GridCell) =>
+                c.measureText((cell as { displayData: string }).displayData).width,
+        })) as unknown as GetCellRendererCallback;
+
+        const ctx = stubCtx();
+        ctx.font = "10px sans-serif"; // what a fresh canvas context reports
+        const columns = [{ title: "A" }] as unknown as GridColumn[];
+        sizeColumns(columns, ctx, theme, sample, ctxMeasuring, opts);
+        // First measurement is the sampled cell; it must have used the cell font.
+        expect(ctx.fontsUsed[0]).toBe(theme.baseFontFull);
+        // ...and the header, measured after it, must have used the header font.
+        expect(ctx.fontsUsed.at(-1)).toBe(theme.headerFontFull);
+    });
+
+    test("restores the caller's font afterwards", () => {
+        // The controller hands over the *live* rendering context. Leaving the measuring font behind
+        // would silently mis-render the next thing drawn.
+        const ctx = stubCtx();
+        ctx.font = "italic 17px serif";
+        const columns = [{ title: "A" }] as unknown as GridColumn[];
+        sizeColumns(columns, ctx, theme, sample, renderer, opts);
+        expect(ctx.font).toBe("italic 17px serif");
+    });
+
+    test("restores the font even when a renderer's measure throws", () => {
+        const ctx = stubCtx();
+        ctx.font = "italic 17px serif";
+        const exploding = (() => ({
+            measure: () => {
+                throw new Error("boom");
+            },
+        })) as unknown as GetCellRendererCallback;
+        const columns = [{ title: "A" }] as unknown as GridColumn[];
+        expect(() => sizeColumns(columns, ctx, theme, sample, exploding, opts)).toThrow("boom");
+        expect(ctx.font).toBe("italic 17px serif");
+    });
 });
