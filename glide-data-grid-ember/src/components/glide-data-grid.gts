@@ -27,6 +27,7 @@ import { modifier } from "ember-modifier";
 import {
     GridHostController,
     type GridHostArgs,
+    type SearchState,
     type RowMarkerKind,
     type CellsForSelectionCallback,
 } from "../-private/grid-host-controller.ts";
@@ -52,6 +53,18 @@ import type {
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
 export interface GlideDataGridApi {
     readonly updateCells: (cells: readonly { cell: Item }[]) => void;
+
+    // Search (Phase 9e). These are what `<GlideSearchBar>` drives; a consumer building their own
+    // search UI uses the same five methods. Note the API object stays a plain bag of bound methods
+    // -- 9f flags that this shape gets awkward as it grows, and that decision is still open.
+    readonly openSearch: () => void;
+    readonly closeSearch: () => void;
+    readonly setSearchValue: (value: string) => void;
+    readonly searchNext: () => void;
+    readonly searchPrev: () => void;
+    /** Reads the current state directly, for a UI that mounts after a search is already open
+     *  rather than waiting for the next `@onSearchStateChange`. */
+    readonly getSearchState: () => SearchState;
 }
 
 export interface GlideDataGridSignature {
@@ -146,6 +159,19 @@ export interface GlideDataGridSignature {
         drawHeader?: DrawHeaderCallback;
         prelightCells?: CellList;
         highlightRegions?: readonly Highlight[];
+
+        // Search (Phase 9e) -- forwarded straight through to `GridHostArgs`; see that interface for
+        // exact semantics. All optional: with none of them set, primary+F still opens an internal
+        // search that highlights matches, because every piece of state has an uncontrolled
+        // fallback. The UI is the separate, opt-in `<GlideSearchBar>` -- pass it the API object
+        // from `@onReady`, or drive `@onSearchStateChange` into a UI of your own.
+        showSearch?: boolean;
+        searchValue?: string;
+        onSearchValueChange?: (newValue: string) => void;
+        onSearchClose?: () => void;
+        searchResults?: CellList;
+        onSearchResultsChanged?: (results: CellList, navIndex: number) => void;
+        onSearchStateChange?: (state: SearchState) => void;
     };
 }
 
@@ -214,6 +240,13 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         drawHeader: this.args.drawHeader,
         prelightCells: this.args.prelightCells,
         highlightRegions: this.args.highlightRegions,
+        showSearch: this.args.showSearch,
+        searchValue: this.args.searchValue,
+        onSearchValueChange: this.args.onSearchValueChange,
+        onSearchClose: this.args.onSearchClose,
+        searchResults: this.args.searchResults,
+        onSearchResultsChanged: this.args.onSearchResultsChanged,
+        onSearchStateChange: this.args.onSearchStateChange,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s
@@ -242,6 +275,12 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
             registerDestructor(this, () => controller.destroy());
             this.args.onReady?.({
                 updateCells: (cells: readonly { cell: Item }[]) => controller.updateCells(cells),
+                openSearch: () => controller.openSearch(),
+                closeSearch: () => controller.closeSearch(),
+                setSearchValue: (value: string) => controller.setSearchValue(value),
+                searchNext: () => controller.searchNext(),
+                searchPrev: () => controller.searchPrev(),
+                getSearchState: () => controller.getSearchState(),
             });
         } else {
             void args; // already consumed for tracking; nothing else to do with it here

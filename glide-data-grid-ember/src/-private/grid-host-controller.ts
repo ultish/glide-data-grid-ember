@@ -54,6 +54,7 @@ import {
     toggleBoolean,
 } from "../rendering/index.ts";
 import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
+import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import type {
     DrawGridArg,
     DragAndDropState,
@@ -353,6 +354,78 @@ export interface GridHostArgs {
      * `prelightCells` above -- the same stability rule applies.**
      */
     readonly highlightRegions?: readonly Highlight[];
+
+    // --- Phase 9e: search --------------------------------------------------------------------
+    // The grid owns the *engine*; the UI is the separate, opt-in `<GlideSearchBar>` (or the
+    // consumer's own, driven through the same API). Every arg below is optional: with none of them
+    // set, primary+F still opens an internal search that highlights matches, because the state
+    // has an uncontrolled fallback exactly as source's does.
+
+    /**
+     * Controls whether search is open. Leave `undefined` for uncontrolled: primary+F opens it and
+     * Escape closes it, and the grid tracks the flag itself. Mirrors source's `showSearch` prop.
+     */
+    readonly showSearch?: boolean;
+
+    /**
+     * Controls the query. Leave `undefined` for uncontrolled. Mirrors source's `searchValue`.
+     */
+    readonly searchValue?: string;
+
+    /** Fired on every query change, whether or not `searchValue` is controlled -- so a consumer can
+     *  observe the query without taking ownership of it. Mirrors source's `onSearchValueChange`. */
+    readonly onSearchValueChange?: (newValue: string) => void;
+
+    /** Fired when the user closes search (Escape, primary+F again, or the bar's close button). */
+    readonly onSearchClose?: () => void;
+
+    /**
+     * Supply results yourself instead of using the built-in scanner -- e.g. when the real search is
+     * server-side. When set, the incremental scan does not run at all. Coordinates are in the
+     * consumer's own space (no row-marker column). Mirrors source's `searchResults` prop.
+     *
+     * **Identity-stable, same rule as `prelightCells`** -- results become `prelightCells` internally.
+     */
+    readonly searchResults?: CellList;
+
+    /**
+     * Fired whenever the result set or the navigation index changes. `results` are in the
+     * consumer's coordinate space. Mirrors source's `onSearchResultsChanged`.
+     *
+     * Note what setting this *turns off*: source treats it as taking ownership of what happens on
+     * navigation, and skips its own "select and scroll to the active result" behaviour. This port
+     * does the same, so a consumer can drive their own navigation without fighting the grid.
+     */
+    readonly onSearchResultsChanged?: (results: CellList, navIndex: number) => void;
+
+    /**
+     * The single reactive channel out of the search engine: fired on every state change (opened,
+     * closed, query edited, results streaming in, navigation moved). `<GlideSearchBar>` subscribes
+     * to this; a consumer writing their own UI can too.
+     *
+     * The controller is deliberately untracked (see this file's header), so this callback is how
+     * search state reaches Ember reactivity at all.
+     */
+    readonly onSearchStateChange?: (state: SearchState) => void;
+}
+
+/** A snapshot of everything a search UI needs to render. Handed to `onSearchStateChange`. */
+export interface SearchState {
+    /** Whether the search UI should be visible. */
+    readonly isOpen: boolean;
+    /** The current query. */
+    readonly value: string;
+    /** Matches so far, in the consumer's coordinate space. Streams in while a scan runs. */
+    readonly results: CellList;
+    /** 0-based index into `results` of the currently navigated match; `-1` for none. */
+    readonly selectedIndex: number;
+    /** Rows scanned so far, out of `rows` -- drives a progress indicator. */
+    readonly rowsSearched: number;
+    /** Total rows the scan will cover. */
+    readonly rows: number;
+    /** `undefined` until the first chunk reports, so a UI can show "Type to search" rather than
+     *  "0 results" before anything has happened. Mirrors source's `searchStatus === undefined`. */
+    readonly status: SearchStatus | undefined;
 }
 
 /**
@@ -411,6 +484,14 @@ interface ResolvedGridHostArgs {
     readonly drawHeader: DrawHeaderCallback | undefined;
     readonly prelightCells: CellList | undefined;
     readonly highlightRegions: readonly Highlight[] | undefined;
+
+    readonly showSearch: boolean | undefined;
+    readonly searchValue: string | undefined;
+    readonly onSearchValueChange: ((newValue: string) => void) | undefined;
+    readonly onSearchClose: (() => void) | undefined;
+    readonly searchResults: CellList | undefined;
+    readonly onSearchResultsChanged: ((results: CellList, navIndex: number) => void) | undefined;
+    readonly onSearchStateChange: ((state: SearchState) => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -872,6 +953,14 @@ export class GridHostController {
             drawHeader: args.drawHeader,
             prelightCells: args.prelightCells,
             highlightRegions: args.highlightRegions,
+
+            showSearch: args.showSearch,
+            searchValue: args.searchValue,
+            onSearchValueChange: args.onSearchValueChange,
+            onSearchClose: args.onSearchClose,
+            searchResults: args.searchResults,
+            onSearchResultsChanged: args.onSearchResultsChanged,
+            onSearchStateChange: args.onSearchStateChange,
         };
     }
 
@@ -1206,6 +1295,10 @@ export class GridHostController {
         this.destroyed = true;
         // Signals any in-flight `getCellsForSelection` thunk that its result is no longer wanted.
         this.cellsForSelectionAbort.abort();
+        // A running scan holds a scheduled callback that would otherwise fire against a torn-down
+        // grid. Source cancels in an unmount effect for the same reason.
+        this.search?.cancel();
+        this.search = undefined;
 
         if (this.overlayState !== undefined) {
             window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
@@ -1302,7 +1395,7 @@ export class GridHostController {
             // (the controller has no way to know whether two equal-looking arrays are "the same").
             drawHeaderCallback: args.drawHeader,
             drawCellCallback: args.drawCell,
-            prelightCells: args.prelightCells,
+            prelightCells: this.effectivePrelightCells(args),
             highlightRegions: args.highlightRegions,
             imageLoader: this.imageLoader,
             lastBlitData: this.lastBlitData,
@@ -2707,6 +2800,31 @@ export class GridHostController {
             return;
         }
 
+        // Ctrl(Cmd)+F: toggle search (Phase 9e). Mirrors source's `keys.search` binding, which
+        // opens but does not close; closing on a second press is this port's own small addition,
+        // since without a bar on screen there would otherwise be no way back out via the keyboard.
+        // Placed with select-all, above the "no current cell" guard, for the same reason: search
+        // must work on a grid nothing has been clicked in yet.
+        if (primary && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "f") {
+            if (this.searchIsOpen(this.resolveArgs())) {
+                this.closeSearch();
+            } else {
+                this.openSearch();
+            }
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+        }
+
+        // Escape closes search when it is open and no overlay editor has claimed the key (the
+        // early-out above already returned in that case).
+        if (ev.key === "Escape" && this.searchIsOpen(this.resolveArgs())) {
+            this.closeSearch();
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+        }
+
         // Cell activation (Phase 4a) -- Enter, Delete/Backspace, and type-to-overwrite. All three
         // are no-ops with nothing selected, mirroring source's early-outs for the same keys.
         if (this.selection.current !== undefined) {
@@ -2956,6 +3074,228 @@ export class GridHostController {
             },
         };
         this.applySelection(newSelection);
+    }
+
+    // --- search (Phase 9e) -------------------------------------------------------------------
+    // Port of source's `DataGridSearch`, minus the UI. Source fuses scanner, state and overlay into
+    // one React component; here the scanner is `rendering/search.ts` (pure, unit-tested), this
+    // section is the state and wiring, and the UI is the opt-in `<GlideSearchBar>`.
+    //
+    // Every piece of state below has a controlled arg and an uncontrolled fallback, mirroring
+    // source's `showSearchIn ?? showSearchInner` pattern -- so search works out of the box with no
+    // args set at all, and a consumer can take over any individual piece without taking over all.
+
+    private searchOpenInner = false;
+    private searchValueInner = "";
+    private searchResultsInner: CellList = [];
+    private searchSelectedIndex = -1;
+    private searchStatus: SearchStatus | undefined;
+    private search: IncrementalSearch | undefined;
+    /** Guards the "select and scroll to the active match" side effect so it runs only when the
+     *  navigated match actually changes. Source keeps the same guard (`lastSent`) because the
+     *  results callback fires on every streamed chunk, not only on navigation. */
+    private lastNavigatedTo: Item | undefined;
+
+    private searchIsOpen(args: ResolvedGridHostArgs): boolean {
+        return args.showSearch ?? this.searchOpenInner;
+    }
+
+    /**
+     * What the renderer actually gets as `prelightCells`: search matches while a search is open
+     * with results, the consumer's own `prelightCells` otherwise.
+     *
+     * **Search wins rather than merging, and that is source's design, not a shortcut.** Source's
+     * `DataGridSearchProps` is `Omit<ScrollingDataGridProps, "prelightCells">` -- it removes the
+     * prop outright, so a consumer literally cannot pass one alongside search, and search sets
+     * `prelightCells={searchResults}` unconditionally. Merging the two would be an invention, and
+     * a costly one: it allocates a combined array every draw, which `computeCanBlit`
+     * identity-compares, so it would silently disable the scroll blit fast path for the whole
+     * lifetime of the grid rather than just while a scan runs.
+     *
+     * When search is closed the consumer's array is passed through by reference, unchanged, so the
+     * blit path is exactly as it was before search existed.
+     */
+    private effectivePrelightCells(args: ResolvedGridHostArgs): CellList | undefined {
+        if (!this.searchIsOpen(args)) return args.prelightCells;
+        const results = this.effectiveSearchResults(args);
+        return results.length > 0 ? results : args.prelightCells;
+    }
+
+    private searchQuery(args: ResolvedGridHostArgs): string {
+        return args.searchValue ?? this.searchValueInner;
+    }
+
+    /** The results actually in effect: a consumer's own if supplied, else the scanner's. */
+    private effectiveSearchResults(args: ResolvedGridHostArgs): CellList {
+        return args.searchResults ?? this.searchResultsInner;
+    }
+
+    private searchSnapshot(args: ResolvedGridHostArgs): SearchState {
+        return {
+            isOpen: this.searchIsOpen(args),
+            value: this.searchQuery(args),
+            results: this.effectiveSearchResults(args),
+            selectedIndex: this.searchSelectedIndex,
+            rowsSearched: this.searchStatus?.rowsSearched ?? 0,
+            rows: args.rows,
+            status: this.searchStatus,
+        };
+    }
+
+    private emitSearchState(args: ResolvedGridHostArgs): void {
+        args.onSearchStateChange?.(this.searchSnapshot(args));
+    }
+
+    /**
+     * Reads a chunk of cells for the scanner, in **mangled** (row-marker-inclusive) column space.
+     *
+     * This is source's `getCellsForSelectionMangled`, which Phase 9g deliberately left unported
+     * because search was its only consumer and it would have been dead code. It has one now.
+     *
+     * The shift matters: search results are used as `prelightCells`, which the renderer reads in
+     * mangled space, and are fed to `moveActiveCell`, which is also mangled. So the scan must
+     * produce mangled columns -- and a placeholder cell stands in for the row-marker column so the
+     * indices line up. That placeholder is `Loading`, which `getSearchTestString` reports as
+     * unsearchable, so a row marker can never itself be a match.
+     */
+    private searchChunkMangled(args: ResolvedGridHostArgs, startRow: number, height: number): CellArray | undefined {
+        const offset = args.rowMarkerOffset;
+        const cells = this.cellsForSelectionSync(args, {
+            x: 0,
+            y: startRow,
+            width: args.columns.length,
+            height,
+        });
+        if (cells === undefined) return undefined;
+        if (offset === 0) return cells;
+        const marker: GridCell = { kind: GridCellKind.Loading, allowOverlay: false };
+        return cells.map(row => [marker, ...row]);
+    }
+
+    private beginSearch(args: ResolvedGridHostArgs, query: string): void {
+        this.search?.cancel();
+        this.searchSelectedIndex = -1;
+        this.lastNavigatedTo = undefined;
+
+        // A consumer supplying `searchResults` owns matching entirely -- do not also scan.
+        if (args.searchResults !== undefined) {
+            this.searchStatus = { rowsSearched: args.rows, results: args.searchResults.length };
+            this.emitSearchState(args);
+            return;
+        }
+
+        if (query === "") {
+            this.searchResultsInner = [];
+            this.searchStatus = undefined;
+            this.emitSearchState(args);
+            return;
+        }
+
+        this.search = new IncrementalSearch({
+            rows: args.rows,
+            // Start at the first visible row, so matches already on screen surface first. Source
+            // does the same (`cellYOffsetRef.current`).
+            startRow: this.cellYOffset,
+            fetchChunk: (startRow, height) => this.searchChunkMangled(this.resolveArgs(), startRow, height),
+            onProgress: (results, status) => {
+                const liveArgs = this.resolveArgs();
+                this.searchResultsInner = results;
+                this.searchStatus = status;
+                // `prelightCells` is identity-compared by `computeCanBlit`, and this genuinely is a
+                // new array each chunk, so the blit is legitimately defeated while a scan runs --
+                // the highlight really did change. It re-engages as soon as the scan settles.
+                this.scheduleFullRedraw();
+                this.notifySearchResults(liveArgs);
+                this.emitSearchState(liveArgs);
+            },
+        });
+        this.searchStatus = undefined;
+        this.searchResultsInner = [];
+        this.search.start(query);
+        this.emitSearchState(args);
+    }
+
+    /** Hands results to the consumer in *their* coordinate space, and -- unless they've taken over
+     *  navigation by supplying `onSearchResultsChanged` -- selects and scrolls to the active match. */
+    private notifySearchResults(args: ResolvedGridHostArgs): void {
+        const results = this.effectiveSearchResults(args);
+        const index = this.searchSelectedIndex;
+
+        if (args.onSearchResultsChanged !== undefined) {
+            const offset = args.rowMarkerOffset;
+            args.onSearchResultsChanged(
+                offset === 0 ? results : results.map(([col, row]) => [col - offset, row] as Item),
+                index
+            );
+            return;
+        }
+
+        if (index < 0 || index >= results.length) return;
+        const [col, row] = results[index]!;
+        if (this.lastNavigatedTo?.[0] === col && this.lastNavigatedTo[1] === row) return;
+        this.lastNavigatedTo = [col, row];
+        this.moveActiveCell(args, col, row);
+    }
+
+    /** Opens search. Idempotent. */
+    public openSearch(): void {
+        const args = this.resolveArgs();
+        if (this.searchIsOpen(args)) return;
+        this.searchOpenInner = true;
+        this.emitSearchState(args);
+    }
+
+    /** Closes search, clearing results and cancelling any scan. Mirrors source's `onClose`. */
+    public closeSearch(): void {
+        const args = this.resolveArgs();
+        this.search?.cancel();
+        this.searchOpenInner = false;
+        this.searchValueInner = "";
+        this.searchResultsInner = [];
+        this.searchStatus = undefined;
+        this.searchSelectedIndex = -1;
+        this.lastNavigatedTo = undefined;
+        args.onSearchClose?.();
+        args.onSearchValueChange?.("");
+        args.onSearchResultsChanged?.([], -1);
+        this.scheduleFullRedraw();
+        this.emitSearchState(args);
+        this.root.focus();
+    }
+
+    /** Sets the query and (re)starts the scan. Always emits `onSearchValueChange`, controlled or
+     *  not, so a consumer can observe the query without owning it -- source's behaviour. */
+    public setSearchValue(value: string): void {
+        const args = this.resolveArgs();
+        this.searchValueInner = value;
+        args.onSearchValueChange?.(value);
+        this.beginSearch(args, value);
+    }
+
+    /** Moves to the next match, wrapping. No-op with no results. */
+    public searchNext(): void {
+        this.stepSearch(1);
+    }
+
+    /** Moves to the previous match, wrapping. No-op with no results. */
+    public searchPrev(): void {
+        this.stepSearch(-1);
+    }
+
+    private stepSearch(delta: number): void {
+        const args = this.resolveArgs();
+        const results = this.effectiveSearchResults(args);
+        if (results.length === 0) return;
+        // `+ results.length` before the modulo: JS `%` keeps the sign of the dividend, so -1 % n is
+        // -1, not n-1. Source handles the same case with an explicit `if (newIndex < 0)`.
+        this.searchSelectedIndex = (this.searchSelectedIndex + delta + results.length) % results.length;
+        this.notifySearchResults(args);
+        this.emitSearchState(args);
+    }
+
+    /** Current search state, for a UI that needs to read it rather than wait for a change event. */
+    public getSearchState(): SearchState {
+        return this.searchSnapshot(this.resolveArgs());
     }
 
     // Simplified stand-in for source's `scrollTo` (see PORTING-NOTES.md -- easing/behavior options,
