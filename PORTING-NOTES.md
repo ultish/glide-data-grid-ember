@@ -4272,3 +4272,93 @@ optional `Theme` field is `undefined`, so those must always be read as
 `var(--gdg-rounding-radius, calc(var(--gdg-bubble-height) / 2))`, a faithful translation of source's
 `var(--gdg-rounding-radius, ${p => p.tagHeight / 2}px)`. Check the name list in `makeCSSStyle` before
 assuming a variable exists — `lineHeight` and `headerIconSize`, for instance, have none.
+
+## `color-parser.ts` and OKLCH (2026-08-08) — the silent-garbage colour bug
+
+Prerequisite for theming the grid from DaisyUI 5 / Tailwind 4, whose palettes are **entirely
+OKLCH**. The bridge itself is a separate follow-up; this was only the blocker.
+
+### The failure mechanism (do not re-derive)
+
+`parseToRgba` resolves a colour by assigning it to a hidden `<div>` and reading
+`getComputedStyle(div).color`. **Chrome does not convert modern colour spaces**: it hands back
+`oklch(0.7 0.15 250)` *unchanged*, and likewise `oklab()`, `lab()`, `lch()` and `color(…)`.
+Browser-confirmed on Chrome 150. The old extractor was
+
+```js
+computedColor.replace(/[^\d.,]/g, "").split(",").map(Number.parseFloat)
+```
+
+which strips the spaces, so `oklch(0.7 0.15 250)` collapses to the single string `"0.70.15250"` →
+**one nonsense number** where four components were expected. `result.length < 4` then pushes an
+alpha of 1 and the NaN guard never fires, so the parse **succeeds loudly wrong**. Since
+`parseToRgba` backs `withAlpha` and `blend`, and `blend` runs for every selected / highlighted /
+prelit cell fill in `render/data-grid-render.cells.ts`, one OKLCH theme colour poisons colours all
+over the canvas. The same regex mangles modern space-separated `rgb(255 0 0 / 0.5)` identically —
+a latent second instance of the same class, now covered.
+
+### The fix, and the design constraint that shaped it
+
+Module is now split in two, with the boundary marked by comment banners:
+
+- **Pure, DOM-free, exported** — `oklchToRgb(l, c, h, alpha = 1)`, `oklabToRgb(l, a, b, alpha = 1)`
+  (both returning `Rgba = readonly [r, g, b, a]`, r/g/b 0-255 integers, a 0-1), and
+  `parseCssColorFunction(value)` which parses `rgb()`/`rgba()`/`oklch()`/`oklab()` and returns
+  **`undefined`** for anything else.
+- **DOM-touching, thin** — `parseToRgba` (unchanged `<div>` + control-colour validity check +
+  the string-keyed `cache`), and `resolveViaCanvas` as a last-resort fallback.
+
+The purity is not stylistic. **`color-parser.ts` was the one module in `src/rendering/` with zero
+coverage** precisely because it needed a DOM (PHASES.md 9a; a Haiku agent's attempt at it was
+deleted in 9a round 2 for testing a reimplementation instead). Restructuring was chosen over adding
+`jsdom`/`happy-dom` to the vitest harness — the harness stays bare-Node, and 69 tests now cover the
+real module.
+
+Maths is CSS Color 4 §10 (Ottosson's matrices): OKLCH → OKLab → LMS (cube) → linear sRGB → gamma
+encode → ×255, **clamped** per channel. Notable details:
+
+- Percentage references differ per component and are **not guessable**: lightness and alpha are out
+  of 1, chroma and OKLab's `a`/`b` are out of **0.4**. Browser-confirmed (`oklch(0.5 50% 30)`
+  computes to `oklch(0.5 0.2 30)`).
+- `grad` must be tested before `rad` in the angle-unit check — it ends with it.
+- `none` is a valid component meaning 0. Hue wraps naturally through `cos`/`sin`; do not add a
+  `% 360` guard, it would break negative hues.
+- CSS clamps L to 0-1 and chroma at 0 (`oklch(1.5 0 0)` computes to `oklch(1 0 0)`); that clamp
+  lives in the parser so the maths functions stay unopinionated.
+- `clampChannel` is written `if (!(x > 0)) return 0` so **`-0`** (which `Math.round` produces from
+  small negatives) and `NaN` both collapse to plain `0`.
+- The `rgb()` path is deliberately **not** rounded or clamped, keeping it byte-identical to the
+  pre-change implementation for every value `getComputedStyle` actually produces.
+
+`resolveViaCanvas` handles everything not special-cased — `lab()`, `lch()`, `color(display-p3 …)` —
+by painting one pixel and reading it back. Verified working end-to-end. Its one limitation:
+`getImageData` un-premultiplies, so a translucent colour's RGB can be off by ~1/alpha units and is
+black at alpha 0. Invisible in practice, and cached.
+
+**Failure is now predictable rather than silent**: unrecognised syntax → `parseCssColorFunction`
+returns `undefined` → canvas fallback → if that also fails, a dev-mode `console.warn` and opaque
+black. Nothing invents a plausible-looking wrong colour any more.
+
+### How the numbers were validated — reuse this method
+
+Not by arithmetic review. Inside a real Chrome, paint the colour to a 1×1 canvas and read the pixel:
+
+```js
+const c = document.createElement("canvas"); c.width = c.height = 1;
+const ctx = c.getContext("2d");
+ctx.fillStyle = "oklch(0.7 0.15 250)"; ctx.fillRect(0, 0, 1, 1);
+ctx.getImageData(0, 0, 1, 1).data;   // => 75, 163, 247, 255
+```
+
+`getComputedStyle` is useless as an oracle here — it is the thing that doesn't convert. Two passes
+were run: **25 named cases → all byte-identical**, and a **7,000-colour pseudo-random sweep** →
+~97.5% byte-identical, worst-case deviation **1/255** on a rounding boundary. Then the *built
+`dist/`* module was ESM-imported into a page served over `python3 -m http.server` and driven for
+real — confirming hex/rgb/rgba/`transparent` unchanged, OKLCH correct, and `lab()`/`lch()`/
+`color(display-p3)`/`hsl()` all resolving through the canvas fallback.
+
+Three test expectations written from my own reasoning were **wrong** and were corrected from the
+browser (achromatic `oklch(0.7 none 250)` is 158,158,158 not 161; plus two `-0` results). That is
+now 8 for 8 on the standing "assume your expectation is wrong first" rule.
+
+`THEMING.md` §6 gained a "What a color value may be" subsection stating the supported syntaxes.

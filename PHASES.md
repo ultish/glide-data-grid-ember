@@ -417,7 +417,12 @@ live site too.
 > **`render/data-grid-render.blit.test.ts` (32), written by the orchestrator**, which pins the
 > identity-stability contract (see below). One agent file (`color-parser.test.ts`) was **deleted**:
 > it tested a reimplementation of the formulas rather than the module, and never imported it.
-> `color-parser.ts` needs a DOM and remains untested.
+> ~~`color-parser.ts` needs a DOM and remains untested.~~ **Resolved 2026-08-08 by the OKLCH fix**:
+> the module was restructured so the colour maths and the CSS component-syntax parsing are pure
+> exported functions, which is what a `jsdom` dependency would otherwise have been bought to work
+> around. `color-parser.test.ts` (69) now exists and imports the real module; the DOM-touching
+> wrappers (`parseToRgba`, `blend`, `withAlpha`, `interpolateColors`, `getLuminance`) still belong
+> to 9a item 4. Suite total: **524**.
 >
 > Round 4 added, orchestrator-written: **`data-source/column-sort.test.ts` (22)** and
 > **`selection-behavior.test.ts` (27)**. The column-sort suite makes Phase 8's throwaway Node scripts

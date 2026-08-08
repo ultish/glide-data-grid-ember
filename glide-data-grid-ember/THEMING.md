@@ -209,6 +209,33 @@ runs for every visible cell on every draw.
 Only `Theme` fields at the end are optional; everything else is present on the base theme, and any
 level may override any field.
 
+### What a color value may be
+
+**Any CSS color the browser understands**, including modern color spaces. Theme colors are handed
+to the canvas verbatim for plain fills, but the grid also has to *read* them numerically — to alpha
+blend a `bgCell` overlay, to derive translucent variants, and to pick a readable foreground — so
+each one is resolved to RGBA on first use and cached.
+
+That resolution understands `rgb()` / `rgba()`, **`oklch()`** and **`oklab()`** directly, and falls
+back to painting a pixel for anything else (`lab()`, `lch()`, `color(display-p3 …)`, …). Named
+colors, hex and `hsl()` are converted to `rgb()` by the browser before it ever gets there.
+
+`oklch()` matters in particular because **Chrome does not convert it** — `getComputedStyle` hands
+back `oklch(0.7 0.15 250)` unchanged — and it is the native format of Tailwind 4 and DaisyUI 5
+palettes. Before 2026-08 that produced silently wrong colors anywhere a color had to be read back
+rather than just painted; it is converted properly now.
+
+```js
+// all equivalent, all fine as a theme value
+{ accentColor: "#4F5DFF" }
+{ accentColor: "rgb(79, 93, 255)" }
+{ accentColor: "oklch(0.5693 0.2369 272.44)" }
+{ bgCell: "oklch(0.7 0.15 250 / 0.07)" }   // translucent overlays work too
+```
+
+An unparseable value degrades to opaque black rather than to a random color, and warns on the
+console in development builds.
+
 ### Colors — accents & selection
 
 | Field | Controls |
