@@ -46,12 +46,13 @@ Both files are kept current after every phase. If anything below conflicts with 
 
 ## Current status (see PHASES.md for the authoritative table)
 
-Phases 0–7 complete, all browser-verified and committed: workspace scaffold, framework-agnostic
+Phases 0–8 complete, all browser-verified and committed: workspace scaffold, framework-agnostic
 rendering-engine port, Ember canvas host layer (sticky header, native scroll, virtualization), the
 full interaction layer (selection, keyboard nav, copy/paste, column resize/reorder), all core cell
 types + the overlay-editor framework (Phase 4), all 13 `packages/cells` extra cell types including
-sparklines (Phase 5), the theming system (Phase 6), and the grid.glideapps.com demo replica with
-**column sort** and **column group headers** (Phase 7). The Phase-2 placeholder renderer
+sparklines (Phase 5), the theming system (Phase 6), the grid.glideapps.com demo replica with
+**column sort** and **column group headers** (Phase 7), and the data-source layer + async/streaming
+data (Phase 8). The Phase-2 placeholder renderer
 (`src/rendering/-temp-text-cell-renderer.ts`) was deleted in Phase 4a — the real registry is
 `src/rendering/cells/index.ts` (`getCellRenderer`), combined with extras via
 `createCombinedCellRenderer` from `src/rendering/extra-cells/index.ts`.
@@ -63,21 +64,27 @@ menu, and fixes for **five addon defects the demo surfaced** — see PORTING-NOT
 section. **Per explicit user instruction the demo is the data grid and nothing else** — the 6
 feature cards from the original requirements were dropped deliberately; don't "restore" them.
 
-**Next up: Phase 8** (async/streaming + the `recordsSource` data-source layer — note `withColumnSort`
-already established the composable-decorator shape and the `src/data-source/` directory it belongs
-in; `recordsSource` should return `columns`/`rows`/`getCellContent` under exactly those names so the
-two compose). Phase 8 also carries a **required API fix agreed with the user**: a decorator that
-remaps the read path must remap the write path too, so `withColumnSort` should take and return
-`onCellsEdited` rather than making every consumer translate `location` through `getOriginalIndex` by
-hand — today's asymmetry silently writes edits to the wrong record on a sorted grid. Full rationale
-and API sketch in PHASES.md's "Phase 8 — START HERE" block; read it before designing `recordsSource`,
-which must adopt the same contract. Phase 9 is a deliberately non-auto-scheduled backlog.
+Phase 8 landed the whole `src/data-source/` layer: `recordsSource` (in-memory records → grid args,
+one `createCache` per record so editing one field re-projects one row — **browser-measured at 1,000
+rows**), `AsyncRecordsSource` (paged/async, a class because it owns page state), the new
+`onVisibleRegionChanged` grid arg that drives it, and `withColumnSort`'s write path
+(`onCellsEdited` in and out, so the read and write coordinate spaces can no longer disagree —
+`getOriginalIndex` is now just the escape hatch). Demos: `<StreamingDemo>` (`updateCells()` measured
+at ~524k cells/sec peak), `<AsyncDemo>` (100k rows, paged), `<ScaleProof>` (the 1,000-row
+measurement + the `object-scan` example), and `<TrackingDemo>` rewired onto `recordsSource`.
+**Two real addon defects were fixed along the way** — `updateCells` ignored the row-marker column
+offset, and a *fractional grid height* blanked the entire grid on every damage-only repaint (canvas
+realloc + `alpha: false`). Both were invisible until something drove `updateCells` continuously; see
+PORTING-NOTES.md's Phase 8e section.
 
-Consumer-facing docs now exist and are the spec for future work — keep them in sync rather than
-letting them go stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and
-`glide-data-grid-ember/DATA.md` (how consumers wire data in; **Phase 8's `recordsSource` must
-implement DATA.md's documented pattern**, and DATA.md's "Status of this recommendation" section
-records which half is measured vs merely reasoned).
+**Next up: nothing is auto-scheduled.** Phase 9 is a deliberately non-auto-scheduled backlog of
+known gaps vs source (PHASES.md) — work it only when asked.
+
+Consumer-facing docs are the spec for future work — keep them in sync rather than letting them go
+stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and `glide-data-grid-ember/DATA.md` (how
+consumers wire data in — now documents `recordsSource` as the recommended path, with the hand-written
+pattern kept as the explanation of what it does internally; its "Status of this recommendation"
+section carries the measured 1,000-row result).
 
 Three things a cold session should know, all written up in full in `PORTING-NOTES.md`:
 `computeCanBlit` identity-compares ~18 `DrawGridArg` fields, so a freshly allocated value silently
@@ -88,3 +95,9 @@ closure that reads tracked state lazily never registers a dependency; and — th
 been "browser-verified"**. Turning on row markers, column groups and header icons for the first time
 in Phase 7 surfaced five latent defects at once, including 28 header-icon glyphs ported in Phase 1
 that nothing had ever imported. When a phase enables something dormant, budget for that.
+
+Phase 8 proved that lesson twice more, and it is worth stating as its own rule: **`updateCells`'s
+damage path had never been driven hard, and both defects it hid were invisible to full redraws** —
+one blanked the entire canvas whenever the grid's height was fractional, the other repainted the
+wrong column whenever row markers were on. A full redraw papers over damage bugs by construction, so
+"the grid looks right" says nothing about the damage path until something exercises it continuously.

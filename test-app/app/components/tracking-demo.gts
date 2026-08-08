@@ -12,8 +12,8 @@
 // ---------------------------------------------------------------------------------------------
 // THE ONE THING THAT MAKES THIS WORK -- read before copying this pattern
 // ---------------------------------------------------------------------------------------------
-// `getCellContent` below is a **getter that eagerly reads every tracked field**, not a class-field
-// arrow function like `<DemoGrid>` uses.
+// `source` below is a **`@cached` getter that calls `recordsSource`**, which projects every record
+// *during the call*. It is not a class-field arrow function like `<DemoGrid>` uses.
 //
 // Autotracking only records reads that happen *during* a tracked computation. `<GlideDataGrid>`'s
 // modifier establishes its dependencies by calling `buildGridHostArgs()`, which reads
@@ -27,64 +27,45 @@
 //
 // ...because `this.store.all[row].name` is only read later, at draw time. Whereas this does:
 //
-//     get getCellContent() {
-//         const snapshot = this.store.all.map(p => ({ name: p.name, ... }));  // ✅ read NOW
-//         return ([col, row]) => cellFor(snapshot[row], col);
+//     @cached get source() {
+//         return recordsSource({ records: this.store.all, columns: COLUMNS, toCell });  // ✅ reads NOW
 //     }
 //
 // Reading the getter (inside the tracking frame) consumes every `@tracked` field, so mutating any
 // of them invalidates the modifier, which re-runs, which produces a new closure identity, which
-// makes `computeCanBlit` return false, which forces a real repaint. The whole chain is load-bearing.
+// makes `computeCanBlit` return false, which forces a real repaint. The whole chain is load-bearing,
+// and encoding it once is exactly why `recordsSource` exists -- calling it from a constructor or an
+// action instead of a tracked computation silently breaks every link in that chain.
 //
-// The tradeoff is that this projects every row up front, so it suits bounded datasets -- exactly
-// what a form-backed editing table is. For the 200k-row virtualized case, keep the lazy class-field
-// form and drive updates with the imperative `updateCells()` API instead (that is the documented
-// dual-path model in PHASES.md, and it is why `<DemoGrid>` is written the other way).
+// The tradeoff is that this projects every row up front, so it suits data you actually hold in
+// memory. For paged/streamed/synthetic rows -- data you fundamentally can't project -- keep the lazy
+// class-field form and drive updates with the imperative `updateCells()` API instead (that is the
+// documented dual-path model in PHASES.md, and it is why `<DemoGrid>` is written the other way).
 //
 // ---------------------------------------------------------------------------------------------
-// SCALING: don't copy this projection verbatim past a few hundred rows
+// SCALING -- handled by the addon now; nothing to copy from this file
 // ---------------------------------------------------------------------------------------------
-// The snapshot below is a plain `.map()` over every record, which is honest at 8 rows and wrong at
-// 1,000: autotracking invalidation is all-or-nothing at the granularity of the computation, so
-// changing ONE field re-runs the whole projection and re-derives every cell of every row.
-//
-// The middle ground (1k-50k rows) is a per-row `@cached` view model -- one object per record whose
-// getter reads only that record's tracked fields:
-//
-//     class PersonRow {
-//         constructor(readonly person: Person) {}
-//         @cached get cells() { return [this.person.name, this.person.email /* ... */]; }
-//     }
-//     @cached get rowVMs() { return this.store.all.map(p => new PersonRow(p)); }  // stable
-//     get flatRows() { return this.rowVMs.map(r => r.cells); }                    // eager read
-//
-// Editing one field then invalidates exactly one row's cache: the outer `.map()` still runs, but
-// it is 999 cache hits plus 1 real recompute rather than 1,000 recomputes. The load-bearing detail
-// is that `rowVMs` must be keyed on the *records array* identity -- if it is rebuilt when a field
-// changes, every `@cached` resets and you are back to full recomputation with extra steps.
-//
-// This is deliberately NOT done here: at 8 rows it would be ceremony that obscures the one thing
-// this file exists to demonstrate. It belongs in the Phase 8 `recordsSource` layer, where it can be
-// written once instead of copied per consumer -- see PHASES.md's Phase 8 section.
-//
-// **If you are a consumer looking for what to actually write, read
-// `glide-data-grid-ember/DATA.md`, not this file.** That documents the single recommended pattern
-// (per-row `@cached` view model + a getter that reads them) which works unchanged at any size. This
-// component is a minimal *proof* that tracking reaches the canvas, deliberately stripped of
-// anything not needed for that proof -- it is not the reference implementation.
+// The eager read above is only half the story: a plain `.map()` over every record is honest at 8
+// rows and wrong at 1,000, because changing ONE field would re-derive every cell of every row. The
+// fix is a per-row memoized projection, and since Phase 8b it lives in the addon as
+// `recordsSource` -- which this component now uses, so the pattern is exercised rather than
+// described. Read `glide-data-grid-ember/DATA.md` for what to write as a consumer, and
+// `<ScaleProof>` (rendered below this demo) for the 1,000-row measurement that "one edit
+// re-projects one row" is actually true in a browser.
 import Component from "@glimmer/component";
-import { tracked } from "@glimmer/tracking";
+import { cached, tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
+import { recordsSource } from "glide-data-grid-ember/data-source/index";
 import {
     GridCellKind,
     getCellRenderer,
     type GridCell,
     type GridColumn,
     type GridSelection,
-    type Item,
 } from "glide-data-grid-ember/rendering/index";
+import ScaleProof from "test-app/components/scale-proof";
 import { ModelStore, ROLES, type Person, type Role } from "test-app/utils/model-store";
 
 const COLUMNS: readonly GridColumn[] = [
@@ -95,14 +76,25 @@ const COLUMNS: readonly GridColumn[] = [
     { title: "Active", width: 90 },
 ];
 
-// A plain, non-reactive projection of one model. Building this is what forces the tracked reads.
-interface PersonSnapshot {
-    readonly id: number;
-    readonly name: string;
-    readonly email: string;
-    readonly role: Role;
-    readonly age: number;
-    readonly active: boolean;
+// The projection. Module scope, so it is identity-stable: `recordsSource` builds one `createCache`
+// per record closing over this function, and a fresh identity would rebuild all of them.
+//
+// Every cell is `allowOverlay: false` -- see the header. The grid's own overlay editor can then
+// never open, so it can never repaint through its internal damage path, so a repaint can only be
+// autotracking.
+function personToCell(p: Person, col: number): GridCell {
+    switch (col) {
+        case 0:
+            return { kind: GridCellKind.Text, allowOverlay: false, data: p.name, displayData: p.name };
+        case 1:
+            return { kind: GridCellKind.Text, allowOverlay: false, data: p.email, displayData: p.email };
+        case 2:
+            return { kind: GridCellKind.Text, allowOverlay: false, data: p.role, displayData: p.role };
+        case 3:
+            return { kind: GridCellKind.Number, allowOverlay: false, data: p.age, displayData: String(p.age) };
+        default:
+            return { kind: GridCellKind.Boolean, allowOverlay: false, data: p.active };
+    }
 }
 
 export default class TrackingDemo extends Component {
@@ -122,71 +114,31 @@ export default class TrackingDemo extends Component {
     /** Last-submitted summary, purely so the page shows that a write really happened. */
     @tracked lastSubmit: string | undefined = undefined;
 
-    readonly columns = COLUMNS;
-
     // Precomputed so the template needs no `eq` helper (which would mean an `ember-truth-helpers`
     // dependency this app doesn't otherwise have).
     get roleOptions(): readonly { value: Role; selected: boolean }[] {
         return ROLES.map(r => ({ value: r, selected: r === this.draftRole }));
     }
 
-    get rowCount(): number {
-        return this.store.all.length;
-    }
-
     get selectedPerson(): Person | undefined {
         return this.selectedId === undefined ? undefined : this.store.find(this.selectedId);
     }
 
-    // See the header comment -- this MUST be a getter that reads the tracked fields eagerly.
-    get getCellContent(): (item: Item) => GridCell {
-        const snapshot: readonly PersonSnapshot[] = this.store.all.map(p => ({
-            id: p.id,
-            name: p.name,
-            email: p.email,
-            role: p.role,
-            age: p.age,
-            active: p.active,
-        }));
-
-        return ([col, row]: Item): GridCell => {
-            const person = snapshot[row];
-            if (person === undefined) {
-                return { kind: GridCellKind.Text, allowOverlay: false, data: "", displayData: "" };
-            }
-            switch (col) {
-                case 0:
-                    return {
-                        kind: GridCellKind.Text,
-                        allowOverlay: false,
-                        data: person.name,
-                        displayData: person.name,
-                    };
-                case 1:
-                    return {
-                        kind: GridCellKind.Text,
-                        allowOverlay: false,
-                        data: person.email,
-                        displayData: person.email,
-                    };
-                case 2:
-                    return {
-                        kind: GridCellKind.Text,
-                        allowOverlay: false,
-                        data: person.role,
-                        displayData: person.role,
-                    };
-                case 3:
-                    return {
-                        kind: GridCellKind.Number,
-                        allowOverlay: false,
-                        data: person.age,
-                        displayData: String(person.age),
-                    };
-                default:
-                    return { kind: GridCellKind.Boolean, allowOverlay: false, data: person.active };
-            }
-        };
+    /**
+     * See the header comment -- the `@cached` is load-bearing, not style. `recordsSource` reads every
+     * record's tracked fields *during* this getter, which is what registers them as dependencies of
+     * the frame that repaints the grid.
+     *
+     * No `onCellEdited` is passed, so `source.onCellsEdited` is `undefined` and the grid is given no
+     * write path at all. That is deliberate: it keeps this component a proof rather than a demo.
+     */
+    @cached
+    get source() {
+        return recordsSource({
+            records: this.store.all,
+            columns: COLUMNS,
+            toCell: personToCell,
+        });
     }
 
     /** Clicking a row loads that record into the form. */
@@ -248,7 +200,7 @@ export default class TrackingDemo extends Component {
     }
 
     <template>
-        <div style="display: flex; flex-direction: column; gap: 12px; height: 100%;">
+        <div style="display: flex; flex-direction: column; gap: 12px; height: 100%; overflow: auto;">
             <p style="margin: 0; font: 13px system-ui; color: #444;">
                 Click a row to load it into the form. Editing and submitting mutates
                 <code>@tracked</code>
@@ -256,15 +208,17 @@ export default class TrackingDemo extends Component {
                 <code>updateCells()</code>, no
                 <code>@onCellsEdited</code>, and cells are
                 <code>allowOverlay: false</code>
-                so the grid can't edit itself. Any repaint you see is autotracking.
+                so the grid can't edit itself. Any repaint you see is autotracking, routed through the
+                addon's
+                <code>recordsSource</code>.
             </p>
 
             <div style="flex: 0 0 320px; min-height: 0;">
                 <GlideDataGrid
-                    @columns={{this.columns}}
-                    @getCellContent={{this.getCellContent}}
+                    @columns={{this.source.columns}}
+                    @getCellContent={{this.source.getCellContent}}
                     @getCellRenderer={{getCellRenderer}}
-                    @rows={{this.rowCount}}
+                    @rows={{this.source.rows}}
                     @onSelectionChanged={{this.handleSelectionChanged}}
                 />
             </div>
@@ -337,6 +291,11 @@ export default class TrackingDemo extends Component {
             {{else}}
                 <p style="font: 13px system-ui; color: #888; margin: 0;">No row selected.</p>
             {{/if}}
+
+            <hr style="width: 100%; border: none; border-top: 1px solid #ddd; margin: 4px 0;" />
+
+            {{! The same claim at 1,000 rows, with the recompute counter on screen. }}
+            <ScaleProof />
         </div>
     </template>
 }

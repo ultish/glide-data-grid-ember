@@ -81,7 +81,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 5 | Extra cell types incl. sparklines | **Done, browser-verified, committed** (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator; 5b tags/dropdown/multi-select/links; 5c date-picker/button/tree-view/user-profile/article, incl. a shared `pasteValueIntoCell` fix so paste dispatches to `CustomRenderer.onPaste` for all 13 extra cells — see PORTING-NOTES.md for full per-cell detail) |
 | 6 | Theming system | **Done, browser-verified, committed** — `getDataEditorDarkTheme()`, `makeCSSStyle`/`--gdg-*` on the grid root + overlay containers, `@getRowThemeOverride` plumbed end to end, per-column/per-cell overrides verified, a real overlay-editor theme-merge bugfix, `glide-data-grid-ember/THEMING.md` + README section, and demo wiring (light/dark toggle + zebra rows + a themed column/cell). Also fixed a **major pre-existing perf defect found along the way**: three `DrawGridArg` fields were allocated fresh every draw, so `computeCanBlit`'s identity checks always failed and the scroll blit fast path had never engaged — see PORTING-NOTES.md's Phase 6 section, it applies to every future phase touching `DrawGridArg`. |
 | 7 | Demo app matching glideapps.com + browser verification | **Done, browser-verified, committed** (7a column-sort decorator `src/data-source/withColumnSort`; 7b column group headers enabled; 7c the demo-grid replica + consumer-built sort menu; 7e five addon defects the demo surfaced — see below) |
-| 8 | Async/streaming data + real-time updates demo | Pending |
+| 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path; 8b `recordsSource`; 8c `AsyncRecordsSource` + `onVisibleRegionChanged`; 8d the 1,000-row incremental proof + `object-scan` example; 8e streaming `updateCells()` demo; plus two real addon defects — see below) |
 | 9 | Backlog — deferred features (**not auto-scheduled**, see detail below) | Not scheduled |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
@@ -215,7 +215,33 @@ with `updateCells` reserved for data that genuinely cannot be held in memory. **
 package exactly that pattern** — if the implementation diverges, DATA.md is the spec and needs
 updating in the same change, not left stale.
 
-### Phase 8 — START HERE (written at Phase 7 completion, 2026-08-08)
+### Phase 8 — WHAT LANDED (written at Phase 8 completion, 2026-08-08)
+
+All four required test-app deliverables below were built, and every item in the "START HERE" block
+that follows was carried out. Full implementation record in `PORTING-NOTES.md`'s Phase 8a/8b, 8c, 8d
+and 8e sections; the consumer-facing result is in `DATA.md`. Summary:
+
+- **`withColumnSort` now takes and returns `onCellsEdited`**, translating edit locations into
+  original row space itself. `getOriginalIndex` remains as the escape hatch. The read/write
+  coordinate asymmetry that silently corrupted data is gone, and `DATA.md`'s caveat section now
+  documents the wired path instead of hand translation.
+- **`recordsSource`** (`src/data-source/records-source.ts`) packages DATA.md's recommended pattern:
+  one `createCache` per record, swept eagerly inside the caller's tracking frame, O(1)
+  `getCellContent`, identity-stable results. **Measured in a browser at 1,000 rows: editing one field
+  re-projects 1 row (7 `toCell` calls), not 1,000.** That closes the open question DATA.md's "Status
+  of this recommendation" had been carrying since Phase 6.
+- **`AsyncRecordsSource`** (a class, not a function — it owns page state) ports source's
+  `use-async-data-source`, driven by the new **`onVisibleRegionChanged`** grid arg.
+- **Two real addon defects fixed**, both invisible before this phase because both need
+  `updateCells` to be driven continuously: `updateCells` ignored the row-marker column offset, and a
+  **fractional grid height blanked the entire grid on every damage-only repaint** (canvas realloc +
+  `alpha: false`). The second is a deliberate divergence from source, commented in place.
+- The blit fast path was re-measured through `recordsSource` (3/3 scroll draws blit-eligible,
+  `getCellContent` never differed) rather than assumed.
+
+Phase 9 remains the deferred backlog and is still **not** auto-scheduled.
+
+### Phase 8 — START HERE (written at Phase 7 completion, 2026-08-08; kept as the original brief)
 
 What Phase 7 already built that Phase 8 must build **on top of**, not duplicate:
 

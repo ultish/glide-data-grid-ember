@@ -252,6 +252,27 @@ export interface GridHostArgs {
      * function, or a class field / `@action`-bound method), don't build it inside a getter.
      */
     readonly getRowThemeOverride?: GetRowThemeCallback;
+
+    // --- Phase 8: async / streaming data ---------------------------------------------------------
+    /**
+     * Fired whenever the set of visible cells changes -- on scroll, on resize, and after any arg
+     * change that moves what is on screen. Mirrors source's `onVisibleRegionChanged`
+     * (`internal/scrolling-data-grid/scrolling-data-grid.tsx`'s `processArgs`), which is what its
+     * `useAsyncDataSource` hook drives paged loading from.
+     *
+     * `region` is in the consumer's **own coordinate space**, the same space as `getCellContent`'s
+     * `Item` and `onCellsEdited`'s `location`: `x` excludes the synthetic row-marker column, and
+     * `y`/`height` cover real data rows only (never the trailing blank row). `width`/`height` are
+     * counts, so `[x, x + width)` x `[y, y + height)` is the on-screen block -- its last row and
+     * column may be only partially visible, exactly as in source.
+     *
+     * Deduplicated: fires only when the region actually differs from the last one reported. It is
+     * also **deferred to a microtask**, so a consumer may safely set tracked state from it. Unlike
+     * source, this callback is reachable from inside the Ember modifier's own tracking frame (via
+     * `scheduleFullRedraw`), where a synchronous tracked write would trip Ember's
+     * backtracking-rerender assertion.
+     */
+    readonly onVisibleRegionChanged?: (region: Rectangle) => void;
 }
 
 export interface GridHostControllerOptions {
@@ -297,6 +318,8 @@ interface ResolvedGridHostArgs {
     readonly onRowAppended: (() => void) | undefined;
 
     readonly getRowThemeOverride: GetRowThemeCallback | undefined;
+
+    readonly onVisibleRegionChanged: ((region: Rectangle) => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -770,6 +793,8 @@ export class GridHostController {
             onRowAppended: args.onRowAppended,
 
             getRowThemeOverride: args.getRowThemeOverride,
+
+            onVisibleRegionChanged: args.onVisibleRegionChanged,
         };
     }
 
@@ -1084,7 +1109,16 @@ export class GridHostController {
     /** Damage-based partial redraw for a known set of changed cells. */
     public updateCells(cells: readonly { cell: Item }[]): void {
         if (this.destroyed) return;
-        this.drawWithDamage(new CellSet(cells.map(c => c.cell)));
+        // `cell` arrives in the consumer's own column space (the same space as `getCellContent`'s
+        // `Item`), but the damage set is matched against *mangled* column indices inside the draw
+        // loop, so the synthetic row-marker column has to be added back here. Source does exactly
+        // this at its own public `updateCells` boundary (`data-editor.tsx:4001-4006`). Without it,
+        // every damaged cell lands one column to the left whenever `rowMarkers !== "none"` --
+        // silently, since an unmatched damage entry just repaints the wrong cell.
+        const { rowMarkerOffset } = this.resolveArgs();
+        this.drawWithDamage(
+            new CellSet(cells.map(c => [c.cell[0] + rowMarkerOffset, c.cell[1]] as Item))
+        );
     }
 
     /** Current selection. Read-only snapshot -- mutate via user interaction, not directly. */
@@ -1212,6 +1246,99 @@ export class GridHostController {
         } else {
             drawGrid(current, undefined);
         }
+
+        this.maybeEmitVisibleRegion(args, mappedColumns, freezeColumns);
+    }
+
+    // --- Phase 8: visible-region reporting ---------------------------------------------------------
+    //
+    // Source computes this in `scrolling-data-grid.tsx`'s `processArgs` (its own scroll handler);
+    // this port derives it at the end of every draw instead, which covers scroll, resize and arg
+    // changes with one call site and keeps it aligned with the offsets that were actually painted.
+    // The dedupe below is what keeps that cheap: the callback fires only when the visible block
+    // genuinely changes, i.e. at most once per crossed row/column boundary, not once per frame.
+
+    private lastVisibleRegion: Rectangle | undefined = undefined;
+
+    private maybeEmitVisibleRegion(
+        args: ResolvedGridHostArgs,
+        mappedColumns: readonly MappedGridColumn[],
+        freezeColumns: number
+    ): void {
+        const onVisibleRegionChanged = args.onVisibleRegionChanged;
+        if (onVisibleRegionChanged === undefined) return;
+
+        const region = this.computeVisibleRegion(args, mappedColumns, freezeColumns);
+        const last = this.lastVisibleRegion;
+        if (
+            last !== undefined &&
+            last.x === region.x &&
+            last.y === region.y &&
+            last.width === region.width &&
+            last.height === region.height
+        ) {
+            return;
+        }
+        this.lastVisibleRegion = region;
+
+        // Deferred deliberately -- see the doc comment on `GridHostArgs.onVisibleRegionChanged`.
+        // A draw can be triggered from inside the Ember modifier's tracking frame, and consumers
+        // of this callback overwhelmingly want to *set tracked state* from it (that is how paged
+        // loading is driven), which Ember forbids during a render pass.
+        queueMicrotask(() => {
+            if (this.destroyed) return;
+            onVisibleRegionChanged(region);
+        });
+    }
+
+    // The visible block, in the consumer's own coordinate space (row-marker column excluded, real
+    // data rows only). `width`/`height` are counts; the last row/column in the range may be only
+    // partially visible, matching source's own `cellRight`/`cellBottom` semantics.
+    //
+    // Frozen columns are deliberately NOT part of the reported range: they are permanently visible
+    // and always occupy `[0, freezeColumns)` in the consumer's space, so folding them into `x`
+    // would make the rect discontiguous the moment the grid is scrolled horizontally.
+    private computeVisibleRegion(
+        args: ResolvedGridHostArgs,
+        mappedColumns: readonly MappedGridColumn[],
+        freezeColumns: number
+    ): Rectangle {
+        const effectiveColumns = getEffectiveColumns(
+            mappedColumns,
+            this.cellXOffset,
+            this.width,
+            undefined,
+            this.translateX
+        );
+        // `getEffectiveColumns` returns every sticky column first, then the visible non-sticky ones
+        // starting at `cellXOffset` -- so the sticky prefix is exactly `freezeColumns` long.
+        const x = Math.max(0, this.cellXOffset - args.rowMarkerOffset);
+        const width = Math.max(
+            0,
+            Math.min(effectiveColumns.length - freezeColumns, args.columns.length - x)
+        );
+
+        const rows = args.rows;
+        if (rows <= 0) return { x, y: 0, width, height: 0 };
+
+        const y = Math.min(Math.max(0, this.cellYOffset), rows - 1);
+        // `translateY` is <= 0: how much of the first visible row is scrolled off the top, so
+        // subtracting it adds that sliver back onto the height still to be covered.
+        const available = Math.max(0, this.height - this.totalHeaderHeight(args)) - this.translateY;
+
+        let height = 0;
+        const rowHeight = args.rowHeight;
+        if (typeof rowHeight === "number") {
+            height = rowHeight > 0 ? Math.ceil(available / rowHeight) : 0;
+        } else {
+            let acc = 0;
+            for (let r = y; r < rows && acc < available; r++) {
+                acc += rowHeight(r);
+                height++;
+            }
+        }
+
+        return { x, y, width, height: Math.max(0, Math.min(height, rows - y)) };
     }
 
     // --- DOM sizing --------------------------------------------------------------------------------

@@ -2792,3 +2792,641 @@ clipboard behaviour here; reach for synthetic `ClipboardEvent`s only if a real k
 impossible. (Consistent with the wider pattern already recorded in this file: trusted `computer`
 input works where synthetic dispatch silently doesn't -- same as `.focus()` not firing `focus`, and
 the `hover` action not firing `mousemove`.)
+
+## Phase 8a/8b — decorator write path + `recordsSource` (COMPLETE, 2026-08-08; NOT browser-tested)
+
+Two deliverables in one change: `withColumnSort` gained the write path agreed with the user (PHASES.md's
+"Phase 8 -- START HERE" REQUIRED item), and the sync in-memory `recordsSource` landed alongside it. The
+demo was rewired onto the new write path as the end-to-end proof.
+
+### Final exported API (use this; don't re-read the code)
+
+```ts
+// glide-data-grid-ember/data-source/index
+
+// --- Phase 8a: withColumnSort now owns BOTH coordinate directions -------------------------------
+export interface CellEdit { readonly location: Item; readonly value: GridCell; }   // NEW, shared type
+
+export interface ColumnSortProps {
+    readonly columns: readonly GridColumn[];
+    readonly rows: number;
+    readonly getCellContent: (cell: Item) => GridCell;
+    readonly onCellsEdited?: (edits: readonly CellEdit[]) => void;   // NEW -- expects ORIGINAL rows
+    readonly sort?: ColumnSort | readonly ColumnSort[];
+}
+export interface ColumnSortResult {
+    readonly getCellContent: (cell: Item) => GridCell;
+    readonly onCellsEdited?: (edits: readonly CellEdit[]) => void;   // NEW -- wire THIS to the grid
+    readonly getOriginalIndex: (index: number) => number;            // demoted to escape hatch
+}
+
+// --- Phase 8b: recordsSource --------------------------------------------------------------------
+export interface RecordsSourceProps<T> {
+    readonly records: readonly T[];
+    readonly columns: readonly GridColumn[];
+    readonly toCell: (record: T, col: number) => GridCell;
+    readonly onCellEdited?: (record: T, col: number, value: GridCell) => void;   // note: singular
+}
+export interface RecordsSourceResult {
+    readonly columns: readonly GridColumn[];
+    readonly rows: number;
+    readonly getCellContent: (cell: Item) => GridCell;
+    readonly onCellsEdited?: (edits: readonly CellEdit[]) => void;               // note: plural
+}
+export function recordsSource<T extends object>(p: RecordsSourceProps<T>): RecordsSourceResult;
+```
+
+Composition (this is the point of the naming, and it is verified working end to end):
+
+```ts
+@cached get gridArgs() {
+    const src = recordsSource({ records: this.people, columns: COLUMNS, toCell, onCellEdited });
+    return { ...src, ...withColumnSort({ ...src, sort: this.sort }) };
+}
+```
+
+`withColumnSort` translates each edit's `location[1]` displayed -> original, then `recordsSource`
+resolves `records[row]`. `location[0]` is untouched by both (already consumer column space -- the
+controller strips the row-marker column at the callback boundary). `onSelectionChanged` is deliberately
+left in displayed space; it was not touched and should not be.
+
+### The settled contract, stated once for every future decorator
+
+**A decorator that remaps the read path must remap the write path too.** Both functions take
+`onCellsEdited`/`onCellEdited` and return an `onCellsEdited`; the consumer wires the *returned* one to
+`<GlideDataGrid @onCellsEdited=...>` and never translates an index by hand. Returned handler is
+`undefined` iff the input was. Any later row/column-remapping decorator (source's `use-movable-columns`,
+`use-collapsing-groups`) must adopt the same shape.
+
+### Memoization / identity design
+
+`withColumnSort`'s existing module-scope `WeakMap<getCellContent, {rows, sortKey, result}>` gained an
+`onCellsEdited` field in the entry. **This is the load-bearing detail, and it's the Phase 6
+`mangledGetCellContent` bug class again:** the cached `onCellsEdited` closure *captures* the incoming
+handler, so the incoming handler's identity must be in the *key*. Without it, swapping the write handler
+while the read handler stayed put would silently keep invoking the stale one. Rule to carry forward:
+**enumerate what the cached closure captures, and check every captured value appears in the key.** Both
+files now have that enumeration written out in a comment next to the cache entry type.
+
+`recordsSource` is a second module-scope `WeakMap`, keyed on the **records array identity**, holding
+`{columns, toCell, onCellEdited, caches, projections, result}`:
+
+- One `createCache` per record (`@glimmer/tracking/primitives/cache` -- the non-decorator form of
+  `@cached`; `@ember/*` and `@glimmer/*` bare imports are already externalized by `addon.dependencies()`,
+  confirmed in the built `dist/data-source/records-source.js`, **no build-config change was needed**).
+  Each cache's function reads only *that* record's tracked fields.
+- The cache **set** is rebuilt only when `records` / `columns` / `toCell` change identity -- exactly the
+  three values the cache functions close over. This is DATA.md's `rowVMs` rule moved into the addon.
+- Every call does an **eager `getValue` sweep over all rows**. That is rule 1 from the "Autotracking ->
+  canvas" section above: the reads must land in the *caller's* tracking frame or the grid never repaints.
+  It is why this can't be a lazy closure and why it must be called from a `@cached` getter.
+- Result reuse is decided by an **element-wise identity scan of the per-row projections**, not a
+  structural digest. `createCache` allocates a fresh array whenever it recomputes, so projection identity
+  is an exact "this row changed" signal; the scan is O(rows) of `===` against the O(rows x cols)
+  re-projection it is already avoiding, and unlike a digest it cannot report equal for different data.
+  All-identical -> return the previous result object (so `computeCanBlit`'s identity check on
+  `getCellContent` keeps passing). Any row changed -> fresh identity, which is correct and wanted.
+- `getCellContent` is `projections[row]?.[col] ?? FALLBACK_CELL` with `FALLBACK_CELL` at module scope --
+  O(1), zero allocation on the paint path.
+- Internals are non-generic (`unknown` records) with one cast at the public boundary, purely so the
+  `CacheEntry` type needs no type parameter and `RowCache` can be named without a TS instantiation
+  expression. Documented in the file.
+
+### Two things that look like contradictions and are not (both documented in the file header)
+
+1. **`isConst` caches are correct here.** A record class with no `@tracked` fields consumes no tracked
+   state, so Glimmer marks its cache permanently constant and it never re-projects. That's fine: nothing
+   about such a record *can* change without a new `records` array (or new `columns`/`toCell`), all three
+   of which rebuild the cache set. Contrast PHASES.md's Phase 9 note where a const cache *would* be a
+   staleness bug -- that's about `GridHostController`, which deliberately holds untracked state.
+2. **This is not DATA.md's "don't memoize rows in a `WeakMap` keyed on the record object" anti-pattern.**
+   That warning is about caching plain **values** by record identity, which a normalized store (Apollo)
+   defeats by mutating entities in place -- identity unchanged, cache serves stale rows. A tracked
+   `createCache` is invalidated *by that very mutation*. The distinction is what is cached, not what it
+   is keyed on. Spelled out in DATA.md too, because the two statements sit a screen apart.
+
+### `records` array must be replaced, not mutated
+
+`records` is typed `readonly T[]` and treated as immutable membership. Mutate records in place freely;
+an in-place `push`/`splice` keeps the array identity, so the cache set (and therefore `rows`) is stale.
+Documented in both the file and DATA.md; not defended against at runtime.
+
+### Files changed
+
+- `glide-data-grid-ember/src/data-source/column-sort.ts` -- write path, `CellEdit`, cache key, doc comments.
+- `glide-data-grid-ember/src/data-source/records-source.ts` -- NEW.
+- `glide-data-grid-ember/src/data-source/index.ts` -- barrel (merged, not clobbered -- re-read immediately
+  before writing, per the Phase 5a concurrent-editing note; a different agent was editing test-app at the time).
+- `glide-data-grid-ember/DATA.md` -- sort caveat section rewritten around the built-in write path
+  (`getOriginalIndex` demoted to an "escape hatch" subsection, "slated to be removed" note deleted);
+  "Planned" replaced by a real `recordsSource` section. **"Status of this recommendation" deliberately
+  untouched** -- see "What was NOT verified" below.
+- `test-app/app/components/glide-demo.gts` -- `handleCellsEdited` renamed `applyEdits`, no longer calls
+  `getOriginalIndex`, passed *into* `withColumnSort`; the grid now gets `this.sortResult.onCellsEdited`.
+  Edit-map keying (`"<originalRow>:<columnId>"`) is unchanged.
+
+### Verification actually performed
+
+- `npx tsc --noEmit -p tsconfig.json` from `glide-data-grid-ember/` -- clean, exit 0.
+- `pnpm --filter glide-data-grid-ember build` -- rollup + `glint --declaration` succeed;
+  `dist/data-source/records-source.js` produced with `@glimmer/tracking/primitives/cache` left external.
+- `pnpm --filter test-app exec vite build` -- succeeds (454 modules).
+- **Node ESM smoke script against the built `dist/`** (scratch space, not committed), 45 assertions, all
+  passing. `@tracked` was reproduced with `trackedData` from `@glimmer/validator` -- the exact primitive
+  Ember's decorator is built on -- and `@glimmer/tracking/primitives/cache` was shimmed to re-export from
+  that same `@glimmer/validator`, so caches and tracked fields share one tag graph. Actual numbers:
+  - 3 records x 2 columns: first call = **6** `toCell` calls; two further calls with identical inputs =
+    still **6**, and `r1 === r2 === r3` with the same `getCellContent`.
+  - Mutate one record's tracked field -> **2** further `toCell` calls (one row), attributed to the mutated
+    record; the other two records recorded **0**. Fresh result identity, new value visible.
+  - **1,000 records**: cold build = **2000** `toCell` calls; a single `person.age = 999` then one more
+    `recordsSource` call = **2** calls. Naive would be 2000. This is the core claim, on a counter.
+  - New `columns` / new `toCell` / new `records` array identity each rebuild (6 calls) -- cache-key coverage.
+  - `withColumnSort`: sorted read path; displayed row 0 -> `getOriginalIndex(0)`; `location[0]` untouched;
+    a 2-cell batch forwarded as **1** call with both entries translated; a freshly-allocated equivalent
+    `sort` returns the identical result *and* the identical `onCellsEdited`; swapping the incoming handler
+    busts the cache; no-sort returns both caller references unchanged; `onCellsEdited === undefined` iff input was.
+  - Composed `recordsSource` + `withColumnSort`: read path sorted `[Adam, Mia, Zoe]`; an edit at
+    **displayed row 0** landed on `records[1]` (Adam) not `records[0]` (Zoe) -- i.e. the exact
+    data-corruption case this phase exists to remove; descending sort likewise landed on Zoe.
+  - `track(() => recordsSource(...))` then mutating a record **invalidates that tag** -- direct proof that
+    the eager sweep registers dependencies in the caller's frame (rule 1), not just in theory.
+- **Test-script gotcha worth knowing** (cost two false failures): the default sort mode is
+  `String.localeCompare`, which is *case-insensitive-ish* -- `"alice".localeCompare("Bob") === -1`. Don't
+  write expectations assuming ASCII ordering. Second: `withColumnSort`'s cache is **one entry per
+  `getCellContent` identity**, so a test that calls it with the same `getCellContent` and a different
+  handler in between will evict the entry and fail an unrelated identity assertion. Both were test bugs.
+
+### What was NOT verified (do not round this up)
+
+- **No browser testing at all.** The orchestrator owns it. In particular the rewired `glide-demo.gts`
+  edit/delete/paste round-trip under an active sort has only been proven at the unit level.
+- **No blit-path re-confirmation in a real browser.** Identity stability is asserted by the smoke script;
+  that `computeCanBlit` still engages through the composed decorators was not re-measured in-page.
+- **The per-row-`@cached` claim is measured in Node, not in a browser, and not against real repaint cost.**
+  DATA.md's "Status of this recommendation" section was therefore left exactly as it is: it promises a
+  ~1,000-row *browser* proof with a recompute counter, and that is still owed. The Node numbers above are
+  strong evidence for the mechanism but they are not that measurement, and claiming otherwise would be
+  worse than leaving the section stale.
+  **-> SUPERSEDED: done in Phase 8d below** (browser-measured at 1,000 rows; DATA.md updated). Repaint
+  *cost* is still unmeasured.
+- `recordsSource` is not yet used by any test-app component (`tracking-demo.gts` rewire, the `object-scan`
+  worked example, and the `updateCells()` high-frequency demo are all still open Phase 8 deliverables).
+  **-> SUPERSEDED for the first two by Phase 8d below**; the `updateCells()` demo is `streaming-demo.gts`.
+- No runtime guard against an in-place-mutated `records` array; documented only.
+
+## Phase 8d — the ~1,000-row browser proof of `recordsSource` (COMPLETE, browser-verified, 2026-08-08)
+
+Closes the gap the Phase 8a/8b section above explicitly left open ("the per-row-`@cached` claim is
+measured in Node, not in a browser") and PHASES.md's required test-app deliverables 1-3. `test-app`
+only -- nothing in `glide-data-grid-ember/src/**` was touched.
+
+### Measured numbers (Chrome, dev server on :4500, against the built `dist/`)
+
+`test-app/app/components/scale-proof.gts`, 1,000 `Employee` records x 7 columns. The projection
+increments a plain counter and records the projected record's `id` in a `Set`, so "rows re-projected
+since the last action" is an observed count on screen:
+
+| Action | Rows re-projected | `toCell` calls |
+| --- | --- | --- |
+| Initial build (cold) | 1000 / 1000 | 7000 |
+| **Edit one field on one record (row 0)** | **1 / 1000** | **7** |
+| Edit one field on row **500** (scrolled out of view) | 1 / 1000 | 7 |
+| Add a nested related entity (`profile` replaced) on one record | 1 / 1000 | 7 |
+| Re-render touching no record | 0 / 1000 | 0 |
+| Replace the `records` array (same instances, new array) | 1000 / 1000 | 7000 |
+
+The canvas visibly repainted each time: `Grace Perlman #1` -> `Grace Perlman #1 (edit #1)`, and the
+`object-scan` "Pets" cell `Momo` -> `Momo, Pet2`. **Constraints held throughout** (same discipline as
+`tracking-demo.gts`): no `updateCells()`, no `onCellEdited` passed at all so the grid had *no* write
+path, every cell `allowOverlay: false`. So the repaint can only be autotracking, and the "1 row"
+count can only be the per-row `createCache`.
+
+The out-of-view row-500 result matters on its own: it rules out "one row" being an artifact of what
+happened to be painted. And the last table row is the measured cost of DATA.md's "the one way to
+break it" -- the `Employee` instances were identical, only the array identity changed, and that alone
+rebuilt all 1,000 projections.
+
+### The tag-system question, settled (this was the actual risk)
+
+`records-source.ts` imports `createCache` from `@glimmer/tracking/primitives/cache`. The Node smoke
+script in Phase 8b had to substitute a standalone `@glimmer/validator`, so it could not answer
+whether the *real* build resolves that specifier to **ember-source's own** validator. If it resolved
+anywhere else, the row caches would live in a different tag graph from `@tracked`, never invalidate,
+and the grid would show stale data with no error. Three independent lines of evidence, all now
+collected:
+
+1. **Behavioural (decisive).** A `@tracked` write invalidated exactly one row cache and repainted the
+   canvas. A split tag system produces exactly the opposite: 0 rows re-projected, stale canvas.
+2. **Resolution, from Vite's own dep-optimizer metadata**
+   (`test-app/node_modules/.vite/deps/_metadata.json`):
+   `ember-source/@glimmer/tracking/primitives/cache/index.js` ->
+   `ember-source/dist/packages/@glimmer/tracking/primitives/cache/index.js`, whose entire body is
+   `export { createCache, getValue, isConst } from '../../../validator/index.js'` -- i.e.
+   ember-source's bundled `@glimmer/validator`.
+3. **The other half of the pair.** Embroider rewrites `@glimmer/tracking` (the standalone 1.1.2, which
+   has no `primitives/cache` subpath at all and declares `@glimmer/validator@^0.44.0`) so its index is
+   `import * as metal from "@ember/-internals/metal"; export { cached, tracked }`. So `@tracked` and
+   `createCache` both land inside ember-source. **One tag graph.**
+
+Worth knowing that standalone `@glimmer/validator` copies (0.44.0, 0.84.3, 0.92.3) *do* exist in the
+pnpm store via transitive deps -- the risk was real, not hypothetical. It is Embroider's rewriting
+that defuses it.
+
+### `object-scan` worked example — and one non-obvious trap
+
+Added to `test-app/package.json` only (`object-scan@^20.0.4`); the addon still depends on no
+traversal library, which is the whole point of `toCell` being an accessor function. Ambient types in
+`test-app/types/object-scan.d.ts` (the package ships none).
+
+**Scanners are compiled once per column at module scope** (`compileScanner()` in
+`app/utils/scale-records.ts`), and the compile count is rendered on the page — it reads **2**, not
+7,000, so the hoisting is visible rather than asserted.
+
+**The trap, which cost a rewrite:** `object-scan` walks **own enumerable** properties, and `@tracked`
+fields are *accessors on the prototype* (Ember's decorator, and `decorator-transforms`, both define
+them there). A scanner pointed at a model instance therefore matches **nothing, silently** — no
+error, just empty cells. Point it at the plain nested payload instead (`objectScan(["pets.name"])`
+applied to `employee.profile`, not to `employee`), which is what a GraphQL response is anyway. DATA.md's
+example previously scanned the record object and has been corrected.
+
+### Instrumenting a projection: the counter must NOT be `@tracked`
+
+`toCell` runs *inside* the caller's tracking frame — that is rule 1. Incrementing a `@tracked`
+counter there is a read-then-write of tracked state inside a computation the template has already
+consumed, i.e. precisely Ember's backtracking-rerender assertion. So the counters are plain untracked
+numbers, and the component copies them into tracked display fields afterwards, in a `next()` turn
+(a new runloop, so it lands after the render the mutation caused). Confirmed working: `next()` fires
+after the projection every time, with no assertion in the console. **Anyone instrumenting a tracked
+computation on this project hits this; don't rediscover it.**
+
+Note also that the on-screen "mutation -> counter read" milliseconds is wall clock including render
+*scheduling* (it varied 110-890 ms across identical actions while the automation was driving the
+tab). It is labelled as not-a-benchmark in the UI for that reason; do not quote it as repaint cost.
+
+### Files changed (all `test-app`)
+
+- `app/components/tracking-demo.gts` — rewired onto `recordsSource`; the module-scope `personToCell`
+  replaces the hand-written `.map()` snapshot; the long "SCALING: don't copy this projection
+  verbatim" block shrank to a pointer at `recordsSource`/DATA.md/`<ScaleProof>`. All four proof
+  constraints preserved (no `updateCells()`, no `onCellEdited` passed, every cell
+  `allowOverlay: false`, nothing changing identity). Renders `<ScaleProof />` below itself, so no new
+  tab and **`demo-switcher.gts` was not touched**.
+- `app/components/scale-proof.gts` — NEW. The 1,000-row measurement + its four controls.
+- `app/utils/scale-records.ts` — NEW. GQL-shaped `Employee` records, deterministic generator,
+  hoisted `object-scan` scanners, the instrumented `employeeToCell`, the counter API.
+- `types/object-scan.d.ts` — NEW. Ambient types.
+- `package.json` — `object-scan` added.
+- `glide-data-grid-ember/DATA.md` — "Status of this recommendation" now carries the measured table
+  instead of an IOU; the nested-data section gained the prototype-accessor warning and a pointer to
+  the worked example.
+
+### Verification actually performed
+
+- `npx tsc --noEmit -p tsconfig.json` (addon) — clean; `npx glint` (test-app) — clean;
+  `pnpm --filter test-app exec vite build` — succeeds (477 modules).
+- `pnpm --filter glide-data-grid-ember build`, then the established loop: kill server ->
+  `rm -rf test-app/node_modules/.vite` -> restart on **:4500** (:4200 was another agent's) ->
+  fresh `?cb=` query string.
+- Browser: every row of the measurement table above; the rewired 8-row tracking proof still repaints
+  from the form (`Alan Turing` -> `Alan M. Turing`) with no imperative redraw; no console
+  errors/assertions.
+
+### What was NOT verified (do not round this up)
+
+- **The blit fast path was not re-measured.** `computeCanBlit`'s identity check on `getCellContent`
+  is what `recordsSource`'s result-object reuse exists to satisfy, and it is still only asserted by
+  the Phase 8b Node script. Nobody has confirmed in-page that the blit engages while scrolling a
+  `recordsSource`-backed grid.
+- **No repaint-cost benchmark.** The claim proven is "one row re-projected, not 1,000", counted. How
+  much wall-clock that saves at 1,000 rows was not measured, and the on-screen ms figure is not it.
+- Composition with `withColumnSort` was not exercised in this demo (no sort is wired to either grid
+  here); `glide-demo.gts` remains the place that covers the sorted write path.
+- `<ScaleProof>` was tested at 1,000 rows only — not at the 200k end, which is the `updateCells()`
+  path's territory anyway (PHASES.md deliverable 4).
+
+## Phase 8c — the high-frequency / streaming `updateCells()` demo (COMPLETE, browser-verified, 2026-08-08)
+
+PHASES.md deliverable 4. `test-app` only — **nothing in `glide-data-grid-ember/src/**` was touched**,
+including the addon defect found below, which is left for whoever owns the addon.
+
+Files: `app/components/streaming-demo.gts` (NEW), `app/utils/streaming-demo-data.ts` (NEW),
+`app/components/demo-switcher.gts` (new tab + a height fix, see below), `app/styles/app.css`.
+
+Shape: 10,000 rows × 12 columns, a plain non-tracked `Float64Array`/`string[]` store mutated in
+place, a lazy O(1) `getCellContent`, and an rAF ticker that mutates N rows and hands the exact
+changed cells to `GlideDataGridApi.updateCells()`. Pattern (1) from "Autotracking → canvas", at
+scale. Every number on screen is measured, not asserted, and is mirrored onto
+`[data-test-streaming-stats]` as `data-*` attributes so automation can read it without scraping
+formatted text.
+
+### Measured throughput (Chrome 120 Hz display, dpr 2, **production `vite build`**, macOS)
+
+| Target | Measured cells/sec | Ticks/sec | Damage repaint (avg / peak) | Whole frame (mutate + `updateCells`) | Cells/tick |
+| --- | --- | --- | --- | --- | --- |
+| 1k/s | 1,003 | 120.1 | 0.23 / 0.9 ms | 0.34 ms | 8 |
+| 10k/s | 10,003 | 120.0 | 0.27 / 0.9 ms | 0.87 ms | 83 |
+| 50k/s | 49,998 | 120.0 | 0.15 / 0.5 ms | 1.15 ms | 417 |
+| 100k/s | 100,003 | 120.1 | 0.16 / 0.4 ms | 1.97 ms | 833 |
+| 250k/s | 249,997 | 120.1 | 0.15 / 0.4 ms | 3.44 ms | 2,082 |
+| **Max** (adaptive) | **524,435** | 119.4 | 0.26 / 3.7 ms | 6.77 ms | 4,392 |
+
+"Max" is an adaptive batch controller (grow while a frame costs < 6 ms, shrink above 12 ms); it
+converged on **4,394 cells/frame** and stayed there, so the half-million figure is a measurement
+rather than a hardcoded claim. **Scroll stayed smooth while streaming**: over a 7 s window at 50k/s
+with real `computer` wheel scrolls (vertical to row ~60 and horizontal), 839 rAF frames in 7,002 ms
+(119.8 fps), worst frame gap 26.4 ms (one ~2-frame hiccup), ticker never dropped below 118.1/sec,
+peak damage repaint 0.4 ms, and **0 frames** with a blanked canvas. No console errors anywhere in
+the session.
+
+### Damage coordinates land on the right column — with row markers ON (the case that used to be wrong)
+
+`GridHostController.updateCells` now adds `rowMarkerOffset` internally, so the demo runs
+`@rowMarkers="number"` deliberately: with markers off, mangled and consumer column space coincide
+and the interesting path never runs.
+
+**Verification technique, reusable**: don't eyeball a screenshot. Hash the content canvas per
+**device-pixel x column** (40 sampled scanlines through the body, rolling `Math.imul` hash per x),
+snapshot twice ~2.5 s apart while streaming, and report the x-ranges that changed. Result: the only
+changed band was CSS x ∈ **[345, 1293.5]**, against column bounds
+`Symbol 45-155 | Company 155-345 | Last 345-435 | … | Fill 1155-1295 | Venue 1295-1385`
+— i.e. exactly the 9 columns the demo names (`Last`…`Fill`, consumer indices 2-10), with the
+row-marker band, `Symbol`, `Company` and `Venue` untouched. A dropped `rowMarkerOffset` would have
+produced [155, 1155] (`Company`…`Trend`) instead, freezing `Fill`. That is a real discriminator, not
+a plausibility check.
+
+### THE FINDING: a fractional grid height blanks the whole grid on any damage-only repaint
+
+**This is an addon defect, unfixed, and it is not specific to this demo.** It cost most of this
+phase's time and it is invisible to `tsc`, every build, and every previous browser pass.
+
+- `GridHostController` takes its size straight from `ResizeObserver`'s `contentRect`
+  (`grid-host-controller.ts:739-741`) — a **float**.
+- `drawGrid` guards canvas sizing with
+  `if (canvas.width !== width * dpr || canvas.height !== height * dpr) { canvas.width = …; canvas.height = …; }`
+  (`src/rendering/render/data-grid-render.ts:179-187`). `canvas.height` is an unsigned long and
+  **truncates**; `height * dpr` does not.
+- So a grid whose measured height is fractional fails that comparison on **every single draw** and
+  reallocates the canvas every time. The 2D context is created with **`alpha: false`**, so a
+  reallocation clears it to **opaque black**.
+- A *full* redraw hides this perfectly — it repaints everything immediately after. A **damage**
+  redraw does not: `drawGrid` returns straight after painting only the damaged cells, so the entire
+  rest of the grid stays black. Measured height here was `574.40625`; `× dpr 2 = 1148.8125` vs a
+  canvas height of `1148`.
+
+Symptom: within ~1 s of starting the stream the grid body went solid black with only the ~9 damaged
+columns of the most recent rows visible, and it never recovered — a subsequent scroll *did* repaint
+correctly for exactly one frame before the next damage draw blanked it again. At 1,000 cells/sec,
+i.e. not load-related at all. It also means the **blit fast path is dead** for any such grid (the
+canvas it would blit from is cleared under it).
+
+**Proof, not inference** — patched `HTMLCanvasElement.prototype`'s `width`/`height` setters in the
+page's **main world** (see the injection trick below) and caught the stack:
+`resizeH from 1148 to 1148.8125 … at drawGrid | at GridHostController.runDraw | at drawWithDamage | at updateCells`.
+
+**The fix belongs in the addon** and was deliberately not made here: round/floor the size before it
+reaches `drawGrid` (e.g. `this.width = Math.round(width)` in the `ResizeObserver` callback), or
+compare against `(canvas.height / dpr)`. Rounding at the observer is the safer of the two — several
+other call sites (`computeBounds`, hit-testing, the `.dvn-stack` height math) consume `this.width`
+/`this.height` and would then all agree with what was actually painted.
+
+**Workaround applied in the demo, so it is usable today** (marked as a workaround in both files):
+`.gdg-streaming__controls`/`__stats` are pinned to whole-pixel flex bases (`flex: 0 0 25px` /
+`0 0 62px`) **plus `min-height: 0`**, and `demo-switcher.gts`'s tab row to `flex: 0 0 30px`. The
+`min-height: 0` is not decorative: a flex item defaults to `min-height: auto`, which refuses to
+shrink below its content's min-content height and silently handed the fractional basis straight back
+(62.0938 px — a `line-height: 1.2` on an 18 px stat value; that 0.09 px blanked the grid). With the
+strips pinned the grid box lands on exactly 566 px, `× 2 = 1132` = `canvas.height`, and the symptom
+is gone (verified: 0 black frames across every rate and across scrolling).
+
+Why this stayed dormant until now: it needs *both* a fractional height *and* damage-only repaints.
+`glide-demo.gts` measures 669 px (whole) at this window size, and every other demo is full-redraw
+driven. Another instance of the standing Phase 7e lesson — **a feature no demo has ever switched on
+is unverified code** — this time for `updateCells()` at volume.
+
+### Second bug, demo-side, fixed: the rate credit was quantised away at low targets
+
+`1k/s` measured **~430/s**. A row tick is indivisible (9 cells), and the ticker was deducting the
+whole per-frame budget from `cellCredit` before rounding down to whole row ticks — so at 120 fps a
+frame earns ~8.3 cells, can't buy a tick, and forfeited the lot. Now the credit is drained in whole
+*row ticks* (`rowTicks = floor(credit / CELLS_PER_ROW_TICK); credit -= rowTicks * CELLS_PER_ROW_TICK`)
+and the remainder accumulates. Every target above is now hit to within 0.3%. Worth remembering for
+any future rate-limited ticker on this project: **never deduct budget you couldn't spend.**
+
+### The rAF + timer ticker driver
+
+rAF is the primary (it is what source's `rapid-updates` story uses, and it keeps `updateCells` in
+step with the compositor), with a **250 ms `setTimeout` racing it**; whichever fires first runs the
+tick and cancels the other, and a `driver: "rAF" | "timer"` readout says which one actually
+delivered, so the measured numbers can be read honestly. Chrome does not run rAF at all in a hidden
+or occluded document, so an rAF-only ticker silently freezes with the UI still saying "streaming".
+
+**Verified directly** by stubbing `window.requestAnimationFrame` to a no-op in the page's main world
+for 4 s: driver flipped `rAF → timer`, ticks/sec `120 → 4.0` (= the 250 ms guard), **31,626 cells
+still processed while rAF was dead**, and everything returned to `rAF` @ 120/sec when it was
+restored. (Chrome additionally clamps timers to ~1 Hz in a genuinely hidden document, which is why
+the readout names the driver rather than implying every tick is a painted frame.)
+
+`driver` is written through a compare-and-set helper, not assigned directly: **`@tracked` setters
+dirty their tag unconditionally**, so `this.driver = "rAF"` inside the ticker would push a Glimmer
+revalidation into all 120 frames a second. Worth knowing for any per-frame code that touches tracked
+state.
+
+### Browser-testing gotchas (add these to the existing list — both cost real time here)
+
+1. **Injecting a `<script>` element executes in the page's MAIN world, and this defeats the
+   documented isolated-world limitation.** PORTING-NOTES' Phase 6 note (correctly) says
+   monkeypatching a prototype from `javascript_tool` does nothing because JS prototypes are
+   per-world. But `document.documentElement.appendChild(Object.assign(document.createElement('script'),
+   {textContent: '…'}))` from `javascript_tool` runs that source *in the page's world*, where
+   prototype patches, `window.requestAnimationFrame` stubs and stack traces all work on real page
+   code. Results still have to come back through the DOM (`root.setAttribute(...)`), but this turns
+   "can't instrument the page" into "can". Both root causes above were nailed this way in minutes
+   after an hour of guessing. No CSP blocks it in this test-app.
+2. **A tab in the MCP tab group is `document.visibilityState === "hidden"` whenever another tab in
+   that group is the active one** — including tabs left behind by a dead session or opened by a
+   concurrent agent. Consequences: rAF never fires, so any `javascript_tool` script that awaits a
+   rAF loop **hangs until the 45 s CDP timeout** ("Inspected target navigated or closed" / "renderer
+   may be frozen"); canvas content can be evicted so screenshots come back black for reasons that
+   have nothing to do with your code; and all timing numbers are throttled garbage. `computer`
+   screenshots and clicks keep working, so nothing warns you. **Check
+   `document.visibilityState === "visible"` before trusting any measurement, and close/avoid extra
+   tabs in the group.** Every measurement in this section carries a visibility check taken in the
+   same script.
+3. **Concurrent agents make a Vite dev server useless for timing work.** Another agent editing
+   `test-app` triggered `[vite] page reload` repeatedly, resetting the demo tab mid-measurement.
+   The reliable answer is to **`vite build` once, copy `test-app/dist` to a scratch directory, and
+   serve that** (`python3 -m http.server`) — immune to file churn, and a production build is a more
+   honest thing to benchmark anyway.
+4. Synthetic `element.click()` from `javascript_tool` **does** drive Ember `{{on "click"}}` handlers
+   reliably (used for every control in the sweeps above). This is consistent with the existing note
+   that it is *focus*, *hover* and *scroll* that need trusted `computer` input, not plain clicks.
+
+### Verification actually performed
+
+- `pnpm --filter glide-data-grid-ember build` (rebuilt first — the addon had changed), addon
+  `npx tsc --noEmit -p tsconfig.json` clean, `npx glint` in `test-app` exit 0,
+  `pnpm --filter test-app exec vite build` succeeds (459 modules).
+- Browser on **:4451** (a static server over a copy of the production build; :4200/:4400/:4500 were
+  other agents'). Every number in the tables above, the per-column damage hash test, the scroll
+  test, the rAF-stub fallback test, and a controls sweep: highlight on/off, reset stats (total
+  resets and re-accumulates), stop (total frozen — ticker really is cancelled), and switching demos
+  away and back (destroy path clean, no leaked ticker). No console errors or Ember assertions.
+- Regression: `<GlideDemo>` still renders correctly after the `demo-switcher.gts` tab-row change,
+  and its grid host measures a whole 669 px (so it was never exposed to the height defect).
+
+### What was NOT verified (do not round this up)
+
+- **The addon height/`alpha:false` defect is only worked around, not fixed**, and the workaround is
+  layout-specific: any consumer whose grid lands on a fractional CSS height (or any fractional
+  `devicePixelRatio`, e.g. browser zoom or a 150% Windows display, where even a whole-pixel height
+  fails) hits it again the moment they use `updateCells`. It needs an addon change.
+- **The blit fast path was not re-measured here.** Given the above it is almost certainly *not*
+  engaging whenever the height is fractional; whether it engages with a whole height under a
+  streaming load was not instrumented (Phase 6's `computeCanBlit` field-diff technique would do it).
+- **Damage row correctness was not isolated.** The column axis was proven precisely; every row is
+  being updated constantly, so no test here distinguishes "damaged row R repainted R" from "R
+  repainted because everything did". The column axis is the one that was actually broken.
+- Numbers are from one machine (macOS, 120 Hz, dpr 2, production build). They are not a cross-browser
+  or cross-platform claim, and the "Max" figure is a property of this machine by construction.
+- The demo is not wired to `recordsSource`/`withColumnSort` — deliberately: pattern (1) exists
+  precisely for data that must not be projected eagerly, and mixing them would blur what it proves.
+
+## Phase 8e — orchestrator's own Phase 8 work: two addon primitives, two addon defects, and the verification pass
+
+Written by the orchestrator after independently re-verifying 8a/8b, 8c and 8d rather than trusting
+the implementing agents' self-reports (standing rule). Everything below is either work done directly
+here or a measurement taken here.
+
+### `onVisibleRegionChanged` (new `GridHostArgs` + `<GlideDataGrid>` arg)
+
+Source computes this in `scrolling-data-grid.tsx`'s `processArgs`; this port derives it at the end of
+`runDraw` instead, which covers scroll, resize and arg changes from one call site and keeps it
+aligned with the offsets actually painted. Two decisions worth knowing before touching it:
+
+- **The region is in the consumer's coordinate space** — `x` excludes the synthetic row-marker
+  column, `y`/`height` cover real data rows only (never the trailing blank row). This matches
+  `getCellContent`'s `Item` and `onCellsEdited`'s `location`, and deliberately *not*
+  `onHeaderMenuClick`'s `col`, which is mangled (see Phase 7c). **Frozen columns are excluded from
+  the range** — they are permanently visible, so folding them in would make the rect discontiguous
+  the moment the grid scrolls horizontally. That is why `AsyncRecordsSource` takes its own
+  `freezeColumns` option: without it, an arriving page would never repaint the frozen columns.
+- **The callback is deduped and deferred to a microtask.** Deduping keeps it to at most one call per
+  crossed row/column boundary rather than one per frame. The deferral is the load-bearing part: a
+  draw can originate *inside* the Ember modifier's tracking frame (via `scheduleFullRedraw`), and the
+  entire point of this callback is that consumers set tracked state from it to drive paging — which
+  Ember forbids during a render pass. Source has no equivalent hazard because React's event model
+  never calls it mid-render.
+
+### `AsyncRecordsSource` (`src/data-source/async-records-source.ts`) — port of `use-async-data-source`
+
+**It is a class, unlike every other decorator in that directory, and that is deliberate.** The pure
+functions there own no state, so memoizing them reproduces identical closures. This one owns a sparse
+row buffer, the requested-page set and the last visible region — source expresses exactly that with a
+pile of `useRef`s. The Ember-honest equivalent is an object constructed once and held as a class
+field; its bound instance fields are then identity-stable permanently, with no memo to get wrong.
+
+**Do not compose it with `withColumnSort`.** Sorting sweeps every row to build its map, and by
+construction most rows here are not loaded. Sort server-side and return a different ordering.
+
+Behaviour verified by a Node suite against the built `dist/` (21 assertions): paging with source's
+own half-page overscan window, no page requested twice, `maxConcurrency` enforced via a real queue,
+damage lists scoped to the visible block, edits to unloaded rows dropped rather than crashing,
+**a failed page un-marked so a later visit retries it** (source has no such handling — a rejected
+`getRowData` there leaves the page permanently marked as loading), `invalidate()`, and frozen-column
+damage coverage.
+
+### Addon defect fixed: `updateCells` ignored the row-marker offset
+
+`GridHostController.updateCells` passed the consumer's `[col, row]` straight into the damage
+`CellSet`, but damage is matched against **mangled** column indices inside the draw loop
+(`data-grid-render.cells.ts` compares `c.sourceIndex`). So with `rowMarkers !== "none"` every
+imperatively-updated cell repainted **one column to the left**. Source adds `rowMarkerOffset` at
+exactly this boundary (`data-editor.tsx:4001-4006`); this port never did.
+
+Same class as the five Phase 7e defects — invisible until a demo turns on two features at once (row
+markers *and* `updateCells`), which nothing did until Phase 8. Confirmed fixed in the browser by the
+8c agent by hashing the canvas per device-pixel column: the changed band was exactly consumer columns
+2–10, with the marker band and the frozen columns untouched; the pre-fix behaviour would have shifted
+that band one column left and frozen the last one.
+
+### Addon defect fixed: a fractional grid height blanked the whole grid on damage-only repaints
+
+Found by the 8c streaming demo, and the most valuable thing that demo produced.
+
+`canvas.width`/`canvas.height` are WebIDL `unsigned long`s, so assigning a fractional value truncates.
+`drawGrid` compared `canvas.width !== width * dpr` and assigned the raw product, so whenever
+`width * dpr` was fractional the readback could never equal the target and **the canvas was
+reallocated on every single draw**. Reallocation clears a canvas, and these contexts are
+`alpha: false`, so it cleared to opaque black.
+
+Why it stayed hidden through seven phases: a full redraw repaints everything immediately afterwards
+and hides it completely. Only a **damage-only** redraw exposes it — it paints a handful of cells onto
+a freshly-blacked canvas. Phase 8 is the first phase to drive `updateCells` continuously. It also
+means the blit path was dead for any such grid, since no previous frame ever survived.
+
+Fractional sizes are ordinary, not exotic: `ResizeObserver`'s `contentRect` is fractional for any
+flex/percentage layout, and `devicePixelRatio` is fractional on many displays — so an integer CSS
+size is not sufficient protection either.
+
+**Fixed in `src/rendering/render/data-grid-render.ts`** by flooring to whole device pixels for the
+main canvas, the header canvas and both double-buffer canvases. This is a **deliberate divergence
+from source** (source still has the unfloored comparison) and is commented as such in place, so
+nobody "restores" it during a future re-sync.
+
+The 8c agent had worked around it by pinning whole-pixel heights in `app.css` and `demo-switcher.gts`.
+**Those pins were reverted here on purpose**: with the addon fixed, letting the demos sit on a
+fractional height (the tab strip measures 21.5px) keeps that path exercised. If a grid ever goes
+black again, that is what broke.
+
+### Verification performed here (not delegated)
+
+- **`recordsSource` + `withColumnSort`, 26 assertions** against the built `dist/`: identity stability,
+  the eager-read entanglement, 1,000 records → 2,000 projections cold and **exactly 2** after editing
+  one field, the sorted write path landing on the displayed record, and the read/write cache split.
+  *Caveat recorded honestly*: ember-source's dist cannot execute in bare Node (it needs the
+  `@embroider/macros` babel transform), so that suite substitutes a standalone `@glimmer/validator`.
+  It proves the algorithm, not the framework integration — 8d's browser proof is what settles that.
+- **The 1,000-row proof reproduced independently in Chrome**: 1000 of 1000 cold → **1 of 1000** (7
+  `toCell` calls) after editing one field. No console errors.
+- **The blit fast path re-measured through `recordsSource`** — the gap 8d explicitly left open, and
+  worth closing given this project lost that optimization silently from Phase 2 to Phase 6. Reused
+  Phase 6/7e's technique: temporarily instrument `computeCanBlit` to write the differing field names
+  onto a `document.documentElement` attribute (the DOM is the only reliable bridge out of
+  `javascript_tool`'s isolated world), then drive **real `computer` scroll actions**. Result on the
+  1,000-row `recordsSource` grid: **3 of 3 scroll draws had `mappedColumns` as the only differing
+  field** (which falls into `computeCanBlit`'s own `deepEqual` branch and returns true), zero draws
+  with `last === undefined`, and **`getCellContent` never differed once**. So `recordsSource` is
+  identity-stable in practice and the blit path engages through it. Instrumentation removed;
+  `git status` on `src/rendering/render/**` afterwards shows only the intentional
+  `data-grid-render.ts` fix.
+- **The black-canvas fix verified on the previously-broken configuration**: streaming demo at 50,002
+  cells/sec measured against a 50,000/s target, on a grid whose host height is **574.40625px** at
+  dpr 2 (= 1148.8125 backing pixels, the exact fractional case). Zero black pixels in 70 samples
+  across the canvas, and a sentinel rectangle stamped into the canvas **survived 1.5s of continuous
+  damage repaints**, which is the direct proof that the canvas is no longer being reallocated per
+  draw.
+- **`AsyncRecordsSource` browser-verified** via a new `<AsyncDemo>` (100,000 rows, `pageSize` 100,
+  `maxConcurrency` 4, simulated latency): page 0 loaded on first paint; scrolling to row ~74 requested
+  the next page via the overscan window; a jump to row 26,470 requested 4 pages with **2 in flight
+  against a cap of 4** and rendered them on arrival through the damage path; `invalidate()` dropped
+  all 400 loaded rows to zero and refetched only the visible pages.
+
+### Browser-testing gotcha that cost real time here (adds to the existing list)
+
+**A tab whose `visibilityState` is `"hidden"` produces 0×0 canvases and an empty visible region, with
+no error anywhere.** Chrome stops the rendering lifecycle for a hidden tab, so `ResizeObserver` never
+delivers a size, `GridHostController` keeps `width`/`height` at 0, and `drawGrid` early-returns on
+`if (width === 0 || height === 0)`. Meanwhile `javascript_tool` still runs, the DOM still measures
+correctly (the *element* is 564px tall), clicks still work, and consumer callbacks still fire — so
+everything looks alive while nothing paints. This produced a completely convincing false bug report
+(`Visible: cols 0–-1, rows 0–-1`, canvases `[0,0]`) that evaporated the instant the tab was
+activated. The 8c agent hit the same thing from the other direction (a tab in the MCP group goes
+hidden whenever another tab in the group is active). **Check `document.visibilityState` before
+believing any "the grid isn't rendering" symptom**, and take a `computer` screenshot to force
+activation.
+
+One related trap: `document.querySelectorAll('canvas')` is **not** a safe way to find the grid's
+canvases. The controller appends two offscreen double-buffer canvases to `document.documentElement`,
+and stale ones from destroyed grids can sit ahead of the live ones in document order. Scope the query
+to the grid root (`.dvn-scroller`'s `parentElement`).

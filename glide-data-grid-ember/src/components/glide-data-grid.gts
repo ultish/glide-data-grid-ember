@@ -82,6 +82,12 @@ export interface GlideDataGridSignature {
         // THEMING.md for the full precedence table -- and note the blit-invalidation caveat there:
         // pass a *stable* function reference, not a fresh inline arrow each render.
         getRowThemeOverride?: GetRowThemeCallback;
+
+        // Async / streaming data (Phase 8). Fired -- deduplicated, and deferred to a microtask so
+        // it is safe to set tracked state from -- whenever the visible block of cells changes.
+        // `region` is in this component's own coordinate space (no row-marker column, real data
+        // rows only). See `GridHostArgs.onVisibleRegionChanged` for the full contract.
+        onVisibleRegionChanged?: (region: Rectangle) => void;
     };
 }
 
@@ -125,6 +131,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         showTrailingBlankRow: this.args.showTrailingBlankRow,
         onRowAppended: this.args.onRowAppended,
         getRowThemeOverride: this.args.getRowThemeOverride,
+        onVisibleRegionChanged: this.args.onVisibleRegionChanged,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s

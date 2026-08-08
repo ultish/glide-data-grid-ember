@@ -176,9 +176,30 @@ export function drawGrid(arg: DrawGridArg, lastArg: DrawGridArg | undefined) {
 
     const canvas = canvasCtx.canvas;
 
-    if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
-        canvas.width = width * dpr;
-        canvas.height = height * dpr;
+    // DELIBERATE DIVERGENCE FROM SOURCE (Phase 8) -- do not "restore" the direct `width * dpr` form.
+    //
+    // `canvas.width`/`canvas.height` are WebIDL `unsigned long`s: assigning a fractional value
+    // truncates it. Source compares `canvas.width !== width * dpr` and assigns the raw product, so
+    // whenever `width * dpr` is fractional the readback can never equal the target and the canvas is
+    // **reallocated on every single draw**. Reallocating a canvas clears it, and these contexts are
+    // `alpha: false`, so it clears to opaque black.
+    //
+    // A full redraw repaints everything immediately and hides this completely. A damage-only redraw
+    // (`updateCells`) does not: it paints just the damaged cells onto a freshly-blacked canvas, so
+    // the entire grid goes black except the few cells being updated. It also kills the blit path,
+    // since there is never a previous frame left to blit from.
+    //
+    // Fractional sizes are ordinary, not exotic: `ResizeObserver`'s `contentRect` is fractional for
+    // any flex/percentage layout, and `devicePixelRatio` itself is fractional on many displays --
+    // so an integer CSS size is not sufficient protection either. Found by the Phase 8 streaming
+    // demo, which is the first thing in this port to lean on `updateCells` continuously; see
+    // PORTING-NOTES.md's Phase 8 section for the diagnosis.
+    const backingWidth = Math.floor(width * dpr);
+    const backingHeight = Math.floor(height * dpr);
+
+    if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+        canvas.width = backingWidth;
+        canvas.height = backingHeight;
 
         canvas.style.width = width + "px";
         canvas.style.height = height + "px";
@@ -188,9 +209,10 @@ export function drawGrid(arg: DrawGridArg, lastArg: DrawGridArg | undefined) {
     const totalHeaderHeight = enableGroups ? groupHeaderHeight + headerHeight : headerHeight;
 
     const overlayHeight = totalHeaderHeight + 1; // border
-    if (overlayCanvas.width !== width * dpr || overlayCanvas.height !== overlayHeight * dpr) {
-        overlayCanvas.width = width * dpr;
-        overlayCanvas.height = overlayHeight * dpr;
+    const backingOverlayHeight = Math.floor(overlayHeight * dpr);
+    if (overlayCanvas.width !== backingWidth || overlayCanvas.height !== backingOverlayHeight) {
+        overlayCanvas.width = backingWidth;
+        overlayCanvas.height = backingOverlayHeight;
 
         overlayCanvas.style.width = width + "px";
         overlayCanvas.style.height = overlayHeight + "px";
@@ -199,15 +221,15 @@ export function drawGrid(arg: DrawGridArg, lastArg: DrawGridArg | undefined) {
     const bufferA = bufferACtx.canvas;
     const bufferB = bufferBCtx.canvas;
 
-    if (doubleBuffer && (bufferA.width !== width * dpr || bufferA.height !== height * dpr)) {
-        bufferA.width = width * dpr;
-        bufferA.height = height * dpr;
+    if (doubleBuffer && (bufferA.width !== backingWidth || bufferA.height !== backingHeight)) {
+        bufferA.width = backingWidth;
+        bufferA.height = backingHeight;
         if (lastBlitData.current !== undefined) lastBlitData.current.aBufferScroll = undefined;
     }
 
-    if (doubleBuffer && (bufferB.width !== width * dpr || bufferB.height !== height * dpr)) {
-        bufferB.width = width * dpr;
-        bufferB.height = height * dpr;
+    if (doubleBuffer && (bufferB.width !== backingWidth || bufferB.height !== backingHeight)) {
+        bufferB.width = backingWidth;
+        bufferB.height = backingHeight;
         if (lastBlitData.current !== undefined) lastBlitData.current.bBufferScroll = undefined;
     }
 

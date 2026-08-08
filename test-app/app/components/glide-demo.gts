@@ -146,9 +146,14 @@ export default class GlideDemo extends Component {
     }
 
     /**
-     * Phase 7a's decorator. Identity-stable by construction: `withColumnSort` memoizes internally on
-     * the incoming `getCellContent` identity + a *structural* digest of the sort, and returns the
-     * original reference untouched when there is no sort. The `@cached` here is belt-and-braces.
+     * Phase 7a's decorator, with Phase 8a's write path. Identity-stable by construction:
+     * `withColumnSort` memoizes internally on the incoming `getCellContent` identity + the incoming
+     * `onCellsEdited` identity + a *structural* digest of the sort, and returns both original
+     * references untouched when there is no sort. The `@cached` here is belt-and-braces.
+     *
+     * `applyEdits` is passed *in* here rather than being wired to the grid directly; the grid gets
+     * `this.sortResult.onCellsEdited`, which has already translated every row index out of displayed
+     * space. `@action` makes `this.applyEdits` a stable per-instance reference, which the memo needs.
      */
     @cached
     get sortResult(): ColumnSortResult {
@@ -156,12 +161,17 @@ export default class GlideDemo extends Component {
             columns: this.displayColumns,
             rows: GLIDE_DEMO_ROW_COUNT,
             getCellContent: this.baseGetCellContent,
+            onCellsEdited: this.applyEdits,
             sort: this.sort,
         });
     }
 
     get getCellContent(): (item: Item) => GridCell {
         return this.sortResult.getCellContent;
+    }
+
+    get onCellsEdited(): ColumnSortResult["onCellsEdited"] {
+        return this.sortResult.onCellsEdited;
     }
 
     // --- Sort menu ------------------------------------------------------------------------------
@@ -235,24 +245,25 @@ export default class GlideDemo extends Component {
      * Applies committed edits from the overlay editor, the Delete key, and paste -- all three
      * funnel through this one callback.
      *
-     * **`location` is in displayed coordinates**, so when a sort is active it must be translated
-     * back to the underlying record before being stored, or editing a sorted row would write to a
-     * different person's record. `getOriginalIndex` (returned by `withColumnSort` alongside
-     * `getCellContent`) exists exactly for this; with no sort active it is the identity function,
-     * so this code path is the same either way.
+     * **This is handed to `withColumnSort`, not to the grid**, so `location[1]` has already been
+     * translated out of displayed row space into the original record order this component's edit map
+     * is keyed on. Wiring it to `<GlideDataGrid @onCellsEdited=...>` directly would reintroduce the
+     * Phase 7f bug: an edit on a sorted grid would be stored against a different person's record,
+     * invisibly until the next re-sort. (Before Phase 8a the decorator had no write path, and this
+     * method had to call `sortResult.getOriginalIndex(displayedRow)` itself -- that remains available
+     * as an escape hatch but is no longer the recommended shape.)
      *
      * `location[0]` is already in *real* column space -- the grid strips the row-marker column at
      * the callback boundary -- so it indexes `this.columns` directly, with no `ROW_MARKER_OFFSET`.
      */
     @action
-    handleCellsEdited(edits: readonly { location: Item; value: GridCell }[]): void {
+    applyEdits(edits: readonly { location: Item; value: GridCell }[]): void {
         const next = new Map(this.edits);
-        const toOriginalRow = this.sortResult.getOriginalIndex;
         for (const { location, value } of edits) {
-            const [col, displayedRow] = location;
+            const [col, originalRow] = location;
             const fieldId = this.columns[col]?.id;
             if (fieldId === undefined) continue;
-            next.set(`${toOriginalRow(displayedRow)}:${fieldId}`, value);
+            next.set(`${originalRow}:${fieldId}`, value);
         }
         this.edits = next;
     }
@@ -285,7 +296,7 @@ export default class GlideDemo extends Component {
                 @rowSelect="multi"
                 @groupHeaderHeight={{28}}
                 @headerHeight={{34}}
-                @onCellsEdited={{this.handleCellsEdited}}
+                @onCellsEdited={{this.onCellsEdited}}
                 @onHeaderMenuClick={{this.handleHeaderMenuClick}}
                 @onColumnResize={{this.handleColumnResize}}
                 @onColumnMoved={{this.handleColumnMoved}}

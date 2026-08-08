@@ -50,3 +50,128 @@
   width: 12px;
   color: #4f5dff;
 }
+
+/* Phase 8: the streaming / high-frequency update demo
+   (`app/components/streaming-demo.gts`). Controls + live instrumentation strip above the grid.
+
+   HISTORICAL NOTE, kept because it explains what this demo is good for. While it was being built,
+   these strips had to be pinned to whole-pixel heights: a grid whose measured height was fractional
+   went **entirely black** within ~1 s of starting the stream. `drawGrid` guarded its canvas sizing
+   with `canvas.width !== width * dpr || canvas.height !== height * dpr`; `canvas.height` is an
+   unsigned long and truncates, `height * dpr` does not, so a fractional size failed that comparison
+   on EVERY draw and reallocated the canvas — which, with an `alpha: false` context, clears it to
+   opaque black. Full redraws repainted straight over it; damage-only redraws (what this demo does
+   thousands of times a second) painted the changed cells onto black.
+   **Fixed in the addon** — `data-grid-render.ts` now floors to whole device pixels; see the long
+   comment there and PORTING-NOTES.md's Phase 8 section. The strips are back to natural sizing
+   deliberately, so this demo keeps landing on a fractional height and stays the regression surface
+   for that defect. If the grid ever goes black here again, that is what broke. */
+.gdg-streaming {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  font: 13px system-ui, -apple-system, sans-serif;
+  color: #313139;
+}
+
+.gdg-streaming__controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.gdg-streaming__primary {
+  min-width: 108px;
+  padding: 5px 12px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  background: #4f5dff;
+  border: 0;
+  border-radius: 5px;
+}
+
+.gdg-streaming__group {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.gdg-streaming__group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #97979d;
+  text-transform: uppercase;
+}
+
+.gdg-streaming__rate {
+  padding: 4px 9px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #e1e2e5;
+  border-radius: 5px;
+}
+
+.gdg-streaming__rate.is-active {
+  color: #fff;
+  background: #313139;
+  border-color: #313139;
+}
+
+.gdg-streaming__checkbox {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.gdg-streaming__note {
+  font-size: 12px;
+  color: #97979d;
+}
+
+.gdg-streaming__stats {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 0;
+  gap: 8px;
+}
+
+.gdg-streaming__stat {
+  display: flex;
+  flex: 1 1 150px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  background: #f7f7fa;
+  border: 1px solid #e1e2e5;
+  border-radius: 6px;
+}
+
+.gdg-streaming__stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #97979d;
+  text-transform: uppercase;
+}
+
+.gdg-streaming__stat-value {
+  font-family: ui-monospace, "SF Mono", menlo, monospace;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.gdg-streaming__stat-sub {
+  font-size: 11px;
+  color: #97979d;
+}
+
+.gdg-streaming__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+}

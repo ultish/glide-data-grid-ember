@@ -28,7 +28,8 @@
     "test:ember": "vite build --mode test && ember test --path dist"
   },
   "dependencies": {
-    "glide-data-grid-ember": "workspace:*"
+    "glide-data-grid-ember": "workspace:*",
+    "object-scan": "^20.0.4"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

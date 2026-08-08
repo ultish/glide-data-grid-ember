@@ -39,6 +39,11 @@ The pattern below satisfies both rules by construction, which is why it's the on
 
 Two pieces: a per-row view model that projects one record, and a getter that reads them all.
 
+> The addon ships this as a one-call helper — see
+> [`recordsSource`: the pattern, packaged](#recordssource-the-pattern-packaged). Use that. Read the
+> hand-written version below anyway: it is exactly what the helper does internally, and knowing the
+> shape is what lets you tell a real problem from a misuse.
+
 ```ts
 import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
@@ -122,20 +127,28 @@ Inside `PersonRow.cells`, never inside `getCellContent`. That includes digging v
 GQL results:
 
 ```ts
-// Compile once, at module scope -- not per row, and definitely not per cell.
+// Compile once, at module scope, one scanner per column -- not per row, and definitely not per
+// cell. Recompiling inside the projection is the single biggest cost in the naive form.
 const petNames = objectScan(["pets.name"], { useArraySelector: false, rtn: "value" });
 
 @cached get cells() {
     return [
         // ...
-        { kind: GridCellKind.Text, allowOverlay: false, data: petNames(this.person).sort().join(", ") },
+        // Note the scan target: the plain nested payload, not the record object. See the warning below.
+        { kind: GridCellKind.Text, allowOverlay: false, data: petNames(this.person.profile).sort().join(", ") },
     ];
 }
 ```
 
+> ⚠️ **Point path scanners at the plain nested payload, not at a class instance.** `object-scan` (and
+> most traversal libraries) walk **own enumerable** properties, while `@tracked` fields are accessors
+> on the prototype. A scanner aimed at a model object matches nothing, silently. Scanning the nested
+> blob a GraphQL response actually hands you — `person.profile`, `person.pets` — sidesteps it.
+
 The grid has no opinion about how you do this and takes no dependency on any path/traversal library
 — `object-scan`, `lodash.get`, or a hand-written closure are all equally fine. Just keep it on the
-`cells` side of the boundary.
+`cells` side of the boundary. A worked example, including the per-column hoisting, is in
+`test-app/app/utils/scale-records.ts`.
 
 ---
 
@@ -188,38 +201,50 @@ Only relevant if profiling actually points here.
 
 ---
 
-## ⚠️ If you add column sort, edits need a row translation
+## ⚠️ If you add column sort, hand your edit handler to the decorator
 
 **Read this before wiring `@onCellsEdited` on a sorted grid. Getting it wrong corrupts data
 silently**, and you won't see it until the next re-sort.
 
-`withColumnSort` remaps rows *above* your data layer. That leaves the read and write paths in
-different coordinate spaces:
+`withColumnSort` remaps rows *above* your data layer, so the row index the grid reports for an edit
+is the **displayed** one while your `getCellContent` and your records array work in **original** row
+order. An edit to the top visible row of a sorted grid arrives as row `0`; writing it to record `0`
+updates whichever record happens to be first *unsorted* — a different person.
 
-| | row index you get |
-|---|---|
-| your own `getCellContent` | **original** — the decorator already translated it |
-| `@onCellsEdited`'s `location` | **displayed** — the row's on-screen position |
-
-So an edit to the top visible row of a sorted grid arrives as row `0`, and writing it to record `0`
-updates whichever record happens to be first *unsorted* — a different person. Translate it back with
-`getOriginalIndex`, which `withColumnSort` returns for exactly this purpose:
+**The rule: any decorator that remaps the read path also remaps the write path. Pass your handler
+*in* and wire the *returned* one to the grid.** Then the two spaces cannot disagree.
 
 ```ts
 @cached get sorted() {
-    return withColumnSort({ columns, rows, getCellContent: this.baseGetCellContent, sort: this.sort });
+    return withColumnSort({
+        columns,
+        rows,
+        getCellContent: this.baseGetCellContent,
+        onCellsEdited: this.applyEdits,   // <- yours, expects ORIGINAL row indices
+        sort: this.sort,
+    });
 }
 
-@action handleCellsEdited(edits) {
+@action applyEdits(edits) {
     for (const { location, value } of edits) {
-        const [col, displayedRow] = location;
-        this.applyEdit(this.sorted.getOriginalIndex(displayedRow), col, value);  // <- translate
+        const [col, originalRow] = location;   // already translated for you
+        this.store(originalRow, col, value);
     }
 }
 ```
+```hbs
+<GlideDataGrid
+    @getCellContent={{this.sorted.getCellContent}}
+    @onCellsEdited={{this.sorted.onCellsEdited}}   {{! <- the decorator's, not yours }}
+/>
+```
 
-With no sort active `getOriginalIndex` is the identity function, so this one code path is correct
-either way — write it unconditionally rather than branching on whether a sort is set.
+`sorted.onCellsEdited` is `undefined` if and only if you passed no `onCellsEdited`, and is
+identity-stable like `getCellContent`. Make sure the handler you pass *in* is identity-stable too
+(`@action`, a class field, or a module-scope function) — it is part of the decorator's memo key.
+
+`recordsSource` implements the same contract, so the composed form needs no wiring at all beyond the
+spread: see [Letting `recordsSource` do it](#letting-recordssource-do-it).
 
 Two things that need no adjustment: `location[0]` is already in your own column space (the grid
 strips the row-marker column at the callback boundary), and `@onSelectionChanged` reports *displayed*
@@ -229,9 +254,13 @@ Prefer keying stored edits by a stable **record id and column id** rather than b
 they also survive column reorders. A worked example is in
 `test-app/app/components/glide-demo.gts`.
 
-> **This asymmetry is slated to be removed** — see `PHASES.md`, Phase 8: `withColumnSort` will
-> optionally take and return `onCellsEdited`, translating locations itself so the two spaces cannot
-> disagree. `getOriginalIndex` will remain as the escape hatch. Until then, translate by hand.
+### The escape hatch: `getOriginalIndex`
+
+`withColumnSort` still returns `getOriginalIndex(displayedRow) → originalRow`, and with no sort
+active it is the identity function. Use it when you need the mapping somewhere the built-in write
+path doesn't reach — most often to correlate a row from `@onSelectionChanged` (deliberately in
+displayed space) back to a record. Prefer the wired write path above for edits; translating by hand
+is the shape that already corrupted data once in this project's own demo.
 
 ## Status of this recommendation
 
@@ -240,17 +269,172 @@ tracked mutation on an in-place model object actually repaints the canvas — is
 (`test-app/app/components/tracking-demo.gts` exists specifically to prove it, with the grid's own
 editing paths disabled so nothing else could account for the repaint).
 
-The **per-row `@cached` half** is reasoned from the same verified mechanics but has not yet been run
-at a size where the difference is measurable. Phase 8 is required to build it at ~1,000 rows with a
-recompute counter and confirm a single-field edit recomputes one row rather than all of them; this
-section gets updated with the measured result then. Nothing above is expected to change — the
-mechanism is the same one already verified — but "expected" is not "measured", and you should know
-which is which.
+The **per-row `@cached` half** is now browser-measured too, at 1,000 rows, in
+`test-app/app/components/scale-proof.gts` — a table whose projection increments a counter on every
+call, so "rows re-projected since the last action" is a number on screen rather than an inference.
+Observed, in Chrome, against the built addon:
 
-## Planned
+| Action | Rows re-projected | `toCell` calls |
+| --- | --- | --- |
+| Initial build (cold) | 1000 of 1000 | 7000 |
+| **Edit one field on one record** | **1 of 1000** | **7** |
+| Add a nested related entity to one record | 1 of 1000 | 7 |
+| Re-render touching no record | 0 of 1000 | 0 |
+| Replace the `records` array | 1000 of 1000 | 7000 |
 
-A `recordsSource` helper is planned (see `PHASES.md`, Phase 8) that packages exactly the pattern
-above — you'd hand it `records` plus per-column accessor functions and get back `columns`/`rows`/
-`getCellContent`, with the per-row `@cached` memoization handled internally. It is designed to
-compose with other data-source decorators such as column sort. Until it lands, write the pattern by
-hand as shown; it's the same shape, so migrating will be mechanical.
+The edited row's cells visibly repainted on the canvas in each case, with no `updateCells()`, no
+`@onCellsEdited` (the grid was given no write path at all) and every cell `allowOverlay: false`, so
+autotracking is the only thing that could have caused the repaint. The 1-row result holds for a row
+scrolled out of view (row 500) as well as a visible one, so it is not an artifact of what is painted.
+
+The last row of that table is the concrete cost of ["the one way to break
+it"](#️-the-one-way-to-break-it): the `Employee` objects were identical instances and only the array
+identity changed, and that alone rebuilt all 1,000 projections.
+
+One implementation fact this measurement also settles: `recordsSource`'s per-row caches come from
+`createCache` in `@glimmer/tracking/primitives/cache`, and they **do** share a tag system with
+`@tracked`. If they hadn't, a tracked mutation could not have invalidated a row cache — the count
+would have read 0 and the canvas would have gone stale.
+
+## `recordsSource`: the pattern, packaged
+
+Everything in [The pattern](#the-pattern) — the per-row memoization, the eager read inside the
+tracking frame, the O(1) `getCellContent` — is available as one call. Prefer it. The hand-written
+version above stays in this document because it is exactly what the helper does internally, and
+because you'll want to recognise the shape when you read it.
+
+```ts
+import { cached, tracked } from "@glimmer/tracking";
+import { recordsSource, withColumnSort } from "glide-data-grid-ember/data-source/index";
+import { GridCellKind, type GridCell, type GridColumn } from "glide-data-grid-ember/rendering/index";
+
+const COLUMNS: readonly GridColumn[] = [
+    { id: "name", title: "Name", width: 200 },
+    { id: "email", title: "Email", width: 240 },
+    { id: "age", title: "Age", width: 90 },
+];
+
+// Module scope: `toCell` must be identity-stable (see the rules below).
+function toCell(p: Person, col: number): GridCell {
+    switch (col) {
+        case 0: return { kind: GridCellKind.Text, allowOverlay: true, data: p.name, displayData: p.name };
+        case 1: return { kind: GridCellKind.Text, allowOverlay: true, data: p.email, displayData: p.email };
+        default: return { kind: GridCellKind.Number, allowOverlay: true, data: p.age, displayData: String(p.age) };
+    }
+}
+
+export default class PeopleTable extends Component {
+    @tracked people: readonly Person[] = [];
+
+    @cached
+    get source() {
+        return recordsSource({
+            records: this.people,
+            columns: COLUMNS,
+            toCell,
+            onCellEdited: (person, col, value) => {
+                if (col === 0 && value.kind === GridCellKind.Text) person.name = value.data;  // etc.
+            },
+        });
+    }
+
+    <template>
+        <GlideDataGrid
+            @columns={{this.source.columns}}
+            @rows={{this.source.rows}}
+            @getCellContent={{this.source.getCellContent}}
+            @onCellsEdited={{this.source.onCellsEdited}}
+        />
+    </template>
+}
+```
+
+### API
+
+```ts
+function recordsSource<T extends object>(p: {
+    records: readonly T[];
+    columns: readonly GridColumn[];
+    toCell: (record: T, col: number) => GridCell;
+    onCellEdited?: (record: T, col: number, value: GridCell) => void;
+}): {
+    columns: readonly GridColumn[];
+    rows: number;
+    getCellContent: (cell: Item) => GridCell;
+    onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
+};
+```
+
+`onCellsEdited` is `undefined` if and only if you passed no `onCellEdited`. Note the singular/plural:
+you write the *per-cell* handler that receives the actual **record object**; the helper produces the
+batched, index-based callback the grid wants.
+
+### Letting `recordsSource` do it
+
+The field names are the ones `withColumnSort` takes and the ones `<GlideDataGrid>` wants, so sorting
+composes by spreading — and because both implement the same read/write coordinate contract (previous
+section), the edit that arrives at your `onCellEdited` is already matched to the right record:
+
+```ts
+@cached
+get gridArgs() {
+    const src = recordsSource({ records: this.people, columns: COLUMNS, toCell, onCellEdited });
+    return { ...src, ...withColumnSort({ ...src, sort: this.sort }) };
+}
+```
+```hbs
+<GlideDataGrid
+    @columns={{this.gridArgs.columns}}
+    @rows={{this.gridArgs.rows}}
+    @getCellContent={{this.gridArgs.getCellContent}}
+    @onCellsEdited={{this.gridArgs.onCellsEdited}}
+/>
+```
+
+`withColumnSort` translates each edit's row from displayed space back to original space, then
+`recordsSource` looks up `records[row]`. No `getOriginalIndex` call anywhere, and no way to forget
+one.
+
+### Four rules
+
+1. **Call it inside a tracked computation** — a `@cached` getter is the idiomatic place. This is
+   load-bearing, not style: `recordsSource` projects every row *during the call*, and those reads are
+   what register your records' `@tracked` fields as dependencies of the frame that repaints the grid.
+   Call it in a constructor or an action and nothing will ever update.
+2. **`toCell` must be identity-stable** — module scope, a class field, or an `@action`. Not an arrow
+   allocated inline in the getter. The per-row caches close over it, so a new identity rebuilds all
+   of them.
+3. **Replace the `records` array; mutate the records** — mutating a record's `@tracked` fields in
+   place is the supported way to change data, and is what makes updates incremental. Adding,
+   removing or reordering rows must produce a **new array**; an in-place `push`/`splice` keeps the
+   array's identity and will be missed.
+4. **Put formatting and nested-data digging in `toCell`, never in `getCellContent`** — same boundary
+   as [Where formatting and nested data go](#where-formatting-and-nested-data-go). `toCell` runs once
+   per record and is memoized; `getCellContent` is on the paint path and is a plain array index.
+
+`toCell` is a plain accessor function generic over your row type — deliberately not a path string.
+The addon takes no dependency on any traversal library (`object-scan`, `lodash.get`, hand-written
+closures are all equally fine and all live on your side of the boundary); compile any such scanner
+once at module scope, not per row and definitely not per cell.
+
+### What it does under the hood
+
+Each record gets its own tracked cache (`createCache` from `@glimmer/tracking/primitives/cache` —
+the non-decorator form of `@cached`) whose function reads only that record's fields. The set of
+caches is rebuilt only when `records`/`columns`/`toCell` change identity. Every call reads all of
+them eagerly; unchanged rows are cache hits returning the identical array, so a one-field edit is
+N cheap hits plus one real projection. `getCellContent` then closes over the resulting array of
+projections and does a single index into it, with a shared module-scope fallback cell for
+out-of-range coordinates.
+
+Repeated calls whose row projections all came back identical return the **same result object**, so
+`getCellContent` keeps its identity and the renderer's scroll fast path stays engaged; when a row
+really changed, a fresh identity is returned, which is what makes the grid repaint.
+
+One consequence worth knowing: a record class with **no** `@tracked` fields produces a permanently
+constant cache — it will never re-project. That is correct rather than stale, because nothing about
+such a record can change without a new `records` array, which rebuilds everything. It is also why
+this is *not* the `WeakMap`-keyed-on-the-record anti-pattern in
+[Tuning notes](#tuning-notes) above: that warning is about caching plain **values** by record
+identity, which has nothing to invalidate it when a normalized store mutates the entity in place. A
+tracked cache is invalidated *by* that same mutation.

@@ -32,7 +32,13 @@
 //
 // Cache shape: a module-scope `WeakMap` keyed on the incoming `getCellContent`'s identity (so
 // multiple grids on one page don't fight, and entries are collected with their closures), holding a
-// single entry of `{ rows, sortKey, result }`. `sortKey` is a **structural** digest of the resolved
+// single entry of `{ rows, sortKey, onCellsEdited, result }`. **Every value the cached closures
+// capture must appear in that key** -- that is the class of bug hand-audited in Phase 6 for
+// `mangledGetCellContent`. Concretely: the returned `getCellContent` captures `sortMap` +
+// `getCellContent` (keyed), and the returned `onCellsEdited` captures `sortMap` + the *incoming*
+// `onCellsEdited` (hence that field in the entry -- without it, swapping the write handler while
+// the read handler stayed put would silently keep calling the stale one).
+// `sortKey` is a **structural** digest of the resolved
 // sort (resolved column index + mode + direction), deliberately not the `sort` argument's identity:
 // a consumer writing `get sort() { return { column: this.columns[0], direction: "asc" }; }` allocates
 // a fresh object on every read, and keying on identity would rebuild the whole sort map every single
@@ -61,6 +67,14 @@ import {
 
 type GetCellContentFn = (cell: Item) => GridCell;
 
+/** One committed edit, exactly as `<GlideDataGrid @onCellsEdited=...>` reports it. */
+export interface CellEdit {
+    readonly location: Item;
+    readonly value: GridCell;
+}
+
+type OnCellsEditedFn = (edits: readonly CellEdit[]) => void;
+
 /**
  * A single column's sort instruction.
  *
@@ -77,11 +91,22 @@ export type ColumnSort = {
     direction?: "asc" | "desc";
 };
 
-/** Input to {@link withColumnSort}. Mirrors source's `Props`. */
+/** Input to {@link withColumnSort}. Mirrors source's `Props`, plus the write path (see below). */
 export interface ColumnSortProps {
     readonly columns: readonly GridColumn[];
     readonly rows: number;
     readonly getCellContent: GetCellContentFn;
+    /**
+     * Your own edit handler, expecting `location` in **original** (unsorted) row space -- i.e. the
+     * same space your `getCellContent` sees.
+     *
+     * Pass it here and consume {@link ColumnSortResult.onCellsEdited} instead of wiring your handler
+     * to the grid directly. This decorator then owns both halves of the coordinate translation and
+     * the read and write paths cannot disagree. Not in source: source's `useColumnSort` remaps only
+     * the read path, which leaves every consumer to translate by hand and silently corrupts data
+     * when they forget (it did exactly that in this project's own demo -- PORTING-NOTES.md, 7f).
+     */
+    readonly onCellsEdited?: OnCellsEditedFn;
     readonly sort?: ColumnSort | readonly ColumnSort[];
 }
 
@@ -93,22 +118,33 @@ export interface ColumnSortResult {
      */
     readonly getCellContent: GetCellContentFn;
     /**
+     * Wired-up write path: pass this to `<GlideDataGrid @onCellsEdited=...>`.
+     *
+     * Each edit's `location` has already been translated from *displayed* row space into the
+     * **original** row space your `getCellContent` and your records array use, so the handler you
+     * passed in as {@link ColumnSortProps.onCellsEdited} never has to think about the sort at all.
+     * Only `location[1]` (row) is touched -- `location[0]` is already in your own column space,
+     * because the grid strips the row-marker column at the callback boundary.
+     *
+     * `undefined` if and only if you passed no `onCellsEdited`. Identity-stable across calls with
+     * unchanged inputs, like `getCellContent`.
+     */
+    readonly onCellsEdited?: OnCellsEditedFn;
+    /**
      * Maps a *displayed* row index back to its index in the caller's original row order.
      *
-     * **Required when applying `onCellsEdited` on a sorted grid, and easy to forget.** This
-     * decorator remaps rows above the caller's data layer, which leaves the read and write paths in
-     * different coordinate spaces: the row reaching the caller's own `getCellContent` is already the
-     * *original* index, but the row in `onCellsEdited`'s `location` is the *displayed* one. Applying
-     * an edit without translating it here writes to a different record -- silently, and invisibly
-     * until the next re-sort.
+     * **Escape hatch, not the recommended path.** Prefer passing your handler in as
+     * {@link ColumnSortProps.onCellsEdited} and wiring the returned
+     * {@link ColumnSortResult.onCellsEdited} to the grid -- that translates every edit for you and
+     * makes it structurally impossible for the read and write paths to end up in different
+     * coordinate spaces. Reach for this only when you need the mapping somewhere the built-in write
+     * path doesn't cover (e.g. correlating a `onSelectionChanged` row, which deliberately stays in
+     * displayed space, back to a record).
      *
-     * With no sort active this is the identity function, so callers should translate
-     * unconditionally rather than branching on whether a sort is set.
+     * With no sort active this is the identity function, so callers can translate unconditionally
+     * rather than branching on whether a sort is set.
      *
-     * See `DATA.md`'s "If you add column sort, edits need a row translation" section for a worked
-     * example. Note this asymmetry is slated for removal (PHASES.md, Phase 8): `withColumnSort` will
-     * optionally take and return `onCellsEdited` and do the translation itself, at which point this
-     * stays available as the escape hatch rather than the required step.
+     * See `DATA.md`'s "If you add column sort, edits need a row translation" section.
      */
     readonly getOriginalIndex: (index: number) => number;
 }
@@ -183,9 +219,29 @@ interface ActiveSort {
     readonly col: number;
 }
 
+// The entry is deliberately split into a read half and a write half, because they have different
+// keys and *wildly* different rebuild costs.
+//
+//   read half  -- `sortMap`/`getCellContent`/`getOriginalIndex`, keyed on {`getCellContent` (the
+//                 WeakMap key), `rows`, `sortKey`}. Rebuilding it means an O(rows) sweep through the
+//                 caller's `getCellContent` plus a sort, and this runs on the paint path.
+//   write half -- `onCellsEdited`, additionally keyed on the *incoming* handler's identity, because
+//                 the returned closure captures it (capture vs. key -- see the header comment).
+//                 Rebuilding it is one closure allocation.
+//
+// Keeping them separate matters for a consumer whose edit handler isn't identity-stable (an inline
+// arrow in a getter is the easy mistake). With one combined key, every such call would rebuild the
+// sort map mid-draw; split, it costs an allocation and -- importantly -- `getCellContent` keeps its
+// identity, so the blit fast path survives the consumer's mistake instead of being silently lost.
 interface CacheEntry {
     readonly rows: number;
     readonly sortKey: string;
+    readonly getCellContent: GetCellContentFn;
+    readonly getOriginalIndex: (index: number) => number;
+    /** `undefined` when no sort is active, i.e. when the read path is a pure passthrough. */
+    readonly sortMap: readonly number[] | undefined;
+    /** The *incoming* handler, not the returned one. */
+    readonly onCellsEditedIn: OnCellsEditedFn | undefined;
     readonly result: ColumnSortResult;
 }
 
@@ -271,32 +327,74 @@ function buildSortMap(
  * file's header comment).
  *
  * When `sort` is undefined, or names no column present in `columns`, the caller's own
- * `getCellContent` reference is returned unchanged and `getOriginalIndex` is the identity function.
+ * `getCellContent` and `onCellsEdited` references are returned unchanged and `getOriginalIndex` is
+ * the identity function.
  */
 export function withColumnSort(p: ColumnSortProps): ColumnSortResult {
-    const { columns, rows, getCellContent: getCellContentIn, sort } = p;
+    const { columns, rows, getCellContent: getCellContentIn, onCellsEdited: onCellsEditedIn, sort } = p;
 
     const activeSorts = resolveActiveSorts(sort, columns);
     const sortKey = sortCacheKey(activeSorts);
 
     const cached = cache.get(getCellContentIn);
-    if (cached !== undefined && cached.rows === rows && cached.sortKey === sortKey) {
+    // The read half is valid whenever the sort itself is unchanged -- independent of the write
+    // handler. See `CacheEntry`'s comment for why those two are keyed separately.
+    const readReusable = cached !== undefined && cached.rows === rows && cached.sortKey === sortKey;
+    if (readReusable && cached.onCellsEditedIn === onCellsEditedIn) {
         return cached.result;
     }
 
-    let result: ColumnSortResult;
-    if (activeSorts.length === 0) {
+    let sortMap: readonly number[] | undefined;
+    let getCellContent: GetCellContentFn;
+    let getOriginalIndex: (index: number) => number;
+    if (readReusable) {
+        // Only the edit handler changed: reuse the sort map and, critically, the *same*
+        // `getCellContent` identity, so the blit fast path is unaffected.
+        ({ sortMap, getCellContent, getOriginalIndex } = cached);
+    } else if (activeSorts.length === 0) {
         // No sort: hand back the caller's own function. A pass-through wrapper here would be a
         // fresh identity every call and would kill the blit fast path for the common case.
-        result = { getCellContent: getCellContentIn, getOriginalIndex: identityIndex };
+        sortMap = undefined;
+        getCellContent = getCellContentIn;
+        getOriginalIndex = identityIndex;
     } else {
-        const sortMap = buildSortMap(activeSorts, rows, getCellContentIn);
-        result = {
-            getCellContent: ([col, row]: Item): GridCell => getCellContentIn([col, sortMap[row] ?? row]),
-            getOriginalIndex: (index: number): number => sortMap[index] ?? index,
-        };
+        const map = buildSortMap(activeSorts, rows, getCellContentIn);
+        sortMap = map;
+        getCellContent = ([col, row]: Item): GridCell => getCellContentIn([col, map[row] ?? row]);
+        getOriginalIndex = (index: number): number => map[index] ?? index;
     }
 
-    cache.set(getCellContentIn, { rows, sortKey, result });
+    const map = sortMap;
+    const result: ColumnSortResult = {
+        getCellContent,
+        // With no sort active, displayed order *is* original order, so the caller's own handler is
+        // returned unchanged rather than wrapped -- one less identity to churn on the common path.
+        onCellsEdited:
+            map === undefined || onCellsEditedIn === undefined
+                ? onCellsEditedIn
+                : (edits: readonly CellEdit[]): void => {
+                      // Translate displayed -> original row, then forward the batch in one call so
+                      // a paste (which arrives as a single multi-cell batch) stays one notification.
+                      // `location[0]` is left alone: already in the consumer's own column space.
+                      onCellsEditedIn(
+                          edits.map(({ location, value }) => {
+                              const [col, row] = location;
+                              const item: Item = [col, map[row] ?? row];
+                              return { location: item, value };
+                          })
+                      );
+                  },
+        getOriginalIndex,
+    };
+
+    cache.set(getCellContentIn, {
+        rows,
+        sortKey,
+        getCellContent,
+        getOriginalIndex,
+        sortMap,
+        onCellsEditedIn,
+        result,
+    });
     return result;
 }
