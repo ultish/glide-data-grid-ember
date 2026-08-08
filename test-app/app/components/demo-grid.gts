@@ -38,6 +38,7 @@ import {
     demoColumnNote,
     demoGetCellContent,
     demoGetRowThemeOverride,
+    normalizeEditedCell,
     setDemoActivityListener,
     DEMO_ROW_COUNT,
 } from "test-app/utils/demo-data";
@@ -395,7 +396,11 @@ export default class DemoGrid extends Component {
         // Keyed by the *underlying* row, not the displayed one -- otherwise an edit made after a row
         // reorder would follow the position rather than the record. Same read/write coordinate-space
         // rule `withColumnSort` settled in Phase 8, here in its simplest possible form.
-        for (const edit of edits) next.set(`${edit.location[0]},${this.sourceRow(edit.location[1])}`, edit.value);
+        // `normalizeEditedCell` recomputes derived display fields the *consumer* owns -- the Progress
+        // column's `${value}%` label being the one that bites. See its doc comment for why that sync
+        // is the consumer's job for `range-cell` and the addon's job for `displayData`/`displayDate`.
+        for (const edit of edits)
+            next.set(`${edit.location[0]},${this.sourceRow(edit.location[1])}`, normalizeEditedCell(edit.value));
         this.edits = next;
     };
 

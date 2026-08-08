@@ -4817,3 +4817,43 @@ columns into it. Source keeps `gridSelection` in *unmangled* space and mangles i
 `DataGrid`, so this is a real inconsistency in a **public callback contract**. Deliberately not
 fixed: changing it would break any consumer already compensating, and `<GlideDemo>` may be one.
 `<DemoGrid>` works around it locally, documented in place.
+
+## The display-field rule has a consumer half (2026-08-09)
+
+The recurring-bug-class entry at the top of this file has been about **addon** defects: three times,
+an addon editor or seeding path changed `data` and forgot the derived display field. The Progress
+column added a fourth instance and it lands on the **other** side of the boundary — worth recording,
+because "display-field staleness" had until now been shorthand for "an addon bug".
+
+**The rule is: whoever owns the formatting semantics owns the sync.**
+
+- `displayData` (text), `displayDate` (date-picker), the uri editor's display value — **the addon
+  formats these**, so keeping them true is the addon's job, and failing to was a real defect each
+  time.
+- `range-cell`'s `label` — **the addon cannot format this.** It is optional free-form text
+  (`"42%"`, `"42 of 100"`, `"high"`); there is no formatter to apply. Source's editor updates only
+  `value` too (`packages/cells/src/cells/range-cell.tsx:129-136`), so this is faithful, not a port
+  gap. The consumer who wrote the label owns keeping it true.
+
+`<DemoGrid>` was that consumer and got it wrong: `demoGetCellContent` built `${value}%` for column 10
+and `handleCellsEdited` stored the edited cell verbatim, so dragging the slider moved the bar and
+left the label reading the pre-edit number. **The user reported this as "the value doesn't update
+after enter/blur", which is what this failure mode looks like from outside** — the edit had saved
+perfectly. Fixed by `normalizeEditedCell` in `demo-data.ts`, where the `%` semantics live.
+
+**Diagnostic tell for next time:** if an edit "doesn't save" but the cell *partly* changes, suspect a
+stale display field before suspecting the commit path. A dropped commit changes nothing; a stale
+display field changes the parts `draw()` reads from `data` and not the parts it reads from the
+display field.
+
+## Tree view: decided against faking row collapse in the demo (2026-08-09, user decision)
+
+`tree-view-cell`'s chevron flips `isOpen` and hides nothing, because `packages/cells` ships no
+grid-level tree — row visibility is entirely a consumer concern, and the renderer is a verbatim port.
+The demo could have implemented a row-index mapping to make it look real. **The user's call was not
+to**: faking it would advertise a feature the addon does not have. The column is now titled
+"Files (toggle)" and says outright that it is a disclosure toggle rather than a row tree.
+
+Worth generalising, since this demo exists to prove the addon: **a demo that fakes a capability is
+worse than one that omits it** — 10a's whole premise is that the demo is what tells you which
+features really work.

@@ -317,7 +317,15 @@ reconcile = rows => {
         // -- object-scan -------------------------------------------------------------------------
         {
             kind: "p",
-            text: "**Digging values out of a nested payload — with and without `object-scan`.** GraphQL results are nested and often contain arrays of related entities; `toCell` is where you flatten them, because it is the memoized side of the boundary. First, without any library at all — a plain accessor is frequently the whole answer:",
+            text: "**Flattening a model into the fields a grid row needs — `object-scan` as an optional helper.** The grid wants a flat list of values per row; your data is usually not flat. Ember Data records have relationships, GraphQL results are nested and carry arrays of related entities, and a domain class has whatever shape it has. `toCell` is where that flattening belongs, because it is the memoized side of the boundary — done here, it runs once per record rather than once per painted cell.",
+        },
+        {
+            kind: "note",
+            text: "**`object-scan` is entirely optional, and it is one of several equally fine choices.** The addon has no opinion and no dependency on it. Reach for it when the shapes are deep or variable enough that hand-written walks stop paying; a plain accessor is frequently the whole answer, so start there.",
+        },
+        {
+            kind: "p",
+            text: "Without any library at all:",
         },
         {
             kind: "code",
@@ -335,7 +343,7 @@ const gqlPersonToCell = (p, col) => {
         },
         {
             kind: "p",
-            text: "With `object-scan`, when the shapes are deep or variable enough that hand-written walks stop paying. The rule that matters is **compile once per column, at module scope** — `objectScan(...)` parses its needles and builds a matcher, and doing that inside `toCell` rebuilds it once per cell:",
+            text: "And with `object-scan`, when a column's value could be at one of several depths, or you want one declarative needle instead of a chain of `?.` and `.map().filter()`. The rule that matters is **compile once per column, at module scope** — `objectScan(...)` parses its needles and builds a matcher, and doing that inside `toCell` rebuilds it once per cell:",
         },
         {
             kind: "code",
@@ -364,7 +372,7 @@ const gqlPersonToCell = (p, col) => {
         },
         {
             kind: "note",
-            text: "**⚠️ Point path scanners at the plain nested payload, not at a class instance.** `object-scan` — like most traversal libraries — walks **own enumerable** properties, while `@tracked` fields are accessors on the *prototype*. A scanner aimed at a tracked model or an Ember Data record matches nothing, silently. Scanning the nested blob the response actually hands you (`person.profile`, `person.pets`) sidesteps it entirely.",
+            text: "**⚠️ Point path scanners at plain data, not at a class instance — this is the one that bites when flattening models.** `object-scan`, like most traversal libraries, walks **own enumerable** properties, while `@tracked` fields and Ember Data `@attr`s are accessors on the *prototype*. A scanner aimed straight at a tracked model or an Ember Data record matches **nothing, silently** — no error, just empty cells. Two ways out, both fine: scan the plain nested blob the response actually handed you (`person.profile`, `person.pets`) and read the model's own top-level fields with ordinary property access, or convert the record to a POJO first (`record.toJSON()`, a serializer, your own mapper) and scan that. The first is cheaper and is what `<ScaleProof>` does.",
         },
         {
             kind: "p",

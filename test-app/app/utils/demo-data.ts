@@ -127,7 +127,7 @@ const TYPED_COLUMNS: readonly { title: string; width: number; icon: string }[] =
     { title: "Links", width: 210, icon: "headerUri" },
     { title: "Hired", width: 180, icon: "headerDate" },
     { title: "Actions", width: 130, icon: "headerIfThenElse" },
-    { title: "Files", width: 210, icon: "headerArray" },
+    { title: "Files (toggle)", width: 210, icon: "headerArray" },
     { title: "Owner", width: 210, icon: "headerReference" },
     { title: "Summary", width: 280, icon: "headerTextTemplate" },
 ];
@@ -181,7 +181,10 @@ const COLUMN_NOTES: Readonly<Record<number, string>> = {
     11: "Spinner -- self-animating, no data and no interaction.",
     15: "Links cell -- click a link TITLE to fire its onClick; click elsewhere to edit the list.",
     17: "Button cell -- fires a callback and never edits the cell. Watch 'Last action' above.",
-    18: "Tree view -- only the chevron is clickable, and it flips isOpen only: no rows are hidden.",
+    18:
+        "Tree view -- a DISCLOSURE TOGGLE, not a row tree. Click the chevron to flip isOpen. Hiding " +
+        "rows is the consumer's job and source ships no grid-level tree, so this demo deliberately " +
+        "does not fake one.",
 };
 
 export function demoColumnNote(col: number): string | undefined {
@@ -641,4 +644,34 @@ export function demoGetCellContent(item: Item): GridCell {
         displayData: text,
         allowOverlay: true,
     };
+}
+
+/**
+ * Recompute any **derived display field** on a cell the user just edited, before the demo stores it.
+ *
+ * WHY THIS EXISTS -- and why it is the consumer's job, not the addon's. Several `GridCell` shapes
+ * carry a raw value *and* a separate derived field that `draw()` is what actually reads. The addon
+ * owns that sync wherever it owns the formatting (`displayData` on text cells, `displayDate` on
+ * date-picker cells -- its own editors recompute those, and failing to was a real addon defect three
+ * times over; see PORTING-NOTES.md's "Recurring bug class" section).
+ *
+ * `range-cell`'s `label` is the case where it CANNOT: the label is optional free-form text -- "42%",
+ * "42 of 100", "high" -- so there is no formatter the addon could apply. Source's editor has the
+ * identical shape and updates only `value` too. Whoever wrote the label owns keeping it true, and in
+ * this demo that is us: `demoGetCellContent` builds `${value}%` for column 10.
+ *
+ * Without this, dragging the Progress slider moved the bar and left the trailing "42%" reading the
+ * pre-edit number -- which looks exactly like "the value didn't save".
+ */
+export function normalizeEditedCell(cell: GridCell): GridCell {
+    if (cell.kind !== GridCellKind.Custom) return cell;
+    const data = cell.data as { kind?: string; value?: number; label?: string };
+    if (data.kind === "range-cell" && data.label !== undefined && typeof data.value === "number") {
+        return {
+            ...cell,
+            copyData: String(data.value),
+            data: { ...data, label: `${data.value}%` },
+        } as GridCell;
+    }
+    return cell;
 }

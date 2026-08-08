@@ -84,6 +84,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path + 8b `recordsSource`; 8c the streaming `updateCells()` demo; 8d the 1,000-row incremental proof + `object-scan` example; 8e `onVisibleRegionChanged` + `AsyncRecordsSource` + two real addon defects + the verification pass. **Those letters match `PORTING-NOTES.md`'s section headers** — go there for the implementation record) |
 | 9 | Backlog — deferred features (**not auto-scheduled**; 15 grouped items 9a–9o, see detail below) | Not scheduled |
 | 10 | Fully-featured demo + consumer cookbook (**schedulable work, not a gap list**) | **Done, browser-verified, committed** (10a `<DemoGrid>` covers every shipped arg; 10b the cookbook is a live page in the test-app, not a `.md`; plus a user-facing README and one real auto-sizing defect) |
+| 11 | Ember integration **guide**, separate from the cookbook (see detail below) | **Not started** — added 2026-08-09 |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
 in a fresh session, this table is the source of truth; recreate the tracked tasks from it if
@@ -1019,6 +1020,53 @@ one phase.
 > local-run instructions until it exists; a Pages build will likely need a base-path setting in
 > `test-app`'s vite config.
 
+## Phase 11 — an Ember integration GUIDE, separate from the cookbook (ADDED 2026-08-09 at user request)
+
+**The user's observation, verbatim in spirit: "the cookbook doesn't feel right as a guide."** That is
+correct, and it is a structural problem rather than a writing-quality one. Do not try to fix it by
+rewriting cookbook chapters.
+
+**The diagnosis.** A cookbook is *task-indexed* — you arrive knowing what you want ("context menus"),
+jump straight to that recipe, and each recipe stands alone. A guide is *narrative* — you arrive
+knowing nothing, and it walks you from zero to a working integration in order. One artifact is
+currently doing both jobs, and chapter 4 ("Using the grid in Ember", ~25k characters, by far the
+longest) is the visible symptom: `DATA.md` was a guide, and Phase 10/queue-item-4 poured it into a
+recipe slot because that was the only slot available.
+
+**The sharper argument, and the real reason a guide is needed.** The Ember-idioms material is *not
+recipe-shaped*. The pull model vs `@tracked`; class-field arrows being identity-stable; `@cached`
+getters; `registerDestructor` teardown; Ember Data live arrays keeping one identity forever. These
+are **cross-cutting rules that apply to every recipe**, not tasks anyone looks up. There is no recipe
+for "don't let your array identity go stale" — it is something you must understand *before* recipe 1.
+Today they are scattered across chapters 4, 5, 8 and 13, which is precisely what makes the whole
+thing read as a reference rather than a guide. The `recordsSource`/Ember-Data defect fixed on
+2026-08-09 is the evidence: a footgun no single recipe would ever have covered.
+
+**The shape.** Two tabs in the test-app, sharing the existing chapter-per-file infrastructure
+(`app/utils/cookbook/`, `Section`/`Block`, the position-numbered TOC) — this is cheap precisely
+because that refactor already happened.
+
+- **Guide** — ordered, ONE running example carried end to end, roughly: install and render → the
+  pull model and why `getCellContent` is not a computation → the reactivity model (`@tracked`,
+  `@cached`, the tracking-frame rule) → wiring real data (`recordsSource`, then Ember Data, then
+  GraphQL) → making it editable → theming it → **the identity rules, as a first-class chapter, not
+  an appendix** → what to reach for next (links into the cookbook).
+- **Cookbook** — keeps all 14 chapters, stays task-indexed, and **links into the guide rather than
+  restating it**. Chapter 4 shrinks dramatically; most of it moves to the guide.
+
+**Must carry over explicitly (user, 2026-08-09):** `object-scan` presented as an **optional helper
+for shaping models/classes into the flat fields the grid consumes** — not as the recommended path and
+never as an addon dependency. Include the caveat that bites in exactly this use case: traversal
+libraries walk *own enumerable* properties while `@tracked`/`@attr` fields are prototype accessors,
+so a scanner pointed at a model instance matches nothing silently. Scan the plain payload, or convert
+to a POJO first.
+
+**Constraints.** Keep exactly one copy of everything — the whole point of queue item 4 was ending a
+two-copies situation, and this must not recreate one. Every guide example must be lifted from a
+demo that actually runs, same rule as Phase 10. And the guide is the natural home for 9l's still-
+missing "bring your own cell type" contract doc and 9n's absent API reference — check both before
+scoping, since together they may make this an `L`.
+
 ## THE QUEUE — start here (accurate as of 2026-08-09, end of session)
 
 **Done on branch `phase-9-partial`**: 9q both halves (the addon's DOM is fully restylable), 9e
@@ -1061,6 +1109,19 @@ Items 1–6 all came from the user reviewing the demo and the cookbook on 2026-0
 > **One decision is waiting for the user** (see PORTING-NOTES.md): `@onSelectionChanged` reports
 > mangled column indices while `@onCellsEdited` and the context-menu callbacks subtract the
 > row-marker offset. Source keeps selection unmangled. Fixing it changes a public callback contract.
+>
+> **Two follow-ups from the user driving the demo again (2026-08-09), both done:**
+>
+> - **Progress column: the slider edit "didn't save".** It did save — the *bar* moved and the
+>   trailing `42%` label did not, because the demo derived `label` from `value` and never
+>   recomputed it. **Fourth instance of the display-field staleness class**, and the first one that
+>   is *correctly* the consumer's problem: `range-cell`'s `label` is free-form text the addon has no
+>   formatter for, and source's editor updates only `value` too. Fixed in the demo
+>   (`normalizeEditedCell`), where the `%` semantics actually live. **Not an addon change.**
+> - **Tree view: decided NOT to add collapsible rows.** Source ships no grid-level tree and row
+>   visibility is a consumer concern, so faking one in the demo would advertise a feature the addon
+>   does not have. The column is renamed **"Files (toggle)"** and its note now says plainly that it
+>   is a disclosure toggle rather than a row tree.
 
 > **Retracted 2026-08-09:** this queue briefly carried a "cell images don't paint" defect as item 1.
 > **There is no such defect** — the user's screenshot shows every Photo cell rendering a distinct
