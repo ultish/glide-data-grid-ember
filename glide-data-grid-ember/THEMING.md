@@ -399,3 +399,59 @@ repaint of the visible window.
 Present in the `Theme` type (and emitted as CSS variables) but never drawn, because the underlying
 feature is not ported: **column/row grouping** (`textGroupHeader`, `bgGroupHeader`,
 `bgGroupHeaderHovered`) and **search-result highlighting** (`bgSearchResult`).
+
+
+## Theming from CSS custom properties (Tailwind / DaisyUI / your own design system)
+
+Everything above assumes you hand `@theme` a plain object. If your app already has a design system
+expressed as CSS custom properties, you can drive the grid from those instead — including switching
+themes at runtime.
+
+**The addon has no dependency on, or knowledge of, any design system.** The bridge is generic: you
+name the CSS expressions, and which `Theme` fields they feed.
+
+```ts
+import { CssThemeWatcher, type CssThemeMapping } from "glide-data-grid-ember/rendering/index";
+
+const MAPPING: CssThemeMapping = {
+    accentColor: "var(--color-primary)",
+    bgCell: "var(--color-base-100)",
+    bgCellMedium: "var(--color-base-200)",
+    textDark: "var(--color-base-content)",
+    // A selection wash is drawn *under* text, so keep it translucent rather than mapping it to a
+    // solid brand colour:
+    accentLight: "color-mix(in oklch, var(--color-primary) 18%, transparent)",
+};
+
+const watcher = new CssThemeWatcher({
+    element: document.documentElement,   // whatever carries your theme attribute
+    mapping: MAPPING,
+    onChange: theme => (this.theme = theme),   // a @tracked field passed to <GlideDataGrid @theme=>
+});
+this.theme = watcher.theme;   // synchronous initial value -- the grid never renders unthemed
+// watcher.destroy() on teardown.
+```
+
+Any expression valid in a `color:` declaration works — `var(--x)`, `var(--x, fallback)`, a literal
+`oklch(...)`, or `color-mix(...)`. An expression that does not resolve is **skipped**, leaving that
+field's built-in value in place, so a partial or misspelled mapping degrades to "unthemed field"
+rather than to black.
+
+`CssThemeWatcher` observes `data-theme` on `element` by default (configurable via `attributes`, or
+call `refresh()` yourself). A live working example is `test-app`'s **DaisyUI theming** demo.
+
+### Why this is a class and not three lines of your own code
+
+**It publishes a new theme object only when a resolved value actually changed.** `theme` is one of
+the ~18 `DrawGridArg` fields `computeCanBlit` compares *by identity*, so the obvious implementation
+— re-deriving the theme inside a `MutationObserver` callback — hands the render engine a fresh
+object on every unrelated attribute write and silently disables the scroll blit fast path for the
+lifetime of the app. No error, no visual difference, just slower scrolling. See the identity
+warnings earlier in this document; this is the same rule, in the one place it is easiest to trip
+over.
+
+### A note on colour syntax
+
+Modern palettes (DaisyUI 5 among them) store colours as `oklch(...)`. The grid parses those
+correctly, along with `oklab()`, `rgb()`/`rgba()` in both comma and space syntax, and — via a canvas
+fallback — `lab()`, `lch()`, `color()`, `hsl()`, hex and named colours.

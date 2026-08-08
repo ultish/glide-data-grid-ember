@@ -122,6 +122,15 @@ export type {
 export { getCopyBufferContents, decodeHTML, unquote } from "./copy-paste.ts";
 export type { CellBuffer, StringArrayCellBuffer, BasicCellBuffer, CopyBuffer } from "./copy-paste.ts";
 
+// CSS-variable theming (Phase 9). Builds a `Theme` overlay from CSS custom properties resolved off
+// a real element, and keeps it in sync as the page's theme changes -- the bridge that lets a
+// DaisyUI/Tailwind app theme the grid. The addon has no DaisyUI dependency and no knowledge of it;
+// see `css-theme.ts`'s header. `CssThemeWatcher` exists mainly to encode one non-obvious rule:
+// publish a NEW theme object only on a real change, because `theme` is identity-compared by
+// `computeCanBlit`.
+export { CssThemeWatcher, themeFromCss, resolveCssColor, themeOverlaysEqual } from "./css-theme.ts";
+export type { CssThemeMapping, ThemeColorKey, CssThemeWatcherOptions } from "./css-theme.ts";
+
 // Search (Phase 9e) -- the engine only. `<GlideDataGrid>` drives all of this internally when a
 // consumer sets `@showSearch`; these exports exist so a consumer can build their own search UI
 // instead of using the opt-in `<GlideSearchBar>`, or reuse the matching rules elsewhere.

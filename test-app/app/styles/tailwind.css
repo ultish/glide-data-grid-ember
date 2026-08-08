@@ -1,0 +1,21 @@
+/* Tailwind 4 + DaisyUI 5 entry -- TEST-APP ONLY.
+ *
+ * These prove a consuming app can drive the grid's canvas theme from its own design system; see
+ * `app/components/daisy-demo.gts`. The addon depends on neither and
+ * `glide-data-grid-ember/package.json` must never gain them.
+ *
+ * WHY THIS IS A SEPARATE FILE IMPORTED FROM `app/app.ts`, and not part of `app/styles/app.css`:
+ * Embroider serves `app.css` as a *virtual* module (`@embroider/virtual/app.css`), which never
+ * reaches `@tailwindcss/vite`. Putting the directives there ships them to the browser verbatim --
+ * `@import "tailwindcss"` as literal text, no utilities generated, no DaisyUI variables defined,
+ * and the only symptom is unstyled markup. Importing a real file from JS routes it through Vite's
+ * ordinary CSS pipeline, where the Tailwind plugin does run.
+ */
+@import "tailwindcss";
+
+/* Only themes named here get CSS emitted. `daisy-demo.gts`'s picker must stay in sync with this
+ * list: selecting a theme with no CSS silently falls back to the previous theme's values, which
+ * reads as "the switcher is broken" rather than "that theme was never built". */
+@plugin "daisyui" {
+  themes: light --default, dark, cupcake, synthwave, dracula, retro, forest, aqua, nord;
+}

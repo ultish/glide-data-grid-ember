@@ -4098,6 +4098,45 @@ Also learned while confirming: `RowID` cells are **not searchable** (nor Loading
 Drilldown) — source's match-string switch omits them — so searching `row-4` against the demo's
 row-id column finds nothing. Faithful, but surprising enough to belong in the API reference (9n).
 
+## DaisyUI / Tailwind theming — the CSS-variable bridge (COMPLETE, browser-verified, 2026-08-08)
+
+Two commits: the OKLCH parser fix (see the `color-parser.ts` section) and this, the bridge itself.
+
+**`src/rendering/css-theme.ts`** — `resolveCssColor`, `themeFromCss`, `themeOverlaysEqual` (pure,
+tested) and `CssThemeWatcher`. The addon has **no DaisyUI dependency and no knowledge of DaisyUI**;
+the bridge is generic (map CSS expressions onto `Theme` colour fields). Tailwind 4 + DaisyUI 5 are
+`test-app` devDependencies only — the same consumer-side boundary `object-scan` sits on.
+
+**Why it is a class rather than consumer boilerplate.** It publishes a **new theme object only when
+a resolved value actually changed**. `theme` is identity-compared by `computeCanBlit`, so the
+obvious implementation — re-deriving inside the `MutationObserver` callback — silently kills the
+scroll blit fast path for the app's lifetime. That rule is not discoverable from outside the addon,
+so it is encoded once here. `themeOverlaysEqual` is the pure predicate that decides it, and is the
+one part of the module unit-testable in bare Node (7 tests).
+
+**`resolveCssColor` appends its probe INSIDE the target element**, not to `<body>`. Custom
+properties are inherited, so a `[data-theme]` set on a subtree is invisible to a probe outside it.
+Unresolvable expressions return `undefined` and the field is skipped, so a typo leaves the built-in
+value rather than producing black.
+
+### Wiring Tailwind 4 into this Ember app — the non-obvious part
+
+**`@import "tailwindcss"` in `app/styles/app.css` does not work.** Embroider serves that file as a
+*virtual* module (`@embroider/virtual/app.css`) which never reaches `@tailwindcss/vite`, so the
+directives ship to the browser as literal text: no utilities generated, no DaisyUI variables
+defined, and the only symptom is unstyled markup — nothing errors. The fix is a real file
+(`app/styles/tailwind.css`) **imported from `app/app.ts`**, which routes it through Vite's ordinary
+CSS pipeline where the plugin does run. Cost about twenty minutes; recorded so it costs nobody else
+any.
+
+Second gotcha: DaisyUI only emits CSS for themes named in its `@plugin "daisyui" { themes: ... }`
+list. Selecting a theme that was never built silently keeps the previous theme's values, which reads
+as "the switcher is broken". `daisy-demo.gts`'s picker list must stay in sync with that block.
+
+**Browser-verified**: DaisyUI's `oklch()` variables resolve, the canvas repaints on every
+`data-theme` switch (light → synthwave → dracula all confirmed visually), and DaisyUI-styled DOM
+controls and the canvas grid stay in agreement because both read the same attribute.
+
 ## Styling: the addon ships a real stylesheet now (2026-08-08) — and why
 
 **Decision (user, 2026-08-08): "inlined css means it can't be changed by the client. so using a css

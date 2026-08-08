@@ -926,7 +926,13 @@ overlay-editor chrome, so the addon's DOM is now fully restylable from a consumi
    arg landed this session. If a `<GlideSearchBar>` is shipped, style it in a fourth stylesheet
    following the same conventions — `.gdg-root`-scoped, `var(--gdg-*)` for theme values, and the
    shared `.gdg-editor-input`/`.gdg-editor-button` primitives where they fit.
-3. **DaisyUI/Tailwind theming.** Blocker is known and verified: Chrome returns `oklch()` unconverted
+3. ~~**DaisyUI/Tailwind theming.**~~ **DONE 2026-08-08, browser-verified.** Two commits: the OKLCH
+   parser fix, then `src/rendering/css-theme.ts` (`CssThemeWatcher` + `themeFromCss` +
+   `resolveCssColor`), a `test-app` demo with a live DaisyUI theme picker, and a THEMING.md section.
+   Tailwind 4 + DaisyUI 5 are **test-app devDependencies only** — the addon has no knowledge of
+   either. Both blockers below were real and are both resolved; see PORTING-NOTES.md for the
+   Embroider/Tailwind wiring trap that cost the most time. Original note kept:
+   Blocker is known and verified: Chrome returns `oklch()` unconverted
    from `getComputedStyle`, and `parseToRgba` mangles it to garbage — DaisyUI 5 is OKLCH. Must also
    handle **runtime theme switching** (user switches DaisyUI themes live), which means a
    `MutationObserver` on `data-theme` producing a *new* theme object only on real change —

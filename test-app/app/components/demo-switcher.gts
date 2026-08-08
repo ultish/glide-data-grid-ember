@@ -11,6 +11,8 @@
 //   - "Streaming"      -> `<StreamingDemo>`: Phase 8's high-frequency demo -- a non-tracked buffer
 //                          + imperative `updateCells()` at thousands of cells/sec, with measured
 //                          throughput and repaint timings.
+//   - "DaisyUI theme"  -> `<DaisyDemo>`: Phase 9's CSS-variable theming bridge -- DaisyUI 5's
+//                          oklch() palette driving the canvas, switching live via `data-theme`.
 //   - "Async paging"   -> `<AsyncDemo>`: Phase 8's `AsyncRecordsSource` -- 100k rows that aren't in
 //                          memory, fetched a page at a time as `@onVisibleRegionChanged` reports
 //                          what's on screen, each arrival repainted by damage.
@@ -23,8 +25,9 @@ import TrackingDemo from "test-app/components/tracking-demo";
 import GlideDemo from "test-app/components/glide-demo";
 import StreamingDemo from "test-app/components/streaming-demo";
 import AsyncDemo from "test-app/components/async-demo";
+import DaisyDemo from "test-app/components/daisy-demo";
 
-type DemoTab = "full-grid" | "tracking" | "glide" | "streaming" | "async";
+type DemoTab = "full-grid" | "tracking" | "glide" | "streaming" | "async" | "daisy";
 
 export default class DemoSwitcher extends Component {
     @tracked tab: DemoTab = "full-grid";
@@ -47,6 +50,14 @@ export default class DemoSwitcher extends Component {
 
     @action showAsyncDemo(): void {
         this.tab = "async";
+    }
+
+    @action showDaisyDemo(): void {
+        this.tab = "daisy";
+    }
+
+    get isDaisy(): boolean {
+        return this.tab === "daisy";
     }
 
     get isFullGrid(): boolean {
@@ -92,6 +103,9 @@ export default class DemoSwitcher extends Component {
                 <button type="button" data-test-show-async {{on "click" this.showAsyncDemo}}>
                     Async paging
                 </button>
+                <button type="button" data-test-show-daisy {{on "click" this.showDaisyDemo}}>
+                    DaisyUI theming
+                </button>
             </div>
             <div style="flex: 1 1 auto; min-height: 0;">
                 {{#if this.isTracking}}
@@ -102,6 +116,8 @@ export default class DemoSwitcher extends Component {
                     <StreamingDemo />
                 {{else if this.isAsync}}
                     <AsyncDemo />
+                {{else if this.isDaisy}}
+                    <DaisyDemo />
                 {{else}}
                     <DemoGrid />
                 {{/if}}

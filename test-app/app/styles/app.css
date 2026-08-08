@@ -1,5 +1,3 @@
-/* Ember supports plain CSS out of the box. More info: https://cli.emberjs.com/release/advanced-use/stylesheets/ */
-
 /* Phase 7c: the column sort menu in `app/components/glide-demo.gts`.
    The addon deliberately ships no menu UI -- it only fires `onHeaderMenuClick(col, bounds)` -- so
    this is consumer-side chrome, positioned against those canvas-space bounds. */
