@@ -37,7 +37,12 @@ Both files are kept current after every phase. If anything below conflicts with 
 ## Quick reference
 
 - Addon package: `glide-data-grid-ember/`. Test app: `test-app/`.
-- Type-check: `cd glide-data-grid-ember && npx tsc --noEmit -p tsconfig.json`
+- Type-check: `pnpm --filter glide-data-grid-ember lint:types` (runs `ember-tsc --noEmit`).
+  **Use `ember-tsc`, not bare `tsc`** — since the Glint v2 upgrade, plain `tsc` silently *ignores*
+  `.gts` files and exits 0 without checking `glide-data-grid.gts`. Older notes in PORTING-NOTES.md
+  say `npx tsc --noEmit -p tsconfig.json`; that is now the wrong command.
+- Unit tests (Phase 9a): `pnpm --filter glide-data-grid-ember test` (vitest, bare Node, ~190ms).
+  Test-project type-check: `pnpm --filter glide-data-grid-ember lint:types:test`.
 - Addon build: `pnpm --filter glide-data-grid-ember build` (rollup)
 - Test-app build (the real end-to-end check): `pnpm --filter test-app exec vite build`
 - Test-app dev server: `pnpm --filter test-app run start` (serves at `localhost:4200`)
@@ -78,7 +83,24 @@ realloc + `alpha: false`). Both were invisible until something drove `updateCell
 PORTING-NOTES.md's Phase 8e section.
 
 **Next up: nothing is auto-scheduled.** Phase 9 is a deliberately non-auto-scheduled backlog of
-known gaps vs source (PHASES.md) — work it only when asked.
+known gaps vs source (PHASES.md) — work it only when asked, and ask *which* items.
+
+Phase 9 was fleshed out on 2026-08-08 into 15 grouped items (9a–9o) by auditing the **source tree**,
+not this project's own notes — which added seven groups that had never been recorded anywhere,
+including that **the repo has no automated tests at all** (9a), **no accessibility DOM/ARIA
+whatsoever** (9b), and no touch, search, or context-menu support. The raw inventory (source file
+line counts, the hardcoded-`undefined` `DrawGridArg` fields, the 82-vs-26 prop gap) is in
+PORTING-NOTES.md's "Phase 9 audit" section — don't re-derive it. Standing lesson recorded there:
+auditing your own notes only finds what you already knew you skipped. **Both repos are indexed in the
+`codebase-memory` knowledge graph** (`Users-jxhui-Developer-glide-data-grid` and
+`...-glide-data-grid-ember`) — use it before hand-grepping either tree.
+
+**Two Phase 9 items have landed** (2026-08-08, browser-verified, see PORTING-NOTES.md's "Phase 9
+(partial)" section): the four consumer draw hooks (`@drawCell`/`@drawHeader`/`@prelightCells`/
+`@highlightRegions` — previously hardcoded `undefined` in `runDraw`) and **`@extraCells`**, which
+replaces every demo's hand-built `createCombinedCellRenderer(...)`. The blit fast path was
+re-measured with all five live and still engages. **9b (accessibility) and 9c (touch) are deferred by
+explicit user decision** — don't propose them as next steps.
 
 Consumer-facing docs are the spec for future work — keep them in sync rather than letting them go
 stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and `glide-data-grid-ember/DATA.md` (how

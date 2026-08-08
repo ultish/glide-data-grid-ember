@@ -51,10 +51,18 @@ export function demoGetRowThemeOverride(row: number): Partial<Theme> | undefined
 // the drilldown column.
 const BUBBLE_TAGS = ["urgent", "bug", "feature", "design", "backend", "frontend", "ops", "docs"] as const;
 
-// A tiny 8x8 solid-color PNG, inlined as a data URI -- used as the drilldown chip icon so the demo
-// never depends on an external image URL (avoids flaky network-dependent browser tests).
+// A tiny 8x8 solid-colour (#4dabf7) RGBA PNG, inlined as a data URI -- used as the drilldown chip
+// icon and the image column's thumbnail so the demo never depends on an external image URL (avoids
+// flaky network-dependent browser tests).
+//
+// FIXED 2026-08-08: the previous constant here was a CORRUPT PNG -- valid 8x8 RGBA `IHDR`, but a
+// truncated `IDAT` zlib stream with a failing CRC and no terminating `IEND`. Chrome partially
+// decodes such a file rather than rejecting it, so Column 5 rendered a couple of thin horizontal
+// bars (the handful of scanlines that survived) instead of a thumbnail, and the Column 7 chips got
+// a matching sliver. It looked like a renderer bug in the port and was not -- the input data was
+// broken. Verified valid this time: all three chunks CRC-check and the IDAT stream round-trips.
 const DRILLDOWN_ICON =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR42mNk+M9QzzCAgHFgYBQMYQAA4WkBH8fY6WkAAAAASUVORK5CYII=";
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR42mPwXf39Pz7MMDIUAABoaLuBoJ3iNwAAAABJRU5ErkJggg==";
 
 // Phase 4d: same tiny inlined data-URI PNG reused for the image column's thumbnail(s) -- keeps the
 // demo free of any external network dependency (a real consumer would pass real image URLs;

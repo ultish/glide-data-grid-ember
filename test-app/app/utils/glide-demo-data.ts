@@ -41,8 +41,11 @@ function mulberry32(seed: number): () => number {
 
 // --- Inlined image generation ----------------------------------------------------------------
 // Tiny 8x8 solid PNG, the same constant `demo-data.ts` uses -- only reached if there is no DOM.
+// Both copies were a corrupt (truncated-`IDAT`) PNG until 2026-08-08; see the fuller note in
+// `demo-data.ts`. This copy never showed the symptom because the browser path always wins here --
+// which is exactly why it went unnoticed. Keep the two in sync.
 const FALLBACK_PNG =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR42mNk+M9QzzCAgHFgYBQMYQAA4WkBH8fY6WkAAAAASUVORK5CYII=";
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR42mPwXf39Pz7MMDIUAABoaLuBoJ3iNwAAAABJRU5ErkJggg==";
 
 function makeCanvasDataUrl(size: number, paint: (ctx: CanvasRenderingContext2D) => void): string {
     if (typeof document === "undefined") return FALLBACK_PNG;

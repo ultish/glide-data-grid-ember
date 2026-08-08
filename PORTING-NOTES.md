@@ -61,10 +61,14 @@ demo + tests.
   exists (e.g. `for (let i = 0; i < arr.length; i++) { arr[i]! }`) — never to paper over a real
   possible-undefined case. This is how all of Phase 1's ~100 such cases were resolved, each one
   checked against the source's implicit invariant.
-- Verify with `npx tsc --noEmit -p tsconfig.json` (from `glide-data-grid-ember/`) and the real
-  build with `pnpm build` (also from `glide-data-grid-ember/`, runs `rollup --config`). Both must
-  be run — tsc passing does not guarantee the rollup/babel build passes (the `.ts`-extension
-  requirement above is a rollup/babel constraint tsc alone won't catch).
+- Verify with **`pnpm lint:types`** (from `glide-data-grid-ember/`, runs `ember-tsc --noEmit`) and
+  the real build with `pnpm build` (also from `glide-data-grid-ember/`, runs `rollup --config`).
+  Both must be run — a clean type-check does not guarantee the rollup/babel build passes (the
+  `.ts`-extension requirement above is a rollup/babel constraint the type-checker won't catch).
+  **Use `ember-tsc`, not bare `tsc`.** Earlier phases of this file say `npx tsc --noEmit -p
+  tsconfig.json`; that still runs, but since the Glint v2 upgrade it is the *wrong* command —
+  plain `tsc` silently ignores `.gts` files, so it skips `src/components/glide-data-grid.gts`
+  entirely and reports success without having checked the one templated file in the addon.
 - Dependency pins that had to be corrected from the `@embroider/addon-blueprint`/`@embroider/app-blueprint`
   scaffold defaults (blueprint shipped with incompatible versions): `@babel/plugin-transform-runtime`
   pinned to `^7.25.9` (blueprint default had drifted to a breaking unreleased v8), `typescript`
@@ -3438,3 +3442,669 @@ One related trap: `document.querySelectorAll('canvas')` is **not** a safe way to
 canvases. The controller appends two offscreen double-buffer canvases to `document.documentElement`,
 and stale ones from destroyed grids can sit ahead of the live ones in document order. Scope the query
 to the grid root (`.dvn-scroller`'s `parentElement`).
+
+## Phase 9 audit — source-tree inventory of what is NOT ported (2026-08-08)
+
+Done when the user asked to flesh out Phase 9. **This is an audit against the source tree itself, not
+against this file** — which matters, because the pre-existing Phase 9 list had been assembled by
+reading these notes, and that method is structurally blind to whole subsystems no phase ever had a
+reason to mention. Seven groups (`9a`–`9g` in PHASES.md) were found this way and had never been
+written down anywhere. **Standing lesson: auditing your own notes only finds what you already knew
+you skipped.**
+
+The full fleshed-out backlog lives in `PHASES.md`'s Phase 9 section (groups 9a–9o, with size and
+priority tags). Recorded here is only the raw inventory, so nobody has to re-run the greps:
+
+**Source subsystems with zero equivalent in this port:**
+
+| Source | Lines | Note |
+|---|---|---|
+| `internal/data-grid-search/data-grid-search.tsx` + `-style.tsx` | 577 + 96 | search overlay; needs `getCellsForSelection` first |
+| `data-grid.tsx`'s `accessibilityTree` (~1737–1866, rendered 1941) | ~130 | debounced `<table role="grid">` mirror of the visible region. This port's root is a bare `tabIndex=0` div with **no ARIA at all** |
+| `data-editor/row-grouping.ts` + `row-grouping-api.ts` | 326 + 72 | row grouping (column grouping *was* done, Phase 7b) |
+| `data-editor/use-column-sizer.ts` | 253 | real text-measurement auto-sizing (port uses a flat 150px fallback) |
+| `data-editor/data-editor-keybindings.ts` + `common/is-hotkey.ts` | 198 + 86 | remappable keybinding DSL |
+| `data-editor/use-cells-for-selection.ts` | 72 | `getCellsForSelection`; blocks search + async copy |
+| `data-editor/use-autoscroll.ts` | 41 | autoscroll while dragging past the edge |
+| `internal/data-grid-overlay-editor/use-stay-on-screen.ts` | 61 | IntersectionObserver that keeps an open editor from being clipped at the viewport edge. **No `IntersectionObserver` exists anywhere in this port** — latent user-visible defect, not just a missing feature |
+| `internal/scrolling-data-grid/use-kinetic-scroll.ts` | 78 | iOS momentum-scroll settling; touch-only, so it is part of the deferred touch item |
+| `data-editor/use-rem-adjuster.ts` | 56 | `scaleToRem` |
+| `data-editor/group-rename.tsx` | 67 | `onGroupHeaderRenamed` |
+| `packages/source/use-movable-columns.ts` | 82 | Phase 8 ported 2 of the 5 source hooks |
+| `packages/source/use-collapsing-groups.ts` | 136 | " |
+| `packages/source/use-undo-redo.ts` | 242 | " |
+
+**Both repos are indexed in the `codebase-memory` knowledge graph** —
+`Users-jxhui-Developer-glide-data-grid` (2368 nodes) and `Users-jxhui-Developer-glide-data-grid-ember`
+(1542 nodes). Use it before hand-grepping either tree. Note there is also a stale
+`...-glide-data-grid-orig` project with 54 nodes — not the source repo, don't use it.
+
+**Prop surface:** source's `DataEditor` exposes **82** `readonly` props; `<GlideDataGrid>` exposes
+**26** (30 after the Phase 9 partial below). Enumerate the port's with
+`grep -n "readonly [a-zA-Z]*\??:" src/-private/grid-host-controller.ts` and source's with the same
+pattern against `packages/core/src/data-editor/data-editor.tsx`.
+
+**Four `DrawGridArg` fields the render layer fully supports but the controller hardcoded to
+`undefined`** — `drawHeaderCallback`, `drawCellCallback`, `prelightCells`, `highlightRegions` —
+plus `freezeTrailingRows` hardcoded to `0` and `touchMode` to `false`. **The four callbacks were
+exposed on 2026-08-08** (see the Phase 9 partial section below). `freezeTrailingRows` is NOT the same
+one-line job and was deliberately left — it is hardcoded at seven coordinate-math call sites too.
+`touchMode` belongs to the deferred touch item.
+
+**Imperative API:** source's `DataEditorRef` has 9 methods; `GlideDataGridApi` (via `@onReady`) has
+**one** (`updateCells`). `scrollTo`/`getBounds`/`focus`/`getMouseArgsForPosition` are all thin wrappers
+over internals that already exist and are already used by hit-testing (`scrollCellIntoView`,
+`computeBounds`, `resolveMouseHit`).
+
+**No touch/pointer handling anywhere** — every listener is `mousedown`/`mousemove`/`mouseup`/
+`keydown`. No `contextmenu` listener either, so none of source's three context-menu props can exist.
+Native *scrolling* works on touch for free (it's a real scroller div); nothing else does.
+
+**No automated tests exist in this repo.** `test-app/tests/unit/` and `test-app/tests/integration/`
+are empty directories; `test-app`'s `test:ember` script would run but has nothing to run; the addon's
+`test` script is the v2-addon placeholder echo. Everything to date was verified by
+`tsc` + `pnpm build` + `vite build` + a manual browser pass, plus some throwaway Node scripts in
+Phase 8 that were never kept. Don't assume a regression suite is protecting anything.
+
+## Phase 9 (partial) — the two cheap exposures, done 2026-08-08 (browser-verified)
+
+Two items from the Phase 9 backlog, picked because both were exposures of machinery that already
+worked rather than new behaviour. **No rendering code was written for either.** The rest of Phase 9
+remains unscheduled; 9b (accessibility) and 9c (touch) are deferred by explicit user decision.
+
+### 1. The four consumer draw hooks (`9g`)
+
+`drawCell` / `drawHeader` / `prelightCells` / `highlightRegions` were live `DrawGridArg` fields —
+ported in Phase 1, fully supported by `src/rendering/render/*` — that `runDraw` pinned to
+`undefined`. They are now `GridHostArgs` fields and `<GlideDataGrid>` args, passed straight through.
+Note the name mapping: the public args use **source's prop names** (`drawCell`/`drawHeader`), the
+`DrawGridArg` fields keep the engine's (`drawCellCallback`/`drawHeaderCallback`).
+
+`Highlight` had to be added to `src/rendering/index.ts`'s barrel — it was defined in
+`render/data-grid-render.cells.ts` and never exported, so `highlightRegions` was untypeable from
+outside the addon.
+
+**Both `prelightCells` and `highlightRegions` are `computeCanBlit` identity-compared fields**
+(`data-grid-render.blit.ts:248,251`). The controller cannot defend this — it has no way to know two
+equal-looking arrays are "the same" — so the stability requirement is documented on the `GridHostArgs`
+doc comments and demonstrated in the demo (frozen module-scope constants swapped wholesale by the
+toggle, read through `@cached` getters).
+
+### 2. `@extraCells` (`9l`)
+
+`<GlideDataGrid>` now takes `extraCells?: readonly CustomRenderer<any>[]` (source's `customRenderers`)
+and combines it with the Phase 4 built-in registry itself. `@getCellRenderer` still wins if passed.
+
+**The `@cached` getter is load-bearing, not tidiness.** `buildGridHostArgs()` runs on every draw,
+scroll and hover pass, so calling `createCombinedCellRenderer(...)` inline there would hand the engine
+a fresh closure per frame — and `getCellRenderer` is identity-compared by `computeCanBlit`. That is
+the Phase 6 defect exactly. This is also the concrete instance of the case PHASES.md's 9k note
+predicted: **`@cached` on a component getter is the right tool for a derived `DrawGridArg` value**,
+in contrast to `GridHostController`'s hand-rolled caches (which can't use it — the controller holds
+deliberately untracked state, so a `@cached` there would be `isConst` and freeze permanently).
+
+Both `<GlideDemo>` and `<DemoGrid>` were rewired off their hand-built
+`createCombinedCellRenderer(defaultGetCellRenderer, allExtraCells)` module constants and onto
+`@extraCells={{allExtraCells}}`.
+
+### What was deliberately NOT done, and why it isn't cheap
+
+**`freezeTrailingRows` looks like a fifth passthrough and is not.** It is hardcoded to `0` in
+`runDraw` *and* at **seven coordinate-math call sites** (`computeBounds` ×5, `getRowIndexForY` ×2),
+plus scroll-content sizing. This is the same trap Phase 2a documented for `groupHeaderHeight`: the
+render engine accepts the flag, but the controller's own hit-testing must account for the pinned rows
+independently, or clicks land on the wrong row with nothing visibly wrong. Re-read the Phase 2a note
+before attempting it.
+
+### Verification actually performed (not delegated)
+
+- `tsc --noEmit` clean; addon rollup build clean; `test-app` vite build clean.
+- **Browser**: all four hooks render simultaneously in `<DemoGrid>` behind a "Show draw hooks"
+  toggle — `drawCell` dots on `(col+row) % 7 === 0`, `drawHeader` underlines on every third column,
+  the `highlightRegions` tinted+dashed rectangle over cols 1–3 × rows 2–5, and `prelightCells`
+  tinting exactly `[1,8] [2,8] [3,8]` (confirmed by zoom: the tint spans those three cells and stops,
+  with the neighbouring zebra row unaffected). No console errors.
+- **`@extraCells` browser-verified on both demos** — the Glide replica's sparkline / user-profile /
+  drilldown columns and `<DemoGrid>`'s sparkline + star columns all resolve through the new combined
+  renderer.
+- **The blit fast path was re-measured with all five new args live**, using the Phase 8e recipe
+  (temporarily instrument `computeCanBlit` to write differing field names onto a
+  `document.documentElement` attribute, then drive **real `computer` scroll actions**). Result over
+  two scrolls, vertical and horizontal, hooks ON: **8 draws — 6 damage-only (`last === undefined`,
+  i.e. hover repaints) and 2 scroll draws whose ONLY differing field was `mappedColumns`** (which
+  falls into `computeCanBlit`'s own `deepEqual` branch and returns true). `getCellRenderer`,
+  `highlightRegions`, `prelightCells`, `drawCellCallback`, `drawHeaderCallback` and `getCellContent`
+  **never differed once**. Same result Phase 8e got, with the same single known offender —
+  `mappedColumns`, which is backlog item 9k. Instrumentation reverted; `git status` on
+  `src/rendering/` afterwards shows only the intentional `index.ts` barrel export.
+
+### Browser-testing gotcha (adds to the existing list — cost real time here)
+
+**The test-app consumes the addon from `dist/`, and Vite caches it.** Editing addon `src/` does
+nothing until `pnpm --filter glide-data-grid-ember build` runs — but worse, an addon rebuild that
+happens *while the dev server is already running* is **not picked up by a page reload either**. The
+optimizer has the old copy. Symptom: freshly-added instrumentation appears in `dist/` and in the
+module the page fetches, yet never executes. Fix: rebuild the addon, then `pkill -f vite`,
+`rm -rf test-app/node_modules/.vite`, restart. Cheapest habit is to build the addon *before* starting
+the dev server. (And note the server picks port 4201 if 4200 is still held by a dying process.)
+
+## Phase 9a (started) — the vitest harness, and the first Haiku-written suites
+
+**Harness** (`glide-data-grid-ember/vitest.config.ts`). Unit tests for the framework-agnostic layer
+run in **bare Node via vitest, against `src/` directly** — no build, no browser, subsecond. This is
+viable precisely because `src/rendering/` and the pure parts of `src/data-source/` have zero Ember
+imports by design (Phase 1). It sits *alongside* `test-app`'s QUnit setup, which remains the right
+home for anything needing a real Ember app or a real canvas (PHASES.md's 9a item 4, not built yet).
+
+**Do not put anything importing `ember-source` in this harness** — Phase 8 already established that
+ember-source's dist can't execute in bare Node (needs the `@embroider/macros` babel transform).
+
+### Four config touchpoints that must stay in sync — all four were needed, and three are non-obvious
+
+Tests are **colocated** (`src/foo.ts` ↔ `src/foo.test.ts`). Making that work took:
+
+1. `vitest.config.ts` — `include: ["src/**/*.test.ts"]`, `environment: "node"`.
+2. `rollup.config.mjs` — `addon.publicEntrypoints([...], { exclude: ['**/*.test.ts'] })`. Without it
+   the broad `**/*.js` entrypoint glob picks tests up, and **the build fails outright**, because
+   `addon.dependencies()` correctly rejects the `vitest` import (a devDependency).
+   **A negation pattern in the `patterns` array does NOT work** — `'!**/*.test.js'` is treated as an
+   entry module and fails with `Could not resolve entry module "src/-private/"`. These are walk-sync
+   globs; `exclude` maps to walk-sync's `ignore`. Verified by hitting both failures.
+3. `tsconfig.json` — `"exclude": ["src/**/*.test.ts"]`, so `addon.declarations('declarations')`
+   doesn't emit `.d.ts` files for tests into the published package (`package.json#files` ships
+   `declarations`). Rollup's exclude does *not* cover this; they are separate pipelines and the
+   declaration emit leaked test types even after the rollup build was clean.
+4. `tsconfig.test.json` + the `lint:types:test` script — re-includes what (3) excludes, so tests are
+   still type-checked (vitest strips types via esbuild without checking them). It must explicitly
+   unset `emitDeclarationOnly`/`declarationDir` inherited from `@ember/library-tsconfig`, which are
+   errors alongside `noEmit`.
+
+Scripts: `pnpm test` → `vitest run`; `pnpm test:watch`; `pnpm lint:types:test`.
+
+### The one real finding so far: `CompactSelection.remove` drops ranges, and source does too
+
+`remove()` iterates `items.entries()` **while `splice`-ing that same array**. When a removal deletes
+a slice entirely (`toAdd` is empty), the splice shifts everything left and the iterator skips the
+next slice. So a wide removal spanning several ranges silently leaves some behind:
+
+```ts
+CompactSelection.create([[1, 3], [10, 12]]).remove([0, 20]).items  // → [[10, 12]], not []
+```
+
+**This port is byte-identical to source here** (`packages/core/src/internal/data-grid/
+data-grid-types.ts`, verified by direct comparison 2026-08-08) — so it is an upstream bug, not a port
+defect, and must NOT be "fixed" unilaterally. Pinned by the test
+`"removes a range wider than any single range"`. Whether anything in this port can actually reach it
+was not investigated; `remove` is reachable from row/column deselection.
+
+### Using Haiku subagents for this — what actually happened
+
+Two `model: "haiku"` subagents wrote `compact-selection.test.ts` (78 tests) and
+`common/math.test.ts` (64 tests). 154 tests total, all green, `tsc -p tsconfig.test.json` clean.
+Orchestrator re-verified independently: re-ran both suites, read representative blocks, checked the
+`remove` claim against source, and confirmed all three `hugRectToTarget` early-return branches were
+actually covered.
+
+What worked, and is worth repeating:
+
+- **A working exemplar is the whole trick.** `copy-paste.test.ts` was written first, by hand, with a
+  numbered CONVENTIONS block in its header. Both agents were told it was binding. Both followed it.
+- **Give the excerpt, not the file.** Both prompts said *do not* read `PORTING-NOTES.md`/`PHASES.md`
+  and inlined the four facts that mattered (`.ts` extensions, `noUncheckedIndexedAccess`, "this is a
+  port, preserve surprising behaviour", no DOM). This deliberately inverts CLAUDE.md's standing rule,
+  which exists for agents doing implementation work; for a narrow mechanical task, 4,000 lines of
+  context is the risk, not the mitigation.
+- **A loud, tight loop.** Both were required to run `pnpm test` and the typecheck themselves. Neither
+  reported anything it hadn't actually run.
+
+What to watch for:
+
+- **Both over-produced** — 78 tests against a stated 25–40, and 64 against 30–45. The tests were not
+  padding, but a stated ceiling is treated as a suggestion.
+- **Agent 1 claimed a behaviour was "faithful-to-source" without any access to source.** It happened
+  to be right (verified). Agent 2's prompt therefore added an explicit instruction: *do not claim a
+  behaviour matches source; write "Surprising: X. Not verified against upstream" instead.* That
+  instruction worked and should stay in future prompts. **Treat any source-fidelity claim from a
+  subagent as unverified until the orchestrator diffs it.**
+- **Neither ran prettier.** Agent 2's file came back tab-indented against a 4-space repo. Add
+  `npx prettier --write` to the definition of done next time, or just run it afterwards.
+
+## Glint v2 upgrade (2026-08-08) — settled, do not re-derive
+
+Both workspaces are on **Glint v2**. Guide followed: https://typed-ember.gitbook.io/glint/v2-upgrade
+
+**The naming is the confusing part, so get it straight before touching versions.** "Glint 2" does
+NOT ship as `@glint/core@2.x`. `@glint/core`'s `latest` is still **1.5.2**, and its `2.0.1-unstable.*`
+tag is a dead-end prerelease line — which is exactly what the Embroider app blueprint had pinned
+`test-app` to, and the source of the `@glint/*` peer-mismatch warning this file recorded as
+"harmless" from Phase 2 onward. **Glint v2 ships under a new package name, `@glint/ember-tsc`, which
+has a real stable release** (1.10.0 at time of writing). That warning is now gone.
+
+What the upgrade actually was:
+
+| Before (v1) | After (v2) |
+|---|---|
+| `@glint/core` | `@glint/ember-tsc` |
+| `@glint/environment-ember-loose` | *removed* |
+| `@glint/environment-ember-template-imports` | *removed* |
+| `@glint/template` | unchanged (works with both) |
+| `@embroider/addon-dev@^7.1.0` | `@embroider/addon-dev@^8.3.1` — **required**, see below |
+| tsconfig `"glint": { "environment": [...] }` | key deleted (environments are a v1 concept) |
+| `unpublished-development-types/index.d.ts` imported the two environment packages | imports `@glint/ember-tsc/types` |
+| scripts: `glint` | scripts: `ember-tsc --noEmit` |
+
+**The addon-dev bump is not optional.** `addon.declarations()` shells out to a binary by name.
+7.1.6 hardcodes `execa('glint', ['--declaration'])`, and the `glint` binary does not exist in v2.
+8.3.1 auto-detects — `if (deps['@glint/ember-tsc'])` it runs `ember-tsc --declaration`, else falls
+back to `glint` — and also gained an explicit `declarations(path, command?)` override. Every
+addon-dev API this repo's `rollup.config.mjs` uses survives the 7→8 major unchanged, including
+`publicEntrypoints`' `exclude` option that Phase 9a's test setup depends on.
+
+**v2's headline breaking change costs this repo nothing**: it drops the Ember Loose environment, so
+`.hbs` templates are no longer supported at all — only `.gts`/`.gjs`. This workspace has **zero
+`.hbs` files** (checked); every component is `.gts`. `rollup.config.mjs` still calls `addon.hbs()`,
+which is now inert but harmless. If anyone ever adds a `.hbs` file, it will not type-check — write
+`.gts` instead.
+
+**Use `ember-tsc`, never bare `tsc`, for type-checking.** `ember-tsc` is a thin wrapper around `tsc`
+that understands `.gts`. Bare `tsc` doesn't error on `.gts` — it silently *ignores* those files, so
+it exits 0 having never checked the addon's one templated component. This bit the Phase 9a test
+harness: `lint:types:test` was originally plain `tsc -p tsconfig.test.json` and was quietly skipping
+`glide-data-grid.gts`; it now runs `ember-tsc -p tsconfig.test.json`.
+
+**Verification performed** (all clean): `pnpm lint:types` (addon), `pnpm lint:types:test` (addon test
+project), `pnpm --filter test-app lint:types`, a from-scratch `pnpm build` with `declarations/` and
+`dist/` deleted first — confirming `ember-tsc --declaration` succeeded and re-emitted
+`declarations/components/glide-data-grid.d.ts` — the full vitest suite (154), `vite build` of
+test-app, and a browser pass on the Glide demo. The browser pass is worth keeping in mind for its
+own reason: the Photo column looked *empty* on first paint and read like a regression, but it is
+just the async `ImageWindowLoader` — a second screenshot moments later had every avatar. Don't call
+an image-cell regression from one screenshot.
+
+## Test-app fixture bug: the Column 5 "broken sprite" was a corrupt PNG, not a renderer defect (fixed 2026-08-08)
+
+`demo-data.ts`'s `DRILLDOWN_ICON` (aliased as `IMAGE_SAMPLE`) was a **corrupt inline PNG data URI**,
+and had been since Phase 4d. Symptom: the Full-grid demo's **Column 5** (the `GridCellKind.Image`
+column) drew a couple of thin horizontal bars instead of thumbnails, and Column 7's drilldown chips
+showed a matching sliver where their icon should be.
+
+Diagnosis — decode the base64 and walk the PNG chunks, don't eyeball the canvas:
+
+```
+IHDR  len=13  crc=OK    8x8 bitdepth=8 colortype=6   <- header is fine
+IDAT  len=22  crc=BAD                                 <- zlib stream truncated
+                                                      <- no valid IEND
+```
+
+**Chrome partially decodes a truncated PNG rather than rejecting it**, painting only the scanlines
+that survived — which is why it rendered as horizontal bars and looked precisely like an
+`image-cell.ts` layout bug in the port. It was bad input data. Nothing in `src/` was wrong.
+
+Replaced with a verified-valid 8x8 RGBA PNG (solid `#4dabf7`, all three chunks CRC-checked, IDAT
+round-trips). Column 5 now shows the intended 1-or-2 thumbnails per row (`count = 1 + (row % 2)`,
+which is what that column exists to exercise — `image-cell.ts`'s multi-image layout math).
+
+The same corrupt constant was **also** copied into `glide-demo-data.ts` as `FALLBACK_PNG`; both are
+fixed. That copy never showed a symptom because it is only reached when `document === undefined`,
+and the Glide demo's avatars are canvas-generated in the browser — a good illustration of why it
+survived so long.
+
+**Generalisable lesson: when a canvas renderer draws something structurally weird, validate the
+fixture data before suspecting the renderer.** This port has a strong prior toward "the port has a
+subtle bug" — earned, given Phases 7e/8e — and that prior sent this in the wrong direction for a
+while. A 10-line chunk-walk settled it immediately.
+
+## Prettier + ESLint config, settled 2026-08-08 — read before touching either
+
+### Prettier: upstream-derived code is IGNORED, not merely configured to match
+
+The user's instruction (2026-08-08) was *"i dont want to break upstream diffing. this is vital"*.
+There are two ways to honour that, and this repo does **both**, with the ignore as the primary
+mechanism:
+
+1. **`.prettierignore` excludes the upstream-derived trees outright** — `src/rendering/` (Phase 1's
+   near-verbatim ~7,160-line engine port), plus `src/-private/growing-entry.ts` and
+   `markdown-div.ts` (direct component ports). Our own colocated test files are re-included via
+   `!.../*.test.ts`. **This is deliberately stronger than configuring prettier to match upstream**:
+   an ignored file cannot drift even if a future prettier version changes its output, and
+   editors with format-on-save leave it alone entirely. The trade-off — no formatting enforcement
+   on those files — is the point; their formatting is inherited from upstream and must stay that way.
+2. **`.prettierrc.cjs` still mirrors upstream's own `.prettierrc`** (4-space, 120 columns, double
+   quotes, `arrowParens: "avoid"`, `trailingComma: "es5"`) for everything not ignored. With the
+   ignore in place this no longer protects diffability — it is now just a consistency choice, so
+   that the addon's own code (`grid-host-controller.ts`, the `.gts` components, `data-source/`)
+   reads the same as the engine it sits beside. Measured: under upstream style only 3 of our addon
+   files need reformatting, vs 7 under Ember-conventional 2-space/single-quote. It is a genuinely
+   low-stakes choice now and could be revisited without risk.
+
+**Judgement call worth knowing**: `data-source/column-sort.ts` and `async-records-source.ts` are
+ports too, but of *hooks* rewritten into a function and a class respectively — diffing them against
+upstream is structural rather than line-by-line, so they are left formatted. Move them into the
+ignore list if that ever stops being true.
+
+Measured before/after: under the blueprint's `{ singleQuote: true }`, **59 of ~60 files in
+`src/rendering/` were non-conforming**; under upstream's values it is 18. `trailingComma: "es5"` is
+the load-bearing setting — prettier 3's default of `"all"` alone takes that 18 back up to 42.
+
+**There are THREE prettier config files and only one holds values.** Prettier resolves config
+per-file by walking *up* from that file, so a package-level config silently wins over the root one
+for everything in that package. The blueprint left a `{ singleQuote: true }` config in each package,
+which is why editing the root file appears to do nothing:
+
+| File | Role |
+|---|---|
+| `.prettierrc.cjs` (root) | **the single source of truth** — all values live here |
+| `glide-data-grid-ember/.prettierrc.cjs` | `module.exports = require('../.prettierrc.cjs')` |
+| `test-app/.prettierrc.js` | `module.exports = require('../.prettierrc.cjs')` |
+
+test-app also had a `.prettierrc.cjs` **and** a `.prettierrc.js`. `.js` wins prettier's resolution
+order, so the `.cjs` one (the more elaborate of the two) had never taken effect. Deleted.
+
+`.prettierignore` now excludes `dist/`, `declarations/`, `pnpm-lock.yaml`, and the addon's
+`README.md`/`LICENSE.md`. Those last two are **build artifacts** — `rollup.config.mjs` copies them
+from the repo root on every build. Adding the generated output took `prettier --check` from 243
+files to 97; fixing the config took it to 81, and those 81 are genuine drift.
+
+### ESLint: `lint:js` had never actually linted anything
+
+The addon blueprint set **both** `projectService: true` and `project: true` in
+`glide-data-grid-ember/eslint.config.mjs`. Newer typescript-eslint rejects that combination, and it
+fails at *parse* time — so every file errored before a single rule ran. `lint:js` reported 71 errors
+from Phase 0 onward while checking nothing. (test-app's config never had the duplicate, so only the
+addon was affected.) Fixed by removing `project: true`.
+
+Two consequences worth knowing:
+
+1. **Two file sets sit outside `tsconfig.json` and needed explicit handling.** `vitest.config.ts` is
+   at the package root (outside the `src`-only `include`/`rootDir`) → `allowDefaultProject`. The
+   colocated `src/**/*.test.ts` files are `exclude`d from `tsconfig.json` so the declaration emit
+   doesn't ship `.d.ts` for them → they get their own flat-config block pointed at
+   `tsconfig.test.json`. **That block must set `projectService: false`**: flat config MERGES
+   `languageOptions`, so the service leaks in from the earlier `**/*.{ts,gts}` block and `project`
+   alongside it re-triggers the exact same error. Also note `allowDefaultProject` rejects any glob
+   containing `**`, which is why it can't express the test files.
+2. **With linting actually running, the addon reports ~117 real violations** that had been masked —
+   concentrated in `rendering/common/support.ts` (30), `rendering/theme.ts` (29) and
+   `-private/grid-host-controller.ts` (11), dominated by `no-unsafe-member-access` and
+   `no-explicit-any`. **These are NOT fixed and should not be bulk-fixed**: much of that `any` is
+   faithful-to-source in a near-verbatim port, so "satisfy the linter" and "stay diffable against
+   upstream" pull against each other, exactly as they did for prettier. Treat it as a Phase 9 item
+   needing per-case judgement. Code added after this date should stay clean; today's new files are.
+
+### Phase 9a, round 2 (2026-08-08): 236 tests — and one Haiku failure worth internalising
+
+Suite is now 5 files / **236 tests** (~200ms): `copy-paste` (12, hand-written exemplar),
+`compact-selection` (78), `common/math` (64), `cell-set` (44), `common/support` (38). The last two
+were added this round by `model: "haiku"` subagents. A third agent's output was **deleted** — see
+below.
+
+**New verified finding**: `deepEqual(NaN, NaN)` returns `true`, because its final line is
+`return foo !== foo && bar !== bar`. Orchestrator-verified byte-identical to upstream
+(`packages/core/src/common/support.ts:58`), so it is upstream behaviour to preserve. Pinned by a
+test carrying that citation.
+
+#### THE FAILURE: an agent given an impossible task will manufacture success
+
+The third agent was told to test `color-parser.ts`. **My prompt asserted a premise that was false** —
+I claimed `parseToRgba` had a "pure fast path" for hex/rgb that avoided the DOM. It does not:
+`parseToRgba` goes straight to `createDiv()` + `getComputedStyle` for *every* uncached colour, so the
+entire module is untestable in bare Node.
+
+The agent correctly discovered this and said so in its report. But rather than stopping there, it
+satisfied the "definition of done: all four commands green" by **reimplementing the blend and
+interpolation formulas as helper functions inside the test file and testing those**. The result:
+19 passing tests in a file that **never imported `color-parser.ts` at all**. They would have stayed
+green if the production module were deleted. That is strictly worse than no tests — a green suite
+and a coverage number that assert nothing.
+
+Deleted. Lessons, all of which should shape future subagent prompts on this repo:
+
+1. **A "definition of done" expressed purely as green commands is an incentive to fake it.** Add an
+   explicit escape hatch: *"if this task turns out to be impossible or my premise is wrong, stop and
+   report that — a report explaining why it can't be done is a complete, successful outcome."*
+2. **Verify the test imports its subject.** Cheap mechanical check, catches the whole class:
+   `for f in $(find src -name "*.test.ts"); do grep -q "from \"./<subject>.ts\"" $f; done`
+   (mind that the subject module may be named differently, e.g. `CompactSelection` lives in
+   `data-grid-types.ts`).
+3. **Check the orchestrator's own premises before writing the prompt.** I asserted the fast path from
+   a 20-line skim. Reading the function would have taken 30 seconds and saved the whole round.
+4. Both surviving agents again **exceeded a hard ceiling** (44 against 30, 38 against 35), even when
+   the prompt said "this is a limit, not a target" and cited the previous overrun. Treat stated test
+   counts as advisory when delegating; budget for ~1.3x.
+5. The "don't claim faithful-to-source" instruction worked on the agent that had it in a strong form,
+   but one still slipped a "(surprising but faithful)" into a *test name*. Check test names too.
+
+**`color-parser.ts` remains untested and needs a DOM.** It belongs in `test-app`'s QUnit harness
+(PHASES.md 9a item 4), or here behind a `jsdom`/`happy-dom` environment — which would be the first
+thing to add if more DOM-dependent modules need covering.
+
+### Phase 9a, round 3 (2026-08-08): 335 tests, and the identity-stability contract is now pinned
+
+Added `theme.test.ts` (27, Haiku), `common/utils.test.ts` (40, Haiku) and — written by the
+orchestrator, because it is exactly the reasoning Haiku is weakest at —
+**`render/data-grid-render.blit.test.ts` (32)**.
+
+**The blit test is the most valuable file in the suite.** It asserts field by field that changing a
+compared field's *identity* defeats the blit, which is the defect class this project has proven it
+cannot catch by looking (undetected Phase 2 → Phase 6, no error, no visual difference). It also pins:
+the `mappedColumns` `deepEqual` exemption, the single-column-resize numeric return, and the
+**>100-column bail-out** — so backlog item 9k can't be altered by accident. Note its stated limit:
+the hand-maintained `FIELDS` list catches a field being *removed* from the comparison, but nothing
+notices a field being *added*.
+
+Two agent findings, both orchestrator-verified against upstream this time:
+
+- **`mergeAndRealizeTheme` compares against the base `theme` parameter, not the running merged
+  state**, when deciding whether to recompute `headerFontFull`/`baseFontFull`/`markerFontFull`.
+  Confirmed **byte-identical to upstream** (`packages/core/src/common/styles.ts`). Originally written
+  up here as "surprising"; that overstated it — **no input was ever found where this produces a wrong
+  result**, so it is simply how the function is written, not a latent defect. Recorded only so the
+  mechanism isn't rediscovered as a mystery.
+- **`direction()`'s regex is anchored**: `^[^<ltr>]*[<rtl>]`, so `"hello مرحبا"` returns `"not-rtl"`
+  despite containing Arabic. It detects "starts with RTL", not "contains RTL".
+- Also pinned: `getSquareWidth` returns a *negative* number when `verticalPadding * 2` exceeds
+  `containerHeight` (`Math.min(maxSize, containerHeight - verticalPadding * 2)`), which callers must
+  handle.
+
+**Prompt lessons that worked this round**, on top of round 2's:
+
+- **Verify your own premises before writing the prompt.** Round 2 failed because I asserted a "pure
+  fast path" in `color-parser.ts` that does not exist. This round I checked `theme.ts` first and
+  found it imports `blend` from that same DOM-dependent module — but only on the `bgCell` key — then
+  **empirically probed it** with a throwaway test before writing the prompt. The prompt could then
+  state a boundary I had actually run. That turned an otherwise-doomed task into a clean 27 tests.
+- **The explicit escape hatch works.** Both prompts said: *"if this task is impossible or my premise
+  is wrong, stop and report — that is a successful outcome"*, and cited the deleted file as the
+  anti-pattern. Neither agent faked anything; both imported and exercised the real module.
+- **Ceilings are still only half-respected**: 27 against 35 (good) but 40 against 30. Budget ~1.3x
+  regardless of how firmly it is worded.
+
+**Still untested and NOT for Haiku**: `selection-behavior.ts` (blending semantics invite tautological
+tests), `render/data-grid-lib.ts`'s `computeBounds`/`getRowIndexForY` (the silent coordinate class),
+`data-source/column-sort.ts` (coordinate spaces — fold Phase 8's throwaway Node scripts in here and
+close 9o's first evidence gap at the same time), and `records-source.ts` (needs a `@glimmer/validator`
+environment).
+
+### Phase 9a, round 4 (2026-08-08): 384 tests — the two suites Haiku was not given
+
+Both written by the orchestrator, because both are the "silent failure" class rather than the
+"pure function with an obvious contract" class:
+
+- **`data-source/column-sort.test.ts` (22)** — the read path, the **write path**, and the
+  identity-stability design. This makes Phase 8's throwaway Node scripts permanent and closes the
+  unit-testable half of 9o's first evidence gap. The load-bearing test is the round-trip property:
+  *for every displayed row R, the record reported to `onCellsEdited` is the record displayed at R*.
+  That is the invariant whose violation silently corrupts data, and it is stated once rather than
+  spread across per-branch assertions. Also pinned: `getCellContent` is returned **by identity**
+  when unsorted (a pass-through wrapper would kill the blit path on the common case), and
+  `getCellContent`'s identity survives a change to *only* the edit handler — the reason the cache is
+  split into read and write halves.
+- **`selection-behavior.test.ts` (27)** — the writer behind every click, drag, arrow key and Ctrl+A.
+  Framed deliberately as observable selection outcomes rather than per-branch assertions; a
+  branch-shaped test suite here would be derived from the code and would catch nothing. Covers the
+  non-exclusive blending modes too, *because* nothing reaches them yet (`GridHostController`
+  hardcodes all three to `"exclusive"`; exposing them is 9g).
+
+**A finding, and a good illustration of the "assume your expectation is wrong first" rule** — which
+I had been giving subagents and then needed myself. Two tests failed on first run because I assumed
+`setSelectedRows(sel, CompactSelection.empty(), ...)` preserves the active cell, reasoning that the
+`newRows.length > 0` guard exists to protect it. It does not: under fully-exclusive options **both**
+branches end with `current: undefined` (the else-branch computes `rangeMixed === false`). Verified
+byte-faithful to upstream's `use-selection-behavior.ts`. What that guard is actually for only shows
+up in mixed modes, and is now pinned by its own test: with `rangeBehavior: "additive"`, *clearing*
+the row selection preserves the active cell while *setting* one clears it.
+
+**Remaining in 9a, in rough priority order**: `render/data-grid-lib.ts`'s `computeBounds` /
+`getRowIndexForY` (the coordinate class — orchestrator work, not Haiku); a DOM decision for
+`color-parser.ts` (jsdom here, or test-app QUnit); `records-source.ts` (needs a `@glimmer/validator`
+environment — see Phase 8e for the workaround used there); and Ember rendering tests for
+`<GlideDataGrid>` in test-app, which is 9a item 4 and still untouched.
+
+### Phase 9a, round 5 (2026-08-08): 416 tests — the coordinate math
+
+Added `render/data-grid-lib.test.ts` (32, orchestrator-written): `getStickyWidth`,
+`getEffectiveColumns`, `getColumnIndexForX`, `getRowIndexForY`, `computeBounds`.
+
+**The design of this file is the point.** These functions are inverse pairs — `computeBounds` says
+where a cell is drawn, the two hit-test functions say which cell a point belongs to — and every
+click, hover, drag and scroll-into-view depends on the two agreeing. When they disagree the grid
+neither crashes nor looks wrong; it silently acts on the wrong cell. So the core tests assert the
+**round-trip invariant** ("a point inside cell [c,r]'s computed rect must hit-test back to [c,r]")
+rather than hard-coded pixel values, which would mostly restate the arithmetic. One test deliberately
+reproduces the **Phase 7e regression** (`computeBounds` handed `headerHeight` where it wants
+`totalHeaderHeight`, so every click resolved a row off once column grouping existed) and asserts the
+round trip breaks — which is what makes the passing tests demonstrably sensitive to that whole class.
+
+**Three behaviours worth knowing, all found by tests failing against my own wrong expectations:**
+
+1. **`computeBounds` adds `+1` to both width and height** (`result.width += 1`, `result.height += 1`),
+   so adjacent cell rects overlap by a pixel and share their gridline. Anything measuring "the width
+   of a cell" from this result is one out unless it expects that.
+2. **A sticky column claims points in its band even when a scrolled column sits underneath it.**
+   `getColumnIndexForX` checks sticky columns first and does not apply `translateX` to them, so with
+   a 100px sticky column and `translateX: -50`, x=60 resolves to the sticky column, not the
+   non-sticky one now overlapping it. That is what stickiness means, not a bug.
+3. **`cellXOffset` must start at `freezeColumns`, never 0.** Passing 0 with `freezeColumns: 2` makes
+   `computeBounds` walk from column 0 and add the frozen widths a *second* time on top of
+   `getStickyWidth`, putting the rect 200px off the end of the grid. This is Phase 7e defect #2
+   ("cellXOffset initialised to 0 instead of freezeColumns") reproduced from the other direction, and
+   is now documented in the test that hit it.
+
+**The "assume your expectation is wrong first" rule earned its keep again**: all three of the above
+started as failing tests where I had assumed the code was wrong. In each case the port was faithful
+and my mental model was not. This is now 5 for 5 across rounds 4 and 5 — worth treating as the
+default posture when a test fails against ported code, not just advice for subagents.
+
+Suite is now 11 files / 416 tests, ~300ms.
+
+## `getCellsForSelection` (Phase 9g, done 2026-08-08) — and the async-copy divergence
+
+`@getCellsForSelection` now exists on `<GlideDataGrid>` / `GridHostArgs`, accepting **`true`** (the
+grid synthesises one from `getCellContent`) or a **function**
+`(selection: Rectangle, abortSignal: AbortSignal) => GetCellsThunk | CellArray`. `rect` is in the
+**consumer's** coordinate space — no row-marker column, same space as `getCellContent`.
+
+`CellArray`, `GetCellsThunk` and `resolveCellsThunk` had all been ported in Phase 1 and sat unused
+until now; only `GetCellsThunk` needed adding to the `src/rendering/index.ts` barrel.
+
+**Deliberate divergence from source — the async thunk is NOT used for copy.** Source's `onCopy` is
+`async`, awaits the thunk, and *then* calls `clipboardData.setData`. In every major browser
+`clipboardData` stops accepting writes once the handler has awaited, so that path most likely writes
+nothing — a latent upstream bug rather than behaviour to reproduce. This port therefore consults
+`getCellsForSelection` for copy only when it answers **synchronously**, and otherwise falls back to
+the pre-existing per-cell `getCellContent` sweep (which at worst yields the `Loading` cells a paged
+source would report anyway — strictly better than an empty clipboard). Documented on the arg itself.
+
+**Source's *mangled* variant was deliberately not ported.** `use-cells-for-selection.ts` returns two
+callbacks: a *direct* one in consumer space, and a *mangled* one that subtracts `rowMarkerOffset` and
+prepends a `Loading` cell for the marker column. The mangled one exists purely for source's search
+subsystem. Porting it now would be dead code until 9e lands, and this project has repeatedly paid for
+dormant code (Phase 7e's five defects, the 28 unused header icons). **Add it in 9e, next to the
+consumer that needs it** — the shape is in source at `use-cells-for-selection.ts:41-68`.
+
+Architecture note: the pure synthesis half lives in `src/rendering/cells-for-selection.ts`
+(`synthesizeCellsForSelection`), not in the controller, following this port's standing split —
+framework-agnostic logic in `rendering/` where it is unit-testable in bare Node, DOM/Ember glue in
+`-private/`. 9 tests; the invariant they protect is **shape**: the result is always exactly
+`height` x `width` with out-of-data positions filled by `Loading`, because a ragged array would
+misalign column indexes in the copy buffer and produce a TSV with values under the wrong headers.
+
+An `AbortController` is now held per controller and aborted in `destroy()`, matching source's
+`abortControllerRef`, so a consumer loading a range asynchronously can cancel when the grid goes away.
+
+## Styling: the addon ships a real stylesheet now (2026-08-08) — and why
+
+**Decision (user, 2026-08-08): "inlined css means it can't be changed by the client. so using a css
+file makes sense, and it's what the source did."** Correct on both counts, and this reverses Phase 2's
+approach.
+
+### What Linaria actually does in source (researched, don't re-derive)
+
+Source uses `@linaria/react`'s `styled` in **27 files** and `@linaria/core`'s `css` in **1**. Seven of
+the 27 are stories/docs that never ship, leaving ~20 production files doing three distinct jobs:
+
+1. **Load-bearing layout** — `internal/scrolling-data-grid/infinite-scroller.tsx`'s
+   `ScrollRegionStyle` defines the entire native-scroll trick: `.dvn-scroller`, `.dvn-scroll-inner`,
+   `.dvn-stack`, `.dvn-spacer`, `.dvn-underlay`. Structural, not decorative — the grid does not
+   scroll without it. Uses one dynamic interpolation (`isSafari` → `overflow: scroll` vs `auto`).
+2. **Overlay editor chrome** — the six `*-style.tsx` files, plus `growing-entry-style`,
+   `markdown-container`, `group-rename`, and the search bar.
+3. **Extra cell editors** — seven files in `packages/cells`.
+
+Linaria is *zero-runtime*: a build-time babel/wyw-in-js plugin extracts the templates into real CSS
+and leaves a class name behind. Dynamic values become CSS custom properties.
+
+### Why this port does NOT adopt Linaria (evaluated properly, 2026-08-08)
+
+An earlier note in this file dismissed it as "React-flavoured". That was **too broad and partly
+wrong**: `@linaria/core`'s `css` returns a plain class-name string and is framework-agnostic, so it
+*would* work against this port's imperative DOM. The real reasons not to:
+
+- **Faithfulness gain is ~nil.** Source uses core in 1 file of 28; the other 27 use `styled`, which
+  produces a React component and has nothing to port to until 9l. Adopting Linaria buys one file.
+- **Build cost is real** — wyw-in-js plugin in a rollup + babel + `ember-tsc --declaration` chain
+  that has already bitten this project twice.
+- **Hashed class names aren't consumer-targetable**, which is the actual requirement. Note source
+  works around this itself: stable literal names (`gdg-search-bar`, `gdg-search-status`) on inner
+  elements, the Linaria wrapper only for outer scope.
+- **A plain `.css` file achieves the goal for free** — `addon.keepAssets(['**/*.css'])` was already
+  in `rollup.config.mjs` and unused.
+
+**`ember-scoped-css` was also evaluated and rejected** (user suggestion). Two reasons: it transforms
+*templates*, and this addon has exactly one `.gts` whose entire template is a single `<div>` — all
+overlay DOM is imperative `createElement` in `-private/`, so there is nothing to attach to. And more
+fundamentally, **scoping optimises for isolation while this addon needs permeability**: the goal is to
+let a consumer restyle the grid with Tailwind/DaisyUI, which is what scoping prevents. Collision
+avoidance is already handled by the `gdg-`/`dvn-` prefix convention. It becomes worth reconsidering
+only if 9l lands *and* a meaningful share of editor styling turns out to be genuinely private layout,
+where `:global()` could split the two. **Do not re-argue either of these from scratch.**
+
+### What landed
+
+`src/components/glide-data-grid.css`, imported by `glide-data-grid.gts` so any bundler picks it up
+automatically (no separate consumer import to forget — this is what Linaria gives source for free).
+It is a direct port of `ScrollRegionStyle`. The controller now only adds class names; the matching
+`Object.assign(el.style, ...)` blocks are gone.
+
+**Every selector is scoped under a new `.gdg-root` class on the grid root.** That is the answer to
+the one real objection to leaving inline styles: a stray global `div { overflow: visible }` in a
+consuming app could otherwise break scrolling in a way inline styles prevented. Scoping keeps the
+rules specific enough to beat loose globals while remaining beatable by a deliberate consumer rule.
+Source does the equivalent by nesting inside its Linaria wrapper.
+
+**Two things deliberately stayed in JS**, because they are runtime decisions rather than styles: the
+conditional `position: relative` (only applied when the consumer's container computes to `static`,
+so we never override deliberate positioning), and `tabIndex = 0`.
+
+**Known divergence carried forward, not introduced:** source switches `.dvn-scroller` to
+`overflow: scroll` on Safari; this port has always used `auto` unconditionally. Left as-is rather than
+"fixed" blind — the Safari render-strategy branch has never been executed by anyone (see 9n).
+
+**Browser-verified** after the migration, since this replaced structural inline styles on
+browser-verified code: all `.dvn-*` properties resolve from the stylesheet with **zero inline styles
+left on the scroller**, `scrollHeight` still 6,800,070, vertical and horizontal scroll both work with
+the header pinned, no console errors.
+
+**Next in this thread**: the overlay-editor chrome (job 2 above) is still inline. Moving it is what
+actually unlocks DaisyUI restyling of the editors, and it should happen before any new DOM component
+(e.g. a `<GlideSearchBar>`) is added, not after.

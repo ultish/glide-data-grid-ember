@@ -1,0 +1,76 @@
+/*
+ * Structural stylesheet for <GlideDataGrid>.
+ *
+ * Ported from source's `internal/scrolling-data-grid/infinite-scroller.tsx`, whose
+ * `ScrollRegionStyle` is a `@linaria/react` styled block defining exactly these `.dvn-*` rules.
+ * This port does not use Linaria (see PORTING-NOTES.md), so the same CSS ships as a plain file.
+ *
+ * WHY A STYLESHEET RATHER THAN INLINE STYLES. Phase 2 assigned all of this imperatively
+ * (`el.style.overflow = "auto"`). That works, but inline styles sit at the top of the cascade, so a
+ * consuming app cannot restyle any of it without `!important` -- which makes the grid's DOM
+ * effectively un-themeable by Tailwind/DaisyUI or any ordinary stylesheet. Source ships CSS for a
+ * reason; this restores that.
+ *
+ * WHY EVERYTHING IS SCOPED UNDER `.gdg-root`. The trade-off of leaving inline styles behind is that
+ * a stray global rule in the consuming app (`div { overflow: visible }`) could now break scrolling in
+ * a way it previously could not. Scoping every selector under the grid's own root class keeps this
+ * CSS specific enough to win against loose global rules, while staying beatable by an intentional,
+ * equally-specific consumer rule. Source does the equivalent by nesting everything inside its
+ * Linaria wrapper class.
+ *
+ * This file is imported by `glide-data-grid.gts`, so any bundler pulls it in automatically -- a
+ * consumer never has to remember a separate CSS import. `rollup.config.mjs`'s
+ * `addon.keepAssets(['**\/*.css'])` preserves that import through the addon build.
+ */
+
+.gdg-root {
+    overflow: hidden;
+    /* The engine draws its own focus indication (the selection ring), so the browser's default
+       focus outline is suppressed. `tabIndex` is still set in JS -- that is behaviour, not style. */
+    outline: none;
+}
+
+/* The canvases live here, outside the scrolling element, and never physically move -- the header is
+   simply repainted every frame. No `position: sticky` is involved anywhere in this grid. */
+.gdg-root .dvn-underlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.gdg-root .dvn-underlay > canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    outline: none;
+}
+
+/* The real scroll surface. `translate3d` promotes it to its own layer, which is what keeps
+   scrolling smooth while the canvas repaints beneath it. */
+.gdg-root .dvn-scroller {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    transform: translate3d(0, 0, 0);
+}
+
+/* Invisible padder structure whose only job is to give the scroller something of the right total
+   size to scroll over. `pointer-events: none` lets clicks fall through to the grid's own handlers. */
+.gdg-root .dvn-scroll-inner {
+    display: flex;
+    pointer-events: none;
+}
+
+.gdg-root .dvn-scroll-inner > * {
+    flex-shrink: 0;
+}
+
+.gdg-root .dvn-stack {
+    display: flex;
+    flex-direction: column;
+}
+
+/* The classic flex trick that gives the scroller its horizontal extent. */
+.gdg-root .dvn-spacer {
+    flex-grow: 1;
+}
