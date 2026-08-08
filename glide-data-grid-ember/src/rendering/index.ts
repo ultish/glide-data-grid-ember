@@ -122,6 +122,22 @@ export type {
 export { getCopyBufferContents, decodeHTML, unquote } from "./copy-paste.ts";
 export type { CellBuffer, StringArrayCellBuffer, BasicCellBuffer, CopyBuffer } from "./copy-paste.ts";
 
+// Search (Phase 9e) -- the engine only. `<GlideDataGrid>` drives all of this internally when a
+// consumer sets `@showSearch`; these exports exist so a consumer can build their own search UI
+// instead of using the opt-in `<GlideSearchBar>`, or reuse the matching rules elsewhere.
+export {
+    IncrementalSearch,
+    getSearchTestString,
+    makeSearchRegex,
+    searchCellChunk,
+    nextSearchStride,
+    formatSearchStatus,
+    TARGET_SEARCH_TIME_MS,
+    MAX_SEARCH_RESULTS,
+    INITIAL_SEARCH_STRIDE,
+} from "./search.ts";
+export type { SearchStatus, IncrementalSearchOptions } from "./search.ts";
+
 // Supporting engine pieces
 export { CellSet } from "./cell-set.ts";
 export { AnimationManager } from "./animation-manager.ts";
