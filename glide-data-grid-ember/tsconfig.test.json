@@ -1,0 +1,23 @@
+/**
+  Phase 9a. Type-checks the colocated vitest files that `tsconfig.json` deliberately excludes.
+  Vitest itself strips types without checking them (esbuild), so without this the test suite would
+  be the one unchecked corner of the addon -- which is a poor look for the suite whose job is
+  catching regressions.
+
+  `noEmit` because this project exists purely to check; `tsconfig.json` owns the declaration emit.
+*/
+{
+    "extends": "./tsconfig.json",
+    "include": ["src/**/*", "unpublished-development-types/**/*"],
+    "exclude": [],
+    "compilerOptions": {
+        "noEmit": true,
+        // `@ember/library-tsconfig` sets `emitDeclarationOnly`/`declarationDir` for the addon's real
+        // declaration build; both are errors alongside `noEmit`, so they are unset here.
+        "emitDeclarationOnly": false,
+        "declaration": false,
+        "declarationMap": false,
+        "declarationDir": null,
+        "types": ["ember-source/types"]
+    }
+}

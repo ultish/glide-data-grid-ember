@@ -1,9 +1,17 @@
 {
   "extends": "@ember/library-tsconfig",
   "include": ["src/**/*", "unpublished-development-types/**/*"],
-  "glint": {
-    "environment": ["ember-loose", "ember-template-imports"]
-  },
+  /**
+    Phase 9a: colocated vitest files are excluded from THIS project so that
+    `addon.declarations('declarations')` doesn't emit `.d.ts` files for them into the published
+    package (`package.json#files` ships `declarations`). They are still fully type-checked -- see
+    `tsconfig.test.json` and the `lint:types:test` script, which cover exactly the files this
+    excludes. Keep the three patterns in sync: here, `tsconfig.test.json`, `vitest.config.ts`, and
+    `rollup.config.mjs`'s `publicEntrypoints` exclude.
+  */
+  "exclude": ["src/**/*.test.ts"],
+  /* Glint v2 needs no `"glint": { "environment": [...] }` block -- environments were a v1 concept
+     and the key is removed as part of the v2 upgrade. See PORTING-NOTES.md's Glint v2 section. */
   "compilerOptions": {
     "allowJs": true,
     "declarationDir": "declarations",

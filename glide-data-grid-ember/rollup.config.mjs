@@ -20,7 +20,18 @@ export default {
     // up your addon's public API. Also make sure your package.json#exports
     // is aligned to the config here.
     // See https://github.com/embroider-build/embroider/blob/main/docs/v2-faq.md#how-can-i-define-the-public-exports-of-my-addon
-    addon.publicEntrypoints(['**/*.js', 'index.js', 'template-registry.js']),
+    // Phase 9a: the `exclude` option keeps colocated vitest files (`src/**/*.test.ts`) out of the
+    // published package. Without it the broad `**/*.js` glob below picks them up and ships every
+    // test to consumers in `dist/` -- and the build fails outright, since `vitest` is a
+    // devDependency and `addon.dependencies()` rejects imports of it.
+    //
+    // NOTE: a negation pattern in the `patterns` array (`'!**/*.test.js'`) does NOT work -- these
+    // are walk-sync globs, and the `!` entry is treated as an entry module, failing with
+    // `Could not resolve entry module "src/-private/"`. Use `exclude`, which maps to walk-sync's
+    // `ignore`. If you move or rename the test pattern, change `vitest.config.ts` to match.
+    addon.publicEntrypoints(['**/*.js', 'index.js', 'template-registry.js'], {
+      exclude: ['**/*.test.ts'],
+    }),
 
     // These are the modules that should get reexported into the traditional
     // "app" tree. Things in here should also be in publicEntrypoints above, but
