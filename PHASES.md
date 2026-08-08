@@ -81,7 +81,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 5 | Extra cell types incl. sparklines | **Done, browser-verified, committed** (5a sparkline/star/range/spinner + the `createCombinedCellRenderer` combinator; 5b tags/dropdown/multi-select/links; 5c date-picker/button/tree-view/user-profile/article, incl. a shared `pasteValueIntoCell` fix so paste dispatches to `CustomRenderer.onPaste` for all 13 extra cells — see PORTING-NOTES.md for full per-cell detail) |
 | 6 | Theming system | **Done, browser-verified, committed** — `getDataEditorDarkTheme()`, `makeCSSStyle`/`--gdg-*` on the grid root + overlay containers, `@getRowThemeOverride` plumbed end to end, per-column/per-cell overrides verified, a real overlay-editor theme-merge bugfix, `glide-data-grid-ember/THEMING.md` + README section, and demo wiring (light/dark toggle + zebra rows + a themed column/cell). Also fixed a **major pre-existing perf defect found along the way**: three `DrawGridArg` fields were allocated fresh every draw, so `computeCanBlit`'s identity checks always failed and the scroll blit fast path had never engaged — see PORTING-NOTES.md's Phase 6 section, it applies to every future phase touching `DrawGridArg`. |
 | 7 | Demo app matching glideapps.com + browser verification | **Done, browser-verified, committed** (7a column-sort decorator `src/data-source/withColumnSort`; 7b column group headers enabled; 7c the demo-grid replica + consumer-built sort menu; 7e five addon defects the demo surfaced — see below) |
-| 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path; 8b `recordsSource`; 8c `AsyncRecordsSource` + `onVisibleRegionChanged`; 8d the 1,000-row incremental proof + `object-scan` example; 8e streaming `updateCells()` demo; plus two real addon defects — see below) |
+| 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path + 8b `recordsSource`; 8c the streaming `updateCells()` demo; 8d the 1,000-row incremental proof + `object-scan` example; 8e `onVisibleRegionChanged` + `AsyncRecordsSource` + two real addon defects + the verification pass. **Those letters match `PORTING-NOTES.md`'s section headers** — go there for the implementation record) |
 | 9 | Backlog — deferred features (**not auto-scheduled**, see detail below) | Not scheduled |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
@@ -421,6 +421,23 @@ friendly value (true of the live site too).
   this addon exposes a public "bring your own cell type" API, where forcing consumers to hand-write
   DOM would be a real DX regression vs. source's `provideEditor: () => <Component />` pattern. Not
   worth the `owner`-threading migration for the cells already built on the current contract.
+
+*Left unverified by Phase 8 (added at its close-out — these are gaps in the evidence, not known
+breakage; each is cheap to close if it ever matters):*
+- **`withColumnSort`'s write path has never been driven in a browser.** The composed read+write
+  behaviour is proven by Node suites against the built `dist/` (including "an edit to displayed row 0
+  of a sorted grid lands on the right record"), and the Glide demo consumes the wired handler — but
+  nobody has typed into a sorted cell and watched where it landed. This is the one Phase 8 API whose
+  whole point is preventing silent data corruption, so it deserves the click.
+- **Damage *row* correctness was never isolated.** Phase 8c proved the column axis precisely (canvas
+  hashed per device-pixel column), but every row was updating constantly, so nothing distinguishes
+  "row R repainted because it was damaged" from "because everything was". The column axis was the one
+  actually broken, so this is a completeness gap rather than a suspicion.
+- **The blit path was not measured under streaming load**, only under ordinary scrolling of a
+  `recordsSource` grid. Phase 6's `computeCanBlit` field-diff technique (see PORTING-NOTES.md's
+  Phase 8e section for the exact recipe) would settle it.
+- **All Phase 8 numbers come from one machine** (macOS, 120 Hz, dpr 2). They are not a cross-browser
+  or cross-platform claim.
 
 Known-and-already-scheduled (restated here only so this list is a complete picture, not because
 they're forgotten): theming consumer API (Phase 6), the actual grid.glideapps.com demo replication

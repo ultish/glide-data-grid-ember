@@ -2793,7 +2793,15 @@ impossible. (Consistent with the wider pattern already recorded in this file: tr
 input works where synthetic dispatch silently doesn't -- same as `.focus()` not firing `focus`, and
 the `hover` action not firing `mousemove`.)
 
-## Phase 8a/8b — decorator write path + `recordsSource` (COMPLETE, 2026-08-08; NOT browser-tested)
+## Phase 8a/8b — decorator write path + `recordsSource` (COMPLETE, 2026-08-08)
+
+> **Status correction, added at Phase 8 close-out** (this section was written before the browser
+> passes existed and originally said "NOT browser-tested"): `recordsSource` **is** now browser-proved
+> — see the Phase 8d section for the 1,000-row measurement, and Phase 8e for the blit re-measurement
+> through it. What remains unit-only is `withColumnSort`'s **write path** on a sorted grid: the
+> composed read+write behaviour is covered by Node suites against the built `dist/`, but nobody has
+> yet driven an edit through the sorted Glide demo in a browser and confirmed it lands on the right
+> record. Listed in Phase 9's backlog.
 
 Two deliverables in one change: `withColumnSort` gained the write path agreed with the user (PHASES.md's
 "Phase 8 -- START HERE" REQUIRED item), and the sync in-memory `recordsSource` landed alongside it. The
