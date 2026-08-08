@@ -146,12 +146,33 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
 
     let firstInput: HTMLInputElement | undefined;
 
+    // The editor's working copy of the cell.
+    //
+    // **This must NOT read back through `p.value`.** `p.value` is the cell as it was when the
+    // editor opened, and it is never reassigned: the overlay host builds the editor-props object
+    // once and `onChange` only writes its own `state.currentCell` (see `openOverlay` in
+    // `grid-host-controller.ts`). So a `render()` that re-read `p.value.data.links` redrew from the
+    // *pre-edit* list -- adding a link made the new row appear and then vanish on the next add or
+    // delete, and a second add discarded the first. Per-keystroke title/URL edits happened to be
+    // unaffected only because they never call `render()`.
+    //
+    // Any stateful editor that re-renders itself needs this same working copy.
+    let currentValue: LinksCell = p.value;
+
     function currentLinks(): readonly LinksCellLink[] {
-        return p.value.data.links;
+        return currentValue.data.links;
+    }
+
+    /** Records the new links on the working copy and notifies the host. Deliberately does not
+     *  re-render: the per-keystroke input handlers must not, since rebuilding the rows would
+     *  destroy the focused input mid-edit. Callers that need a redraw use `setLinks`. */
+    function commitLinks(newLinks: readonly LinksCellLink[]): void {
+        currentValue = { ...currentValue, data: { ...currentValue.data, links: newLinks } };
+        p.onChange(currentValue);
     }
 
     function setLinks(newLinks: readonly LinksCellLink[]): void {
-        p.onChange({ ...p.value, data: { ...p.value.data, links: newLinks } });
+        commitLinks(newLinks);
         render();
     }
 
@@ -175,7 +196,7 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
             titleInput.addEventListener("input", () => {
                 const next = [...currentLinks()];
                 next[i] = { ...next[i]!, title: titleInput.value };
-                p.onChange({ ...p.value, data: { ...p.value.data, links: next } });
+                commitLinks(next);
             });
 
             const linkInput = document.createElement("input");
@@ -186,7 +207,7 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
             linkInput.addEventListener("input", () => {
                 const next = [...currentLinks()];
                 next[i] = { ...next[i]!, href: linkInput.value };
-                p.onChange({ ...p.value, data: { ...p.value.data, links: next } });
+                commitLinks(next);
             });
 
             row.append(titleInput, linkInput);

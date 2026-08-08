@@ -84,10 +84,10 @@ export default class DemoSwitcher extends Component {
   <template>
     <div style="display: flex; flex-direction: column; height: 100%; gap: 8px;">
       {{! Natural (fractional) height, deliberately. A row of 13px system-ui buttons measures
-                21.5px here, which leaves every grid below it on a fractional height -- the exact
-                case that used to blank the canvas on damage-only repaints, fixed in Phase 8 (see
-                `data-grid-render.ts`'s backing-size comment). Keeping it fractional means the demos
-                keep exercising that path instead of tiptoeing around it. }}
+    21.5px here, which leaves every grid below it on a fractional height -- the exact
+    case that used to blank the canvas on damage-only repaints, fixed in Phase 8 (see
+    `data-grid-render.ts`'s backing-size comment). Keeping it fractional means the demos
+    keep exercising that path instead of tiptoeing around it. }}
       <div
         style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; font: 13px system-ui;"
       >

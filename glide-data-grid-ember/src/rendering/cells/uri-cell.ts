@@ -146,6 +146,13 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
     const container = document.createElement("div");
     container.className = "gdg-uri-editor";
 
+    // Working copy, for the same reason `links-cell.ts` needs one: `p.value` is the cell as it was
+    // when the editor opened and is never reassigned, so anything that re-renders from it shows
+    // pre-edit data. Today `renderPreview()` is only reachable before any edit (the pencil goes
+    // preview -> edit and nothing goes back), so this is hardening rather than a live fix -- but it
+    // is the exact shape that was a real, data-losing bug in `links-cell`.
+    let currentValue: UriCell = p.value;
+
     let growingEntry: GrowingEntry | undefined;
     let focusTarget: HTMLElement | undefined;
 
@@ -160,10 +167,10 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
 
         const link = document.createElement("a");
         link.className = "gdg-link-area";
-        link.href = p.value.data;
+        link.href = currentValue.data;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
-        link.textContent = p.value.displayData ?? p.value.data;
+        link.textContent = currentValue.displayData ?? currentValue.data;
         container.appendChild(link);
 
         if (!readonly) {
@@ -194,7 +201,7 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
     function renderEdit(): void {
         clear();
         growingEntry = new GrowingEntry({
-            value: p.value.data,
+            value: currentValue.data,
             theme: p.theme,
             // Matches source's `<GrowingEntry highlight={true} .../>` -- always select-all when
             // entering edit mode, regardless of `p.isHighlighted` (this is the URI text itself, not
@@ -210,12 +217,15 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
             // Confirmed as a real, reproducible bug via browser testing (same class as Phase 4a's
             // text-cell `displayData`-staleness fix, documented in PORTING-NOTES.md) -- fixed here
             // by keeping both fields in sync on every keystroke, not just replicating source.
-            onChange: value => p.onChange({ ...p.value, data: value, displayData: value }),
+            onChange: value => {
+                currentValue = { ...currentValue, data: value, displayData: value };
+                p.onChange(currentValue);
+            },
         });
         container.appendChild(growingEntry.element);
     }
 
-    if (!readonly && p.value.data === "") {
+    if (!readonly && currentValue.data === "") {
         renderEdit();
     } else {
         renderPreview();

@@ -643,6 +643,8 @@ interface OverlayState {
     /** Set once `finish()` has run, to make it idempotent against being called twice (e.g. both
      * the editor's own Enter keydown AND a subsequent click-outside on the same tick). */
     finished: boolean;
+    /** Tears down the stay-on-screen observer/animation frame. Assigned in `openOverlay`. */
+    stopStayOnScreen?: () => void;
 }
 
 function computeYOffset(
@@ -1302,6 +1304,7 @@ export class GridHostController {
 
         if (this.overlayState !== undefined) {
             window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
+            this.overlayState.stopStayOnScreen?.();
             this.overlayState.handle.destroy();
             this.overlayState.container.remove();
             this.overlayState = undefined;
@@ -2667,6 +2670,9 @@ export class GridHostController {
 
         container.appendChild(handle.element);
         this.root.appendChild(container);
+        // Must run after insertion -- an unattached element has no meaningful bounding rect and
+        // `IntersectionObserver` would never fire for it.
+        state.stopStayOnScreen = this.setupStayOnScreen(container);
 
         // Deferred, not called synchronously here (Phase 4a bug found via browser testing): this
         // whole method runs inside a native `mousedown` handler, and the activating click's
@@ -2695,6 +2701,58 @@ export class GridHostController {
         }, 0);
     }
 
+    /**
+     * Keeps an open overlay editor from being clipped by the right edge of the window, by nudging
+     * it left with a `translateX`.
+     *
+     * Port of source's `internal/data-grid-overlay-editor/use-stay-on-screen.ts`. Before this,
+     * opening an editor on a cell near the right edge simply cut it off -- a latent, user-visible
+     * defect that nothing had hit because every demo opens editors mid-grid. There was no
+     * `IntersectionObserver` anywhere in this addon.
+     *
+     * The observer (threshold 1, i.e. "fully visible or not") is what starts the correction; the
+     * rAF loop is what performs it, and re-runs because the editor can *grow* while open --
+     * `GrowingEntry` gets taller and wider as you type, and a one-shot measurement would go stale.
+     *
+     * **Deliberate divergence from source**: source's loop never stops -- it re-queues a frame for
+     * as long as the editor is open, even once the offset has converged. Here it stops as soon as
+     * the correction is under half a pixel, and the observer restarts it if the editor is clipped
+     * again. Same result, without burning a frame per tick for the lifetime of every editor.
+     */
+    private setupStayOnScreen(container: HTMLDivElement): () => void {
+        if (typeof IntersectionObserver === "undefined") return () => undefined;
+
+        let offset = 0;
+        let rafHandle: number | undefined;
+
+        const step = (): void => {
+            rafHandle = undefined;
+            const { right } = container.getBoundingClientRect();
+            // Never push the editor *right* past its anchor cell: source clamps at 0 too, so a
+            // narrow editor already on screen is left exactly where the cell rect put it.
+            const next = Math.min(offset + window.innerWidth - right - 10, 0);
+            if (Math.abs(next - offset) < 0.5) return;
+            offset = next;
+            container.style.transform = `translateX(${offset}px)`;
+            rafHandle = requestAnimationFrame(step);
+        };
+
+        const observer = new IntersectionObserver(
+            entries => {
+                const entry = entries[entries.length - 1];
+                if (entry === undefined || entry.isIntersecting) return;
+                if (rafHandle === undefined) rafHandle = requestAnimationFrame(step);
+            },
+            { threshold: 1 }
+        );
+        observer.observe(container);
+
+        return () => {
+            observer.disconnect();
+            if (rafHandle !== undefined) cancelAnimationFrame(rafHandle);
+        };
+    }
+
     private readonly onOverlayOutsideClick = (ev: MouseEvent): void => {
         const state = this.overlayState;
         if (state === undefined) return;
@@ -2718,6 +2776,7 @@ export class GridHostController {
         this.overlayState = undefined;
 
         window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
+        state.stopStayOnScreen?.();
         state.handle.destroy();
         state.container.remove();
 
