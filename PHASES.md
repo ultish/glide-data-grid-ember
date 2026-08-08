@@ -664,6 +664,15 @@ only by nobody having needed them. Each is small on its own — the value is in 
 - **Assorted nav variants** — Tab/Shift+Tab aliasing, alt+Arrow "free move", primary+shift
   jump-to-edge selection, row/column space-bar select shortcuts. Each `S`, all in one place
   (`onKeyDown`).
+- **`links-cell`'s editor re-reads the original link list** *(NEW — found 2026-08-08 during the 9q
+  CSS migration, deliberately not fixed there since it is orthogonal to styling)*. `currentLinks()`
+  reads `p.value.data.links`, but `p.value` is the *original* cell object: `openOverlay` builds the
+  editor-props literal once and `onChange` only ever writes `state.currentCell`. So the
+  `setLinks()` → `onChange()` → `render()` cycle re-reads the pre-edit list — adding a link makes the
+  new row appear and then vanish on the next add/delete, and a second add discards the first.
+  Per-keystroke title/URL edits are unaffected (they never call `render()`). The fix is for the editor
+  to hold its own working copy, as the other stateful editors do. Worth checking whether any *other*
+  `provideEditor` re-reads `p.value` after an `onChange` — this may not be the only one. `S`.
 - **Overlay editors can be clipped at the viewport edge** *(NEW — 2026-08-08 audit; this one is a
   latent user-visible defect, not just a missing feature)*. Source has
   `internal/data-grid-overlay-editor/use-stay-on-screen.ts` (61 lines): an `IntersectionObserver` that
@@ -813,7 +822,22 @@ normally fragile — but see the CI note above before assuming that stays true.
 *row* isolation, and blit-under-streaming — plus real clipboard interaction, which the Chrome MCP
 tool has repeatedly made awkward (see PORTING-NOTES.md's browser-testing gotchas).
 
-### 9q — Ship CSS for the overlay editors **(NEW 2026-08-08; first half already done)**
+### 9q — Ship CSS for the overlay editors **(DONE 2026-08-08, browser-verified)**
+
+> **Both halves have landed.** The addon now ships three stylesheets, all imported by
+> `glide-data-grid.gts` so a consumer never has a CSS import to forget:
+> `glide-data-grid.css` (structural `.dvn-*` scroll scaffolding),
+> `glide-data-grid-editors.css` (overlay container, `GrowingEntry`, markdown div, edit icons, the
+> core editors, plus the shared `.gdg-editor-input` / `.gdg-editor-button` / `.gdg-focus-decoy`
+> primitives) and `glide-data-grid-extra-cell-editors.css` (the seven `packages/cells` editors).
+> **The sequencing constraint below is therefore satisfied — a `<GlideSearchBar>` can now be added.**
+>
+> Everything below is kept as the original brief. The implementation record — including the one
+> mechanic that made it possible (the overlay container already stamps the merged per-cell theme as
+> `--gdg-*`, so theme values live in CSS, not JS), what deliberately stayed inline, and the ten-editor
+> browser pass — is in PORTING-NOTES.md's styling section.
+
+
 
 The addon shipped **zero CSS** until 2026-08-08 — everything was inline `el.style.x = ...`, which a
 consuming app cannot restyle without `!important`. Source ships CSS (via Linaria) precisely so it can
@@ -874,17 +898,21 @@ rather than rounded up to "verified".
 
 ## THE QUEUE — start here (accurate as of 2026-08-08, end of session)
 
-**Done this session** (branch `phase-9-partial`, 6 commits): the four draw-hook passthroughs and
+**Done this session** (branch `phase-9-partial`, 7 commits): the four draw-hook passthroughs and
 `@extraCells` (9g/9l), the vitest harness + 425 tests (9a, ongoing), Glint v2, prettier/eslint config
-repair, `getCellsForSelection` (9g), and the structural-CSS migration (9q, first half).
+repair, `getCellsForSelection` (9g), and **all of 9q** — the structural-CSS migration *and* the
+overlay-editor chrome, so the addon's DOM is now fully restylable from a consuming app.
 
 **Next, in agreed order:**
 
-1. **9q second half — overlay-editor CSS.** Sequencing constraint, not a preference: it must land
-   **before** any new DOM component (i.e. before a `<GlideSearchBar>`), or we ship another
-   un-restylable component and migrate it twice.
-2. **9e — search.** Unblocked. **Settle the OPEN DECISION in 9e first** (does the addon ship the UI?).
-   Result highlighting can reuse the `@highlightRegions` arg landed this session.
+1. ~~**9q second half — overlay-editor CSS.**~~ **DONE 2026-08-08, browser-verified.** Its sequencing
+   constraint is discharged: a `<GlideSearchBar>` can now be added without shipping an
+   un-restylable component and migrating it twice.
+2. **9e — search.** Unblocked, and now unblocked on the styling side too. **Settle the OPEN DECISION
+   in 9e first** (does the addon ship the UI?). Result highlighting can reuse the `@highlightRegions`
+   arg landed this session. If a `<GlideSearchBar>` is shipped, style it in a fourth stylesheet
+   following the same conventions — `.gdg-root`-scoped, `var(--gdg-*)` for theme values, and the
+   shared `.gdg-editor-input`/`.gdg-editor-button` primitives where they fit.
 3. **DaisyUI/Tailwind theming.** Blocker is known and verified: Chrome returns `oklch()` unconverted
    from `getComputedStyle`, and `parseToRgba` mangles it to garbage — DaisyUI 5 is OKLCH. Must also
    handle **runtime theme switching** (user switches DaisyUI themes live), which means a

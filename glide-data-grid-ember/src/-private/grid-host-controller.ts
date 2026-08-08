@@ -2497,13 +2497,14 @@ export class GridHostController {
         const theme = this.themeForCell(args, cell, mCol, mRow);
 
         const container = document.createElement("div");
+        // Appearance lives in `components/glide-data-grid-editors.css` under `.gdg-overlay-editor`
+        // (and `.gdg-pad`, source's own name for the same padding toggle). Only the geometry stays
+        // here, because only this method knows the cell's rect.
+        container.className = disablePadding ? "gdg-overlay-editor" : "gdg-overlay-editor gdg-pad";
         Object.assign(container.style, {
-            position: "absolute",
             left: `${cellRect.x}px`,
             top: `${cellRect.y}px`,
             minWidth: `${cellRect.width}px`,
-            width: "max-content",
-            maxWidth: "400px",
             // Deliberately `minHeight`, not a fixed `height` (a real bug found via browser testing
             // of Phase 4b's markdown editor, whose content is routinely taller than one row): a
             // fixed height + `overflow: visible` let multi-line editor/preview content spill out
@@ -2512,16 +2513,10 @@ export class GridHostController {
             // over the next row" rather than a properly-sized editor box. `minHeight` lets the
             // container grow to fit its content (mirrors source's `min-height`/`max-height`
             // approach, `internal/data-grid-overlay-editor/data-grid-overlay-editor-style.tsx`);
-            // `maxHeight` + `overflow: auto` caps growth at the visible viewport instead of letting
-            // a very long value push the box off-screen, scrolling internally past that point.
+            // the stylesheet's `overflow: auto` plus this `maxHeight` caps growth at the visible
+            // viewport instead of letting a very long value push the box off-screen.
             minHeight: `${cellRect.height}px`,
             maxHeight: `calc(100vh - ${cellRect.y}px - 10px)`,
-            boxSizing: "border-box",
-            background: theme.bgCell,
-            border: `2px solid ${theme.accentColor}`,
-            zIndex: "20",
-            overflow: "auto",
-            padding: disablePadding ? "0" : `${theme.cellVerticalPadding}px ${theme.cellHorizontalPadding}px`,
         } satisfies Partial<CSSStyleDeclaration>);
         // Phase 6: source's second `makeCSSStyle` application site
         // (`data-grid-overlay-editor.tsx:237`) -- the overlay container carries this *cell's*

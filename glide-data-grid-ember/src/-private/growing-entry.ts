@@ -16,16 +16,21 @@ import type { SelectionRange } from "../rendering/data-grid-types.ts";
 
 export interface GrowingEntryOptions {
     readonly value: string;
+    /** No longer read by `GrowingEntry` itself: since the stylesheet migration its font/colour come
+     * from the `--gdg-*` custom properties the overlay container stamps, exactly as source's
+     * `growing-entry-style.tsx` does. Retained because every caller already has it to hand and
+     * because a themed variant may want it again; nothing depends on it today. */
     readonly theme: FullTheme;
     /** `true` = select-all on mount (overwrite-by-typing UX); `false` = caret placed at the end. */
     readonly highlight: boolean;
     readonly disabled?: boolean;
     readonly placeholder?: string;
-    /** Extra inline padding on the input box itself -- mirrors source's `text-cell.tsx` passing
-     * `style={{padding: "3px 8.5px"}}` when `cell.allowWrapping === true` (the shadow box keeps
-     * its own fixed padding regardless, matching source: the `style` prop only ever reached
-     * `InputBox`, never `ShadowBox`). */
-    readonly padding?: string;
+    /** Adds the `gdg-input-wrapping` class to the input box, which pads it -- mirrors source's
+     * `text-cell.tsx` passing `style={{padding: "3px 8.5px"}}` when `cell.allowWrapping === true`
+     * (the shadow box keeps its own fixed padding regardless, matching source: the `style` prop
+     * only ever reached `InputBox`, never `ShadowBox`). Was a free-form `padding` string until the
+     * stylesheet migration; a boolean + class is the same two states, restylable by a consumer. */
+    readonly wrapping?: boolean;
     /** Shift+Enter inserts a literal newline instead of being forwarded to `onKeyDown` -- mirrors
      * source's `altNewline` prop (`text-cell.tsx` passes `true`; number/row-id don't). */
     readonly altNewline?: boolean;
@@ -45,60 +50,23 @@ export class GrowingEntry {
     private readonly validatedSelection: SelectionRange | undefined;
 
     constructor(options: GrowingEntryOptions) {
-        const { theme } = options;
         this.highlight = options.highlight;
         this.validatedSelection = options.validatedSelection;
 
+        // All three elements' styling lives in `components/glide-data-grid-editors.css` under these
+        // class names -- including the font metrics, which come from the `--gdg-*` custom
+        // properties the overlay container stamps for this cell's fully-merged theme. Source's own
+        // `growing-entry-style.tsx` is written against the same variables, so this is the faithful
+        // shape rather than a port-specific one.
         this.element = document.createElement("div");
         this.element.className = "gdg-growing-entry";
-        Object.assign(this.element.style, {
-            position: "relative",
-            marginTop: "6px",
-        } satisfies Partial<CSSStyleDeclaration>);
 
         this.shadowEl = document.createElement("div");
-        Object.assign(this.shadowEl.style, {
-            visibility: "hidden",
-            whiteSpace: "pre-wrap",
-            wordWrap: "break-word",
-            width: "max-content",
-            maxWidth: "100%",
-            minWidth: "100%",
-            fontSize: theme.editorFontSize,
-            lineHeight: "16px",
-            fontFamily: theme.fontFamily,
-            color: theme.textDark,
-            padding: "0",
-            margin: "0",
-            paddingBottom: "2px",
-        } satisfies Partial<CSSStyleDeclaration>);
+        this.shadowEl.className = "gdg-shadow-box";
 
         this.textareaEl = document.createElement("textarea");
-        this.textareaEl.className = "gdg-input";
+        this.textareaEl.className = options.wrapping === true ? "gdg-input gdg-input-wrapping" : "gdg-input";
         this.textareaEl.dir = "auto";
-        Object.assign(this.textareaEl.style, {
-            position: "absolute",
-            left: "0",
-            right: "0",
-            top: "0",
-            bottom: "0",
-            width: "100%",
-            height: "100%",
-            borderRadius: "0px",
-            resize: "none",
-            whiteSpace: "pre-wrap",
-            minWidth: "100%",
-            overflow: "hidden",
-            border: "0",
-            outline: "none",
-            backgroundColor: "transparent",
-            fontSize: theme.editorFontSize,
-            lineHeight: "16px",
-            fontFamily: theme.fontFamily,
-            color: theme.textDark,
-            padding: options.padding ?? "0",
-            margin: "0",
-        } satisfies Partial<CSSStyleDeclaration>);
         if (options.placeholder !== undefined) this.textareaEl.placeholder = options.placeholder;
         if (options.disabled === true) this.textareaEl.disabled = true;
 

@@ -134,19 +134,15 @@ export const linksCellRenderer: CustomRenderer<LinksCell> = {
 // Plain stateful DOM factory porting source's `LinksCellEditorStyle`/`LinkTitleEditor` -- a
 // title+URL input pair per link, add/delete affordances. No `react-select`/styled-components
 // dependency needed (this cell's source editor was already plain React DOM + `@linaria/react`
-// styling, not `react-select` -- only the CSS-in-JS is dropped in favor of inline `style`, per
-// PORTING-NOTES.md's Phase 5 guidance on `@linaria/react`).
+// styling, not `react-select` -- only the CSS-in-JS is dropped, in favor of plain CSS in
+// `src/components/glide-data-grid-extra-cell-editors.css`, per PORTING-NOTES.md's Phase 5 guidance
+// on `@linaria/react`).
 function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
     const maxLinks = p.value.data.maxLinks ?? Number.MAX_SAFE_INTEGER;
 
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        margin: "4px 0",
-        gap: "4px",
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-links-editor";
 
     let firstInput: HTMLInputElement | undefined;
 
@@ -166,28 +162,16 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
 
         for (const [i, l] of links.entries()) {
             const row = document.createElement("div");
-            Object.assign(row.style, {
-                display: "flex",
-                minWidth: "250px",
-                gap: "4px",
-            } satisfies Partial<CSSStyleDeclaration>);
+            row.className = "gdg-links-row";
 
             const titleInput = document.createElement("input");
-            titleInput.className = "gdg-title-input";
+            // `gdg-title-input`/`gdg-link-input` are source's own class names, kept as the public
+            // hooks for targeting one input or the other; every style they used to set inline is
+            // exactly the shared `.gdg-editor-input` primitive.
+            titleInput.className = "gdg-editor-input gdg-title-input";
             titleInput.value = l.title;
             titleInput.placeholder = "Title";
             titleInput.disabled = readonly;
-            Object.assign(titleInput.style, {
-                flexGrow: "1",
-                minWidth: "0",
-                border: `1px solid ${p.theme.borderColor}`,
-                borderRadius: "4px",
-                padding: "6px 8px",
-                fontFamily: p.theme.fontFamily,
-                fontSize: p.theme.editorFontSize,
-                color: p.theme.textDark,
-                backgroundColor: p.theme.bgCell,
-            } satisfies Partial<CSSStyleDeclaration>);
             titleInput.addEventListener("input", () => {
                 const next = [...currentLinks()];
                 next[i] = { ...next[i]!, title: titleInput.value };
@@ -195,21 +179,10 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
             });
 
             const linkInput = document.createElement("input");
-            linkInput.className = "gdg-link-input";
+            linkInput.className = "gdg-editor-input gdg-link-input";
             linkInput.value = l.href ?? "";
             linkInput.placeholder = "URL";
             linkInput.disabled = readonly;
-            Object.assign(linkInput.style, {
-                flexGrow: "1",
-                minWidth: "0",
-                border: `1px solid ${p.theme.borderColor}`,
-                borderRadius: "4px",
-                padding: "6px 8px",
-                fontFamily: p.theme.fontFamily,
-                fontSize: p.theme.editorFontSize,
-                color: p.theme.textDark,
-                backgroundColor: p.theme.bgCell,
-            } satisfies Partial<CSSStyleDeclaration>);
             linkInput.addEventListener("input", () => {
                 const next = [...currentLinks()];
                 next[i] = { ...next[i]!, href: linkInput.value };
@@ -222,13 +195,7 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
                 const deleteButton = document.createElement("button");
                 deleteButton.type = "button";
                 deleteButton.textContent = "✕";
-                Object.assign(deleteButton.style, {
-                    border: "none",
-                    borderRadius: "4px",
-                    background: "transparent",
-                    color: p.theme.textMedium,
-                    cursor: "pointer",
-                } satisfies Partial<CSSStyleDeclaration>);
+                deleteButton.className = "gdg-editor-button gdg-links-delete-button";
                 deleteButton.addEventListener("click", () => {
                     const next = [...currentLinks()];
                     next.splice(i, 1);
@@ -245,18 +212,10 @@ function buildLinksEditor(p: CellEditorProps<LinksCell>): CellEditorHandle {
             const addButton = document.createElement("button");
             addButton.type = "button";
             addButton.textContent = "Add link";
+            // The dimmed/not-clickable look of the maxed-out state is the shared
+            // `.gdg-editor-button:disabled` rule -- setting `disabled` is behaviour, not style.
             addButton.disabled = links.length >= maxLinks;
-            Object.assign(addButton.style, {
-                alignSelf: "flex-end",
-                border: "none",
-                borderRadius: "4px",
-                background: "transparent",
-                color: p.theme.accentColor,
-                fontWeight: "600",
-                padding: "6px 8px",
-                cursor: addButton.disabled ? "default" : "pointer",
-                opacity: addButton.disabled ? "0.4" : "1",
-            } satisfies Partial<CSSStyleDeclaration>);
+            addButton.className = "gdg-editor-button gdg-links-add-button";
             addButton.addEventListener("click", () => {
                 setLinks([...currentLinks(), { title: "" }]);
             });

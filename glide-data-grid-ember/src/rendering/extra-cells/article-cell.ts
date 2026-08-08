@@ -8,9 +8,9 @@
 // besides `kind` -- `markdown: string` -- there is no separate title field to preserve; source's
 // editor is single-field (one big rich-text body), so the plain-textarea replacement below is
 // likewise single-field: a `GrowingEntry`-based `<textarea>` plus Close/Save buttons mirroring
-// source's `Wrapper`'s `.gdg-close-button`/`.gdg-save-button` footer (translated from source's
-// `@linaria/react` CSS-in-JS to inline styles, this port's established styling convention -- see
-// `growing-entry.ts`/`markdown-div.ts`). **Known size limitation vs. source, worth noting**:
+// source's `Wrapper`'s `.gdg-close-button`/`.gdg-save-button` footer (source's `@linaria/react`
+// CSS-in-JS is translated to plain CSS in `src/components/glide-data-grid-extra-cell-editors.css`,
+// which keeps source's class names). **Known size limitation vs. source, worth noting**:
 // source's `provideEditor` sets `styleOverride` to a fixed-position ~75vw x 75vh full-viewport box;
 // this port's `CellEditorProps`/overlay host contract has a `styleOverride` field that is
 // documented as "unused/unguessed" (`data-grid-types.ts`, `ObjectEditorCallbackResult`) -- the
@@ -37,22 +37,14 @@ function isArticleCell(cell: CustomCell): cell is ArticleCell {
     return (cell.data as { kind?: unknown }).kind === "article-cell";
 }
 
-function footerButton(theme: CellEditorProps<ArticleCell>["theme"], label: string, kind: "save" | "close"): HTMLButtonElement {
+function footerButton(label: string, kind: "save" | "close"): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = label;
-    Object.assign(btn.style, {
-        border: "none",
-        padding: "8px 16px",
-        fontSize: "14px",
-        fontWeight: "500",
-        fontFamily: theme.fontFamily,
-        cursor: "pointer",
-        borderRadius: `${theme.roundingRadius ?? 9}px`,
-        marginRight: kind === "close" ? "8px" : "0",
-        backgroundColor: kind === "save" ? theme.accentColor : theme.bgHeader,
-        color: kind === "save" ? theme.accentFg : theme.textMedium,
-    } satisfies Partial<CSSStyleDeclaration>);
+    // Source's own `.gdg-save-button`/`.gdg-close-button` names; everything they used to set
+    // inline now lives in `glide-data-grid-extra-cell-editors.css` on top of the shared
+    // `.gdg-editor-button` primitive.
+    btn.className = `gdg-editor-button gdg-${kind}-button`;
     return btn;
 }
 
@@ -60,15 +52,7 @@ function buildArticleEditor(p: CellEditorProps<ArticleCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
 
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        width: "100%",
-        minHeight: "260px",
-        padding: `${p.theme.cellVerticalPadding + 8}px ${p.theme.cellHorizontalPadding + 8}px`,
-        boxSizing: "border-box",
-        color: p.theme.textDark,
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-article-editor";
 
     let currentMarkdown = p.value.data.markdown;
 
@@ -89,21 +73,15 @@ function buildArticleEditor(p: CellEditorProps<ArticleCell>): CellEditorHandle {
             if (ev.key === "Enter") ev.stopPropagation();
         },
     });
-    Object.assign(entry.element.style, {
-        flexGrow: "1",
-        minHeight: "200px",
-    } satisfies Partial<CSSStyleDeclaration>);
+    // `classList.add`, not `className =` -- `GrowingEntry` sets its own class on this element.
+    entry.element.classList.add("gdg-article-body");
     container.appendChild(entry.element);
 
     if (!readonly) {
         const footer = document.createElement("div");
-        Object.assign(footer.style, {
-            display: "flex",
-            justifyContent: "flex-end",
-            paddingTop: "12px",
-        } satisfies Partial<CSSStyleDeclaration>);
+        footer.className = "gdg-article-footer";
 
-        const closeButton = footerButton(p.theme, "Close", "close");
+        const closeButton = footerButton("Close", "close");
         closeButton.addEventListener("click", ev => {
             ev.preventDefault();
             ev.stopPropagation();
@@ -111,7 +89,7 @@ function buildArticleEditor(p: CellEditorProps<ArticleCell>): CellEditorHandle {
         });
         footer.appendChild(closeButton);
 
-        const saveButton = footerButton(p.theme, "Save", "save");
+        const saveButton = footerButton("Save", "save");
         saveButton.addEventListener("click", ev => {
             ev.preventDefault();
             ev.stopPropagation();

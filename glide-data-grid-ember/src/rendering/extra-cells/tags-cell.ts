@@ -87,25 +87,16 @@ export const tagsCellRenderer: CustomRenderer<TagsCell> = {
 // `styled.div` + React component -- same `CellEditorProps`/`CellEditorHandle` contract every other
 // editor in this port uses (see `data-grid-types.ts`'s doc comments, PORTING-NOTES.md's Phase 4a
 // section). No `react-select` dependency needed here since source itself never used one for this
-// cell.
+// cell. Source's `EditorWrap` Linaria block is ported as plain CSS in
+// `src/components/glide-data-grid-extra-cell-editors.css`, keeping source's own
+// `gdg-pill`/`gdg-selected`/`gdg-unselected`/`gdg-readonly` class names.
 function buildTagsEditor(p: CellEditorProps<TagsCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
     const { possibleTags, tags } = p.value.data;
-    const tagHeight = p.theme.bubbleHeight;
-    const innerPad = p.theme.bubblePadding;
 
     const container = document.createElement("div");
-    container.className = "gdg-tags-editor";
-    Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        paddingTop: "6px",
-        boxSizing: "border-box",
-        color: p.theme.textDark,
-        fontFamily: p.theme.fontFamily,
-        fontSize: p.theme.editorFontSize,
-    } satisfies Partial<CSSStyleDeclaration>);
+    // `gdg-readonly` is source's own marker class; it is what switches the rows' cursor off.
+    container.className = readonly ? "gdg-tags-editor gdg-readonly" : "gdg-tags-editor";
 
     let firstInput: HTMLInputElement | undefined;
 
@@ -113,17 +104,11 @@ function buildTagsEditor(p: CellEditorProps<TagsCell>): CellEditorHandle {
         const selected = tags.includes(t.tag);
 
         const label = document.createElement("label");
-        Object.assign(label.style, {
-            display: "flex",
-            alignItems: "center",
-            cursor: readonly ? "default" : "pointer",
-        } satisfies Partial<CSSStyleDeclaration>);
 
         if (!readonly) {
             const input = document.createElement("input");
             input.type = "checkbox";
             input.checked = selected;
-            Object.assign(input.style, { cursor: "pointer" } satisfies Partial<CSSStyleDeclaration>);
             input.addEventListener("change", () => {
                 const currentTags = p.value.data.tags;
                 const newTags = currentTags.includes(t.tag)
@@ -136,21 +121,12 @@ function buildTagsEditor(p: CellEditorProps<TagsCell>): CellEditorHandle {
         }
 
         const pill = document.createElement("div");
-        pill.className = "gdg-pill";
+        pill.className = selected ? "gdg-pill gdg-selected" : "gdg-pill gdg-unselected";
         pill.textContent = t.tag;
-        Object.assign(pill.style, {
-            marginLeft: "8px",
-            marginRight: "6px",
-            marginBottom: "6px",
-            borderRadius: `${p.theme.roundingRadius ?? tagHeight / 2}px`,
-            minHeight: `${tagHeight}px`,
-            padding: `2px ${innerPad}px`,
-            display: "flex",
-            alignItems: "center",
-            font: `12px ${p.theme.fontFamily}`,
-            backgroundColor: selected ? t.color : p.theme.bgBubble,
-            opacity: selected ? "1" : "0.8",
-        } satisfies Partial<CSSStyleDeclaration>);
+        // The ONE thing here that CSS cannot express: a selected pill is painted in the colour
+        // carried by the cell's own `possibleTags[].color` data, not by anything in the theme. The
+        // unselected colour (`--gdg-bg-bubble`) and the 0.8 dimming both live in the stylesheet.
+        if (selected) pill.style.backgroundColor = t.color;
         label.appendChild(pill);
 
         container.appendChild(label);

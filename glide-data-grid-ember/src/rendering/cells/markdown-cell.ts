@@ -32,20 +32,12 @@ export const markdownCellRenderer: InternalCellRenderer<MarkdownCell> = {
     onPaste: (toPaste, cell) => (toPaste === cell.data ? undefined : { ...cell, data: toPaste }),
 };
 
-function iconButton(theme: CellEditorProps<MarkdownCell>["theme"], icon: SVGSVGElement): HTMLDivElement {
+// Styled as `.gdg-icon-button` in `components/glide-data-grid-editors.css`, which also sizes the
+// nested `<svg>`. The button's `color` is what drives the glyph -- every path in `edit-icons.ts`
+// is `stroke="currentColor"`.
+function iconButton(icon: SVGSVGElement): HTMLDivElement {
     const btn = document.createElement("div");
-    Object.assign(btn.style, {
-        cursor: "pointer",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        color: theme.accentColor,
-        height: "24px",
-        width: "24px",
-        flexShrink: "0",
-        borderRadius: "6px",
-    } satisfies Partial<CSSStyleDeclaration>);
-    Object.assign(icon.style, { width: "16px", height: "16px" });
+    btn.className = "gdg-icon-button";
     btn.appendChild(icon);
     return btn;
 }
@@ -75,14 +67,7 @@ function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle
     let focusTarget: HTMLElement | undefined;
 
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "space-between",
-        position: "relative",
-        width: "100%",
-        color: p.theme.textDark,
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-markdown-editor";
 
     function clear(): void {
         container.replaceChildren();
@@ -93,16 +78,17 @@ function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle
     function renderPreview(): void {
         clear();
 
+        // `createMarkdownDiv` already carries `.gdg-markdown-div`; the flex sizing that makes it
+        // share the row with the icon button is `.gdg-markdown-editor > .gdg-markdown-div`.
         const div = createMarkdownDiv(currentValue.data);
-        Object.assign(div.style, { flexGrow: "1", minWidth: "0" } satisfies Partial<CSSStyleDeclaration>);
         container.appendChild(div);
 
         if (!readonly) {
             const spacer = document.createElement("div");
-            spacer.style.flex = "1";
+            spacer.className = "gdg-markdown-spacer";
             container.appendChild(spacer);
 
-            const editButton = iconButton(p.theme, createEditPencilIcon());
+            const editButton = iconButton(createEditPencilIcon());
             editButton.addEventListener("click", ev => {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -117,17 +103,7 @@ function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle
         // (registered on the host's wrapping container) actually receives keystrokes while showing
         // the rendered-markdown preview, mirrors source's hidden `<textarea autoFocus />`.
         const hidden = document.createElement("textarea");
-        Object.assign(hidden.style, {
-            position: "absolute",
-            top: "0px",
-            left: "0px",
-            width: "0px",
-            height: "0px",
-            padding: "0",
-            margin: "0",
-            border: "0",
-            opacity: "0",
-        } satisfies Partial<CSSStyleDeclaration>);
+        hidden.className = "gdg-focus-decoy";
         container.appendChild(hidden);
         focusTarget = hidden;
     }
@@ -152,10 +128,10 @@ function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle
                 if (ev.key === "Enter") ev.stopPropagation();
             },
         });
-        Object.assign(growingEntry.element.style, { flexShrink: "1", minWidth: "0" } satisfies Partial<CSSStyleDeclaration>);
+        // Flex sizing comes from `.gdg-markdown-editor > .gdg-growing-entry` in the stylesheet.
         container.appendChild(growingEntry.element);
 
-        const checkButton = iconButton(p.theme, createCheckmarkIcon());
+        const checkButton = iconButton(createCheckmarkIcon());
         checkButton.addEventListener("click", ev => {
             ev.preventDefault();
             ev.stopPropagation();

@@ -4105,6 +4105,104 @@ browser-verified code: all `.dvn-*` properties resolve from the stylesheet with 
 left on the scroller**, `scrollHeight` still 6,800,070, vertical and horizontal scroll both work with
 the header pinned, no console errors.
 
-**Next in this thread**: the overlay-editor chrome (job 2 above) is still inline. Moving it is what
-actually unlocks DaisyUI restyling of the editors, and it should happen before any new DOM component
-(e.g. a `<GlideSearchBar>`) is added, not after.
+### Second half — the overlay-editor chrome (COMPLETE, browser-verified, 2026-08-08)
+
+Job 2 above is now done, which is what actually unlocks restyling the editors with Tailwind/DaisyUI.
+**Two more stylesheets**, both imported by `glide-data-grid.gts` alongside the structural one:
+
+- **`src/components/glide-data-grid-editors.css`** — the overlay container, `GrowingEntry`,
+  `createMarkdownDiv`, the edit-pencil/checkmark icon button, and the core `packages/core` editors
+  (markdown, uri, image). Also defines **three shared primitives** used by both files:
+  `.gdg-editor-input`, `.gdg-editor-button` (+ its `:disabled` rule), and `.gdg-focus-decoy`.
+- **`src/components/glide-data-grid-extra-cell-editors.css`** — the seven `packages/cells` editors
+  that build their own DOM (article, date-picker, dropdown, links, multi-select, range, tags).
+
+The split is deliberate: structural/load-bearing, core chrome, extra-cell chrome — mirroring source's
+own `ScrollRegionStyle` / `*-style.tsx` / `packages/cells` split, and making "which rules are safe for
+a consumer to override" answerable from the file name.
+
+**The whole thing hinges on one fact that was already true and unexploited**: `openOverlay` stamps
+the *fully-merged per-cell* theme onto the overlay container as `--gdg-*` custom properties, and every
+editor element is a descendant of that container. So `color: p.theme.textDark` becomes
+`color: var(--gdg-text-dark)` **in CSS**, and the whole precedence chain (base → global → column → row
+→ cell override) keeps working untouched. This is not a port-specific trick — source's own
+`growing-entry-style.tsx` and `data-grid-overlay-editor-style.tsx` are already written against exactly
+these variables. Browser-confirmed in both light and dark theme after the migration.
+
+**What deliberately stayed in JS**, and the rule behind it — *only values CSS cannot know*:
+
+- The overlay container's `left`/`top`/`min-width`/`min-height`/`max-height`: computed from the cell
+  rect, so only `openOverlay` knows them. Everything else on that element moved, including the
+  padding toggle, which is now `.gdg-pad` (**source's own class name for the same toggle**).
+- `image-cell.ts`'s thumbnail radius, but only its *first* link. The chain was
+  `cell.rounding ?? theme.roundingRadius ?? 4`; the last two links are now
+  `--gdg-image-thumb-radius: var(--gdg-rounding-radius, 4px)` in CSS, and JS sets the custom property
+  only when the *cell* specifies one.
+- `tags-cell.ts`'s selected-pill background, which comes from `possibleTags[].color` — cell data, so
+  no theme variable could ever carry it.
+
+Everything else that "varied" turned out to be **enumerable**, and became a class toggle or a native
+selector rather than an inline style: `gdg-input-wrapping` (text-cell's `allowWrapping`),
+`gdg-readonly` / `gdg-selected` / `gdg-unselected` (tags — all source's names), and `:disabled` for
+every disabled-button dimming. That is the general rule worth carrying forward: *an inline style is
+justified by an unbounded value, never by a boolean.*
+
+**Two JS-side simplifications fell out of this rather than being goals:**
+
+- `markdown-div.ts` used to walk the rendered nodes after every render to set `margin` per child
+  (source's `> * { margin: 0 }`, `*:last-child`, `p img { width: 100% }`). Those are now three CSS
+  selectors, so they hold for whatever `marked` produces instead of only for what existed at build
+  time.
+- `GrowingEntry`'s `padding?: string` option became `wrapping?: boolean`, and **its `theme` option is
+  now unread** — its font and colours come from the variables. The field is retained (every caller
+  has it to hand; nothing depends on it) with a comment saying so. `CellEditorProps.theme`'s doc
+  comment, which used to claim there was "no other channel" for an editor to receive theme values,
+  was corrected: there now is one, and it is the preferred one.
+
+**Verification actually performed** (not delegated): `ember-tsc`, 425 vitest tests, addon build,
+`test-app` vite build, plus a real browser pass opening **all ten** editor types — markdown (preview
+*and* edit mode), uri, image, range, tags, dropdown, multi-select, links, date-picker, article. For
+each: dumped every node's class list and `style` attribute and confirmed **zero inline styles** beyond
+the two documented exceptions, then spot-checked computed values against the pre-migration inline
+ones. Then re-opened an editor under the dark theme and confirmed the container, its border and its
+controls all repainted from the dark palette. No console errors. The seven extra-cell files were
+delegated to a subagent; its output was re-verified property-by-property against a snapshot of the
+original inline styles taken before it started, and every property was accounted for.
+
+**One intentional appearance change, small but real**: `.gdg-editor-button` sets `font-family`, so the
+links `✕` and the multi-select "Add" button now render in the theme font instead of the UA button
+font. They were the only two buttons not already setting it. Accepted rather than special-cased —
+consistent editor typography is the better default, and the alternative was a `font-family: inherit`
+carve-out on two elements.
+
+**A real bug was found while doing this and deliberately NOT fixed** (it is orthogonal to styling and
+wants its own change): `links-cell.ts`'s `currentLinks()` reads `p.value.data.links`, and `p.value` is
+the *original* cell object — `openOverlay` builds the editor props literal once and only ever writes
+`state.currentCell` from `onChange`. So `setLinks()` → `onChange()` → `render()` re-reads the original
+list: adding a link makes the new row appear and then vanish on the next add/delete, and a second add
+discards the first. Per-keystroke title/URL edits are unaffected (they never call `render()`). Logged
+in PHASES.md's 9h.
+
+### Two mechanics worth reusing when adding more editor CSS
+
+**Overriding a shared primitive from a *different* stylesheet must win on specificity, not order.**
+`.gdg-root .gdg-editor-button` (in `glide-data-grid-editors.css`) and a per-cell
+`.gdg-root .gdg-save-button` (in `glide-data-grid-extra-cell-editors.css`) have *identical*
+specificity (0,2,0), so which one wins depends entirely on the two files' import order — which is a
+detail of `glide-data-grid.gts` that no stylesheet should depend on. Every such override is therefore
+written compound: `.gdg-root .gdg-editor-button.gdg-save-button` (0,3,0). This matters for
+`gdg-save-button`/`gdg-close-button` (border-radius + background), `gdg-multi-select-add-input`
+(tighter padding) and `gdg-multi-select-add-button` (padding). Conversely the shared
+`:disabled` rule is already (0,3,0), so it correctly beats any per-cell class without help — which is
+why the "Add link" button's disabled dimming could be dropped from JS entirely.
+
+**Not every theme field has a `--gdg-*` variable, and one of them is conditional.**
+`makeCSSStyle` (`src/rendering/theme.ts`) omits `--gdg-rounding-radius`,
+`--gdg-header-bottom-border-color` and `--gdg-resize-indicator-color` whenever the corresponding
+optional `Theme` field is `undefined`, so those must always be read as
+`var(--gdg-rounding-radius, <fallback>)` — exactly as source does. `--gdg-bubble-height` /
+`--gdg-bubble-padding` / `--gdg-cell-*-padding` are stamped as `px` *strings*, so they compose in
+`calc()`: the tags pill's radius is
+`var(--gdg-rounding-radius, calc(var(--gdg-bubble-height) / 2))`, a faithful translation of source's
+`var(--gdg-rounding-radius, ${p => p.tagHeight / 2}px)`. Check the name list in `makeCSSStyle` before
+assuming a variable exists — `lineHeight` and `headerIconSize`, for instance, have none.

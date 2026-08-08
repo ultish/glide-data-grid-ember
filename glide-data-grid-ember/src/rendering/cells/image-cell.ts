@@ -120,22 +120,19 @@ function buildImageEditor(p: CellEditorProps<ImageCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
 
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        width: "100%",
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-image-editor";
 
     const thumbRow = document.createElement("div");
-    Object.assign(thumbRow.style, {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "4px",
-    } satisfies Partial<CSSStyleDeclaration>);
+    thumbRow.className = "gdg-image-editor-thumbs";
     container.appendChild(thumbRow);
 
-    const rounding = p.value.rounding ?? p.theme.roundingRadius ?? 4;
+    // The `cell.rounding ?? theme.roundingRadius ?? 4` precedence chain now lives in the
+    // stylesheet: `.gdg-image-editor-thumbs` defaults `--gdg-image-thumb-radius` to
+    // `var(--gdg-rounding-radius, 4px)`, covering the last two links. Only the first link is
+    // per-instance -- it comes from this cell's own data -- so only it is set here.
+    if (p.value.rounding !== undefined) {
+        thumbRow.style.setProperty("--gdg-image-thumb-radius", `${p.value.rounding}px`);
+    }
 
     function renderThumbs(urls: readonly string[]): void {
         thumbRow.replaceChildren();
@@ -144,12 +141,6 @@ function buildImageEditor(p: CellEditorProps<ImageCell>): CellEditorHandle {
             const img = document.createElement("img");
             img.src = url;
             img.draggable = false;
-            Object.assign(img.style, {
-                maxHeight: "80px",
-                maxWidth: "120px",
-                objectFit: "contain",
-                borderRadius: `${rounding}px`,
-            } satisfies Partial<CSSStyleDeclaration>);
             thumbRow.appendChild(img);
         }
     }

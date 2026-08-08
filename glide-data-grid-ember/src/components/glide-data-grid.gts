@@ -12,6 +12,15 @@ import Component from "@glimmer/component";
 // Linaria block. Imported here so any bundler picks it up automatically -- consumers never need a
 // separate CSS import. See the file header for why this is a stylesheet rather than inline styles.
 import "./glide-data-grid.css";
+// Overlay-editor chrome, split from the structural sheet above deliberately -- see that file's
+// header. Imported here rather than from `src/rendering/`, which is kept free of bundler-dependent
+// imports so the vitest suite can import it in bare Node.
+import "./glide-data-grid-editors.css";
+// The `packages/cells` extra-cell editors. Always loaded, even when a consumer passes no
+// `@extraCells` -- a few hundred bytes, against the alternative of importing it from
+// `src/rendering/extra-cells/index.ts` and giving that framework-agnostic directory a
+// bundler-dependent import.
+import "./glide-data-grid-extra-cell-editors.css";
 import { cached } from "@glimmer/tracking";
 import { registerDestructor } from "@ember/destroyable";
 import { modifier } from "ember-modifier";

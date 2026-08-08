@@ -144,13 +144,7 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
 
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        flexGrow: "1",
-        alignItems: "center",
-        minHeight: "21px",
-        width: "100%",
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-uri-editor";
 
     let growingEntry: GrowingEntry | undefined;
     let focusTarget: HTMLElement | undefined;
@@ -170,33 +164,13 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.textContent = p.value.displayData ?? p.value.data;
-        Object.assign(link.style, {
-            flexGrow: "1",
-            flexShrink: "1",
-            cursor: "pointer",
-            marginRight: "8px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            color: p.theme.linkColor,
-            textDecoration: "underline",
-        } satisfies Partial<CSSStyleDeclaration>);
         container.appendChild(link);
 
         if (!readonly) {
             const editButton = document.createElement("div");
-            Object.assign(editButton.style, {
-                flexShrink: "0",
-                width: "32px",
-                color: p.theme.accentColor,
-                cursor: "pointer",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-            } satisfies Partial<CSSStyleDeclaration>);
-            const icon = createEditPencilIcon();
-            Object.assign(icon.style, { width: "24px", height: "24px" });
-            editButton.appendChild(icon);
+            editButton.className = "gdg-uri-edit-button";
+            // Sized by `.gdg-uri-edit-button > svg` (24px here, unlike the markdown editor's 16px).
+            editButton.appendChild(createEditPencilIcon());
             editButton.addEventListener("click", ev => {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -212,17 +186,7 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
         // host's wrapping `container`, a `keydown` listener that only fires for events bubbling
         // through a focused descendant) actually receives keystrokes while showing the link preview.
         const hidden = document.createElement("textarea");
-        Object.assign(hidden.style, {
-            position: "absolute",
-            top: "0px",
-            left: "0px",
-            width: "0px",
-            height: "0px",
-            padding: "0",
-            margin: "0",
-            border: "0",
-            opacity: "0",
-        } satisfies Partial<CSSStyleDeclaration>);
+        hidden.className = "gdg-focus-decoy";
         container.appendChild(hidden);
         focusTarget = hidden;
     }

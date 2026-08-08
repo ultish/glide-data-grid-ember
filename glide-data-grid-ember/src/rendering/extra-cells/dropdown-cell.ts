@@ -68,27 +68,13 @@ function buildDropdownEditor(p: CellEditorProps<DropdownCell>): CellEditorHandle
     const readonly = p.value.readonly === true;
     const { allowedValues, value: valueIn } = p.value.data;
 
+    // Chrome for both of these lives in `glide-data-grid-extra-cell-editors.css` (port of source's
+    // `Wrap`/`.glide-select` Linaria block).
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        width: "100%",
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-dropdown-editor";
 
     const select = document.createElement("select");
     select.className = "gdg-dropdown-select";
-    Object.assign(select.style, {
-        width: "100%",
-        border: "0",
-        outline: "none",
-        backgroundColor: p.theme.bgCell,
-        color: p.theme.textDark,
-        fontFamily: p.theme.fontFamily,
-        fontSize: p.theme.editorFontSize,
-        padding: `0 ${p.theme.cellHorizontalPadding}px`,
-        height: "100%",
-    } satisfies Partial<CSSStyleDeclaration>);
     select.disabled = readonly;
 
     // A blank leading option so "no selection" is representable (source's `allowedValues` can

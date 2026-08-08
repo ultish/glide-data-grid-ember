@@ -407,12 +407,16 @@ export interface CellEditorProps<T extends InnerGridCell> {
     readonly value: T;
     /** `true` = select-all-on-focus (overwrite-by-typing UX); `false` = caret placed at the end. */
     readonly isHighlighted: boolean;
-    /** The realized theme in effect for this cell (post `mergeAndRealizeTheme`), so DOM editors
-     * can match the canvas-drawn font/colors without needing their own CSS-custom-property wiring
-     * (not built yet, theming is Phase 6 -- see PORTING-NOTES.md). Not part of source's editor
-     * props (source's editors read `ThemeContext` via `useTheme()` instead); added here because
-     * `GrowingEntry` genuinely needs font-family/font-size/text-color and there is no other channel
-     * for it to receive them in this port's plain-DOM overlay host. */
+    /** The realized theme in effect for this cell (post `mergeAndRealizeTheme`). Not part of
+     * source's editor props (source's editors read `ThemeContext` via `useTheme()` instead).
+     *
+     * **The CSS-custom-property channel this once said didn't exist now does** -- the overlay
+     * container stamps this same merged theme as `--gdg-*` variables, and since the 9q stylesheet
+     * migration the editors take their font and colours from those in CSS rather than from this
+     * object. What remains genuinely useful here is theme values an editor needs in *JavaScript*:
+     * measuring against `baseFontFull`, or feeding a value into a canvas draw. Prefer `var(--gdg-*)`
+     * in the stylesheet over reading this field and assigning an inline style -- an inline style is
+     * not restylable by the consuming app, which is the whole point of the migration. */
     readonly theme: FullTheme;
     /** Mirrors source's separate `validatedSelection` editor prop (`data-grid-overlay-editor.tsx`)
      * -- an explicit text-selection range to (re-)apply inside the editor, e.g. after a

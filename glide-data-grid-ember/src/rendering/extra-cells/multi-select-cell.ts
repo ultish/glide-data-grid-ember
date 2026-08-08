@@ -133,30 +133,15 @@ function buildMultiSelectEditor(p: CellEditorProps<MultiSelectCell>): CellEditor
     let values = [...(valuesIn ?? [])];
     const options = prepareOptions(optionsIn ?? []);
 
+    // Chrome for both of these lives in `glide-data-grid-extra-cell-editors.css` (port of source's
+    // `Wrap`/`.gdg-multi-select` Linaria block; `gdg-multi-select` is source's own class name).
     const container = document.createElement("div");
-    Object.assign(container.style, {
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "stretch",
-        width: "100%",
-        gap: "4px",
-    } satisfies Partial<CSSStyleDeclaration>);
+    container.className = "gdg-multi-select-editor";
 
     const select = document.createElement("select");
     select.className = "gdg-multi-select";
     select.multiple = true;
     select.disabled = readonly;
-    Object.assign(select.style, {
-        width: "100%",
-        minHeight: "80px",
-        border: `1px solid ${p.theme.borderColor}`,
-        borderRadius: "4px",
-        outline: "none",
-        backgroundColor: p.theme.bgCell,
-        color: p.theme.textDark,
-        fontFamily: p.theme.fontFamily,
-        fontSize: p.theme.editorFontSize,
-    } satisfies Partial<CSSStyleDeclaration>);
 
     function renderOptions(): void {
         select.replaceChildren();
@@ -187,34 +172,18 @@ function buildMultiSelectEditor(p: CellEditorProps<MultiSelectCell>): CellEditor
     let addInput: HTMLInputElement | undefined;
     if (allowCreation === true && !readonly) {
         const addRow = document.createElement("div");
-        Object.assign(addRow.style, { display: "flex", gap: "4px" } satisfies Partial<CSSStyleDeclaration>);
+        addRow.className = "gdg-multi-select-add-row";
 
         addInput = document.createElement("input");
         addInput.type = "text";
         addInput.placeholder = "Add...";
-        Object.assign(addInput.style, {
-            flexGrow: "1",
-            minWidth: "0",
-            border: `1px solid ${p.theme.borderColor}`,
-            borderRadius: "4px",
-            padding: "4px 6px",
-            fontFamily: p.theme.fontFamily,
-            fontSize: p.theme.editorFontSize,
-            color: p.theme.textDark,
-            backgroundColor: p.theme.bgCell,
-        } satisfies Partial<CSSStyleDeclaration>);
+        // Shared `.gdg-editor-input` primitive; the per-cell class only tightens the padding.
+        addInput.className = "gdg-editor-input gdg-multi-select-add-input";
 
         const addButton = document.createElement("button");
         addButton.type = "button";
         addButton.textContent = "Add";
-        Object.assign(addButton.style, {
-            border: "none",
-            borderRadius: "4px",
-            padding: "4px 8px",
-            cursor: "pointer",
-            color: p.theme.accentColor,
-            background: "transparent",
-        } satisfies Partial<CSSStyleDeclaration>);
+        addButton.className = "gdg-editor-button gdg-multi-select-add-button";
 
         const addValue = (): void => {
             const raw = addInput!.value.trim();

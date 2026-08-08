@@ -9,9 +9,10 @@
 // native `<input type="range">` rendered via React. Ported here as the equivalent plain-DOM
 // factory satisfying this port's `CellEditorProps`/`CellEditorHandle` contract (established in
 // Phase 4a, see `data-grid-types.ts`) -- a `<label>` wrapping a real `<input type="range">` plus a
-// live numeric-value `<span>`, built with the same `Object.assign(el.style, {...})` inline-style
-// pattern `GrowingEntry` uses (no CSS-in-JS dependency, matching the `@linaria/react` skip called
-// out in PORTING-NOTES.md's Phase 5 section).
+// live numeric-value `<span>`. Its chrome is plain CSS in
+// `src/components/glide-data-grid-extra-cell-editors.css` (this port skips `@linaria/react`, see
+// PORTING-NOTES.md's Phase 5 section, but ships the same rules as an ordinary stylesheet so a
+// consuming app can restyle them without fighting inline styles).
 import { GridCellKind, type CustomCell } from "../data-grid-types.ts";
 import type { CustomRenderer } from "../cell-types.ts";
 import { roundedRect, measureTextCached, getMiddleCenterBias, getEmHeight } from "../render/data-grid-lib.ts";
@@ -121,19 +122,12 @@ export const rangeCellRenderer: CustomRenderer<RangeCell> = {
         ctx.restore();
     },
     provideEditor: () => p => {
-        const { value, onChange, theme } = p;
+        const { value, onChange } = p;
         const data = value.data;
         const readonly = value.readonly === true;
 
         const wrapper = document.createElement("label");
-        Object.assign(wrapper.style, {
-            display: "flex",
-            alignItems: "center",
-            flexGrow: "1",
-            gap: "8px",
-            width: "100%",
-            padding: "0 8px",
-        } satisfies Partial<CSSStyleDeclaration>);
+        wrapper.className = "gdg-range-editor";
 
         const input = document.createElement("input");
         input.type = "range";
@@ -142,19 +136,11 @@ export const rangeCellRenderer: CustomRenderer<RangeCell> = {
         input.step = String(data.step);
         input.value = String(data.value);
         input.disabled = readonly;
-        Object.assign(input.style, {
-            flexGrow: "1",
-        } satisfies Partial<CSSStyleDeclaration>);
+        input.className = "gdg-range-input";
 
         const valueLabel = document.createElement("span");
         valueLabel.textContent = String(data.value);
-        Object.assign(valueLabel.style, {
-            fontFamily: theme.fontFamily,
-            fontSize: theme.editorFontSize,
-            color: theme.textDark,
-            minWidth: "3ch",
-            textAlign: "right",
-        } satisfies Partial<CSSStyleDeclaration>);
+        valueLabel.className = "gdg-range-value";
 
         input.addEventListener("input", () => {
             const newValue = Number(input.value);

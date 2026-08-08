@@ -102,16 +102,8 @@ function buildDatePickerEditor(p: CellEditorProps<DatePickerCell>): CellEditorHa
     if (maxValue !== undefined) input.max = maxValue;
     if (step !== undefined) input.step = String(step);
     input.value = value;
-    Object.assign(input.style, {
-        minHeight: "26px",
-        width: "100%",
-        border: "none",
-        outline: "none",
-        background: "transparent",
-        fontSize: p.theme.editorFontSize,
-        fontFamily: p.theme.fontFamily,
-        color: p.theme.textDark,
-    } satisfies Partial<CSSStyleDeclaration>);
+    // Port of source's `StyledInputBox` -- see `glide-data-grid-extra-cell-editors.css`.
+    input.className = "gdg-date-picker-input";
 
     let currentValue: DatePickerCell = p.value;
     input.addEventListener("change", () => {
