@@ -228,7 +228,21 @@ export function recordsSource<T extends object>(p: RecordsSourceProps<T>): Recor
     const prev = cache.get(records);
     // The row caches close over `records[i]`, `columns` and `toCell`. Reuse them (and therefore
     // every per-row memo) unless one of those three changed identity.
-    const cachesReusable = prev !== undefined && prev.columns === columns && prev.toCell === toCell;
+    //
+    // The length check is NOT redundant with the `records` identity key, and leaving it out is a
+    // silent-blank-rows bug. The documented contract is "replace the array when rows are added or
+    // removed", but Ember Data's live arrays (`store.peekAll(...)`, a retained `findAll` result)
+    // deliberately keep ONE identity for the life of the store and mutate in place. Their tracked
+    // `length` still invalidates the caller's `@cached` getter, so this function re-runs -- with
+    // the *same* `records` identity, the *old* `caches`, and a *new* `records.length`. `rows` would
+    // then exceed `projections.length` and every added row would paint `FALLBACK_CELL`: blank cells,
+    // no error, no warning. Rebuilding on a length change costs one full re-projection on a row
+    // add/remove, which is the correct price and still O(1) per painted cell afterwards.
+    const cachesReusable =
+        prev !== undefined &&
+        prev.columns === columns &&
+        prev.toCell === toCell &&
+        prev.caches.length === records.length;
     const caches = cachesReusable ? prev.caches : createRowCaches(records, columns, toCell);
 
     // EAGER READ (rule 1). Must happen on every call, inside the caller's tracking frame -- this is

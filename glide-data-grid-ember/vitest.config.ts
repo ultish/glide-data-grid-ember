@@ -15,6 +15,23 @@ import { defineConfig } from "vitest/config";
 // transform); that suite worked around it by substituting a standalone `@glimmer/validator`. If you
 // need to test Ember-integrated behaviour, it belongs in `test-app`, not here.
 export default defineConfig({
+    resolve: {
+        alias: {
+            // `data-source/records-source.ts` imports `@glimmer/tracking/primitives/cache`, which
+            // an Ember app provides at build time and which bare Node cannot resolve -- which is
+            // why that module had no tests at all until 2026-08-09.
+            //
+            // This is NOT a stub. Ember's `createCache`/`getValue` are re-exports of
+            // `@glimmer/validator`'s, so the alias gives the tests the **real** primitives,
+            // including real tracked invalidation via `createTag`/`consumeTag`/`dirtyTag`. That is
+            // what makes `records-source.test.ts` able to assert the actual memoization invariant
+            // ("editing one field re-projects one row") rather than merely its shape.
+            //
+            // The rule in the comment above still stands: this is the standalone-@glimmer/validator
+            // substitution it refers to, not a licence to import from `ember-source` here.
+            "@glimmer/tracking/primitives/cache": "@glimmer/validator",
+        },
+    },
     test: {
         // Colocated: `foo.ts` is tested by `foo.test.ts` next to it. Kept out of the published
         // package by `rollup.config.mjs`'s `publicEntrypoints` exclusion -- if you change this
