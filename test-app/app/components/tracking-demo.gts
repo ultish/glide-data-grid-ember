@@ -49,7 +49,7 @@
 // rows and wrong at 1,000, because changing ONE field would re-derive every cell of every row. The
 // fix is a per-row memoized projection, and since Phase 8b it lives in the addon as
 // `recordsSource` -- which this component now uses, so the pattern is exercised rather than
-// described. Read `glide-data-grid-ember/DATA.md` for what to write as a consumer, and
+// described. Read the cookbook's "Using the grid in Ember" chapter for what to write as a consumer, and
 // `<ScaleProof>` (rendered below this demo) for the 1,000-row measurement that "one edit
 // re-projects one row" is actually true in a browser.
 import Component from "@glimmer/component";

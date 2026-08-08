@@ -1,7 +1,7 @@
 // Minimal ambient types for `object-scan` (v20), which ships no `.d.ts` of its own.
 //
 // Scoped to the two options this app actually uses -- see
-// `app/utils/scale-records.ts` for the worked example and `glide-data-grid-ember/DATA.md`'s
+// `app/utils/scale-records.ts` for the worked example and the cookbook's "Using the grid in Ember" chapter's
 // "Where formatting and nested data go" for why the traversal lives on the consumer side of the
 // boundary (the addon deliberately depends on no path/traversal library).
 declare module "object-scan" {

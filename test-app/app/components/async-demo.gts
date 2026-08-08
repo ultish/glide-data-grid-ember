@@ -12,7 +12,7 @@
 //   <AsyncDemo>     -- `AsyncRecordsSource`, a lazy buffer of plain objects, zero tracked state,
 //                      repaints driven imperatively by `updateCells()`. For data you don't.
 //
-// See `DATA.md`'s "When you can't hold the data in memory" for the consumer-facing version of that
+// See the cookbook's "When you can't hold the data in memory" for the consumer-facing version of that
 // split, and PORTING-NOTES.md's "Autotracking → canvas" for the mechanism.
 //
 // The two grid args that make this work are both new in Phase 8:

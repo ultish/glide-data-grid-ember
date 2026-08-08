@@ -1,7 +1,8 @@
 // The ~1,000-row dataset, columns and projection behind `app/components/scale-proof.gts`.
 //
-// This module exists to close the open question in `glide-data-grid-ember/DATA.md`'s "Status of this
-// recommendation": DATA.md tells every consumer to use a per-row memoized projection, and until
+// This module exists to close the open question in the cookbook's "Using the grid in
+// Ember" chapter (formerly the addon's `DATA.md`): it tells every consumer to use a per-row
+// memoized projection, and until
 // Phase 8 that half of the recommendation had only been reasoned about. Everything here is shaped so
 // the claim is *measurable* in a browser rather than inferred:
 //

@@ -3,7 +3,8 @@
 // It lives in the test-app on purpose: this app is what gets deployed, so the cookbook ships with
 // the demos it describes, and the "one-line render" recipe at the top is an actual live grid rather
 // than a screenshot of one. The addon's README covers install and the minimal render and links
-// here; `DATA.md` and `THEMING.md` remain the deep guides and are not restated.
+// here. As of 2026-08-09 this is the *only* consumer guide: the addon's `DATA.md` and `THEMING.md`
+// were migrated into chapters here and deleted, so there is exactly one copy of each.
 //
 // Content is a plain data model rendered by a small template, for two reasons: code samples
 // containing `{{ }}` would otherwise be parsed as Glimmer, and keeping prose as data means editing
@@ -125,11 +126,12 @@ export default class CookbookPage extends Component {
                     <a href="#{{chapter.id}}">{{chapter.title}}</a>
                 {{/each}}
                 <div class="gdg-cookbook__toc-note">
-                    Deep guides live in the addon:
+                    This is the whole guide — the addon's former
                     <code>DATA.md</code>
                     and
-                    <code>THEMING.md</code>. Every other tab above is a working demo of something
-                    described here.
+                    <code>THEMING.md</code>
+                    now live here as chapters, so there is exactly one copy of each. Every other tab
+                    above is a working demo of something described here.
                 </div>
             </nav>
 

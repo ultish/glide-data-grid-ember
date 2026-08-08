@@ -31,7 +31,7 @@
 // ============================================================================================
 // WHY EVERY DISPLAY STRING IS PRECOMPUTED AT MUTATION TIME
 // ============================================================================================
-// DATA.md's first rule: `getCellContent` must be an O(1) lookup, never a computation. It runs once
+// The cookbook's first data rule: `getCellContent` must be an O(1) lookup, never a computation. It runs once
 // per painted cell inside the draw loop (`render/data-grid-render.cells.ts`). So `tickRow()` — which
 // runs once per *changed* row — does all the `toFixed`/`toLocaleString` formatting and stores the
 // result; `streamingGetCellContent` only ever indexes arrays. This also satisfies the "display

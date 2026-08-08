@@ -97,16 +97,19 @@ copy-pasteable recipes for each task you'll hit when integrating.
 
 ## Deeper guides
 
-Both are shipped inside the published package.
+All of them are chapters of the **Cookbook** tab in the demo app above — one place, every recipe
+runnable next to the demo that proves it.
 
-- **[DATA.md](glide-data-grid-ember/DATA.md)** — where cell data comes from. Read this before
-  wiring anything real up: because the grid pulls cells during paint, the most natural-looking
-  `@getCellContent` never repaints, and this explains why and what to write instead. Also covers
-  `recordsSource` (the packaged version of the recommended pattern), paged/streamed data, and where
-  to put formatting so it stays off the paint path.
-- **[THEMING.md](glide-data-grid-ember/THEMING.md)** — the override precedence chain, a
-  copy-pasteable dark theme, every `Theme` field and what it controls, the `--gdg-*` CSS custom
-  properties, and the CSS-variable bridge for design systems.
+- **Using the grid in Ember** — where cell data comes from. Read this before wiring anything real
+  up: because the grid pulls cells during paint, the most natural-looking `@getCellContent` never
+  repaints, and this explains why and what to write instead. Also covers `recordsSource` (the
+  packaged version of the recommended pattern), Ember Data and GraphQL, paged/streamed data, and
+  where to put formatting so it stays off the paint path.
+- **Theming** and **Theme reference** — the override precedence chain, a copy-pasteable dark theme,
+  every `Theme` field and what it controls, the `--gdg-*` CSS custom properties, and the
+  CSS-variable bridge for design systems (with the working DaisyUI integration).
+- **Performance rules** — the identity-stability rule, which is the one footgun here that fails
+  silently: no error, no warning, no visual difference, just a slower grid.
 
 ## Contributing
 

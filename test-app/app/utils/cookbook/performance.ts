@@ -44,7 +44,7 @@ getCellContent = ([col, row]) => this.project(col, row);
         },
         {
             kind: "p",
-            text: "**The reactivity rule.** Autotracking only records reads made *during* the tracking frame. A `@getCellContent` closure that reads tracked state lazily — later, when the grid calls it — never registers a dependency, so mutating that state repaints nothing. `DATA.md` has the mechanism and the two patterns that work; `recordsSource` packages the safe one.",
+            text: "**The reactivity rule.** Autotracking only records reads made *during* the tracking frame. A `@getCellContent` closure that reads tracked state lazily — later, when the grid calls it — never registers a dependency, so mutating that state repaints nothing. The *Using the grid in Ember* chapter has the mechanism and the two patterns that work; `recordsSource` packages the safe one.",
         },
         {
             kind: "p",

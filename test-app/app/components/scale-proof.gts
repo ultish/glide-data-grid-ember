@@ -1,6 +1,7 @@
-// The measurement that closes `glide-data-grid-ember/DATA.md`'s "Status of this recommendation".
+// The measurement that closed the addon's old `DATA.md` "Status of this recommendation" question
+// (that file is now the cookbook's "Using the grid in Ember" chapter).
 //
-// DATA.md tells every consumer to project rows through a per-row memoized view model, and the addon
+// That chapter tells every consumer to project rows through a per-row memoized view model, and the addon
 // now ships that as `recordsSource`. Up to Phase 8 the *eager-read* half was browser-verified (see
 // `tracking-demo.gts`, which this component renders below) but the *per-row memoization* half had
 // only been reasoned about, and later measured in Node. This component runs it in a real browser, at
@@ -155,7 +156,7 @@ export default class ScaleProof extends Component {
 
     /**
      * Control #2 / the contrast: a new `records` array identity rebuilds every per-row cache, which
-     * is exactly DATA.md's "the one way to break it". Expect the full row count. The `Employee`
+     * is exactly the cookbook's "the one way to break it". Expect the full row count. The `Employee`
      * objects are the same instances -- only the array identity changed.
      */
     @action
