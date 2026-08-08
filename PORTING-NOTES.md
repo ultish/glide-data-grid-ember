@@ -4032,6 +4032,28 @@ misalign column indexes in the copy buffer and produce a TSV with values under t
 An `AbortController` is now held per controller and aborted in `destroy()`, matching source's
 `abortControllerRef`, so a consumer loading a range asynchronously can cancel when the grid goes away.
 
+## Browser-testing gotchas discovered 2026-08-08 (add to the standing list)
+
+Three separate times this session, a **working** feature looked broken because of the harness, not
+the code. All three cost real time; none was a defect.
+
+1. **`document.activeElement` is not what you assume.** The Chrome-automation tool's synthetic
+   clicks do not focus the grid root, and `onKeyDown` early-returns on `!this.isFocused` -- so every
+   keyboard feature silently does nothing. **Assert `document.activeElement === root` before
+   concluding a keyboard feature is broken**, and prefer an explicit `root.focus()` in the probe.
+2. **Ember has not rendered yet when your probe runs.** Dispatching an event and querying the DOM in
+   the same `javascript_tool` call reads the *pre-render* DOM. Split the dispatch and the assertion
+   into two calls, or the feature will look dead.
+3. **Vite's pre-bundle cache goes stale on addon changes.** `pnpm build` updating `dist/` is not
+   enough; the dev server can keep serving the old module. `rm -rf test-app/node_modules/.vite` and
+   restart. This is DEV_BUILD_GUIDE.md's "Scenario B" and it is worth trying *early*, not late.
+
+The meta-lesson is the mirror image of the standing one about dormant code. That lesson says an
+unexercised feature is unverified however many phases have passed. This one says: **when a feature
+appears broken under automation, suspect the harness before the code** -- and the tell is that a
+human tries it by hand and it works immediately, which is exactly how the search false negative was
+caught.
+
 ## Phase 9e — search (COMPLETE, browser-verified, 2026-08-08)
 
 Three commits: the engine (`src/rendering/search.ts` + 30 tests), the controller wiring, and the

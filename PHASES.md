@@ -83,6 +83,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 7 | Demo app matching glideapps.com + browser verification | **Done, browser-verified, committed** (7a column-sort decorator `src/data-source/withColumnSort`; 7b column group headers enabled; 7c the demo-grid replica + consumer-built sort menu; 7e five addon defects the demo surfaced — see below) |
 | 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path + 8b `recordsSource`; 8c the streaming `updateCells()` demo; 8d the 1,000-row incremental proof + `object-scan` example; 8e `onVisibleRegionChanged` + `AsyncRecordsSource` + two real addon defects + the verification pass. **Those letters match `PORTING-NOTES.md`'s section headers** — go there for the implementation record) |
 | 9 | Backlog — deferred features (**not auto-scheduled**; 15 grouped items 9a–9o, see detail below) | Not scheduled |
+| 10 | Fully-featured demo + consumer cookbook (**schedulable work, not a gap list**) | Not started |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
 in a fresh session, this table is the source of truth; recreate the tracked tasks from it if
@@ -909,69 +910,107 @@ rather than rounded up to "verified".
 
 ---
 
+## Phase 10 — the fully-featured demo, and a consumer cookbook (ADDED 2026-08-08 at user request)
+
+Unlike Phase 9 this is **ordinary schedulable work with a definition of done**, not a backlog of
+gaps. Two deliverables, and they are deliberately paired: the demo is what proves the cookbook is
+true, and the cookbook is what makes the demo legible to someone who did not build it.
+
+### 10a — `<DemoGrid>` becomes the single fully-featured reference grid
+
+**The problem it solves is one this project has already been burned by twice.** The standing lesson
+from Phase 7e, restated in Phase 8 and again this session: *a feature no demo has ever switched on
+is effectively unverified code, however many phases have been "browser-verified".* Turning on row
+markers, column groups and header icons for the first time in Phase 7 surfaced five latent defects
+at once. Today the shipped features are scattered across six demos, and several have **no demo
+coverage at all** — which means the next person to enable one is the person who finds its bugs.
+
+Known gaps at the time of writing, each of which 10a must close:
+
+- **Context menus on group headers** and **the row-marker coordinate offset** (9d shipped both;
+  `<DemoGrid>` has neither row markers nor column groups, so neither path has ever run).
+- **Column auto-sizing** is exercised only by `<DaisyDemo>`.
+- **`freezeColumns`** is a shipped arg no demo sets.
+- **`@getCellsForSelection`** has still never been driven in a browser (noted as a loose end when it
+  landed).
+- **Row markers, column groups, header icons** are only in `<GlideDemo>`.
+- Whatever 9h adds (fill handle, row reorder) must land here too, or it inherits the same problem.
+
+The target is one grid that has **every shipped feature switched on**, with toggles where two
+settings are mutually exclusive. Treat the toggle row as part of the deliverable: it is what makes a
+regression visible without reading code. Where a feature genuinely cannot coexist with another,
+say so in a comment rather than silently omitting it.
+
+**Do not delete the other demos.** They each prove something specific and hard to prove in a
+kitchen-sink grid — `<StreamingDemo>` the damage path under load, `<ScaleProof>` the 1,000-row
+incremental projection, `<AsyncDemo>` paging, `<TrackingDemo>` autotracking, `<DaisyDemo>` live
+theme switching. 10a is about coverage of *args*, not replacing those proofs.
+
+### 10b — `COOKBOOK.md`: how to actually use this addon in an Ember app
+
+There is no document that answers "I have an Ember app, how do I put this grid in it?". `THEMING.md`
+and `DATA.md` are excellent but are topic guides, and 9n correctly notes there is no API reference.
+The cookbook is the third, different thing: **task-oriented recipes**, each a complete copy-pasteable
+example.
+
+Suggested contents, roughly in the order a real integration hits them:
+
+1. Install and the one-line render. What `@columns` / `@rows` / `@getCellContent` mean, and that the
+   grid sizes to its container (so the container needs a height).
+2. Where data comes from — link to `DATA.md`, don't restate it. Show `recordsSource` for the common
+   case and `AsyncRecordsSource` for paged.
+3. Editing: `@onCellsEdited`, and the "consumer owns the data" contract — the grid never mutates.
+4. Selection, row markers, and select-all.
+5. Sorting, and why the header menu is consumer chrome (`@onHeaderMenuClick` + `withColumnSort`).
+6. Theming — link `THEMING.md`; show the DaisyUI/CSS-variable bridge as the "my app already has a
+   design system" recipe.
+7. Search: the built-in `<GlideSearchBar>` *and* the app-owned-input recipe.
+8. Context menus.
+9. Custom cell types — this is also 9l's missing "bring your own cell type" doc; write it once, here.
+10. **Performance rules, as their own chapter.** Not an appendix: the identity-stability rule is the
+    single biggest silent footgun this addon has, and it has bitten this project repeatedly.
+    `@theme`, `@prelightCells`, `@highlightRegions`, `@getCellRenderer`, `@extraCells`,
+    `@getRowThemeOverride` are all identity-compared by `computeCanBlit`; a fresh object or inline
+    arrow per render silently disables the scroll blit fast path with **no error and no visual
+    difference**. Say plainly: build them in a `@cached` getter or a module-scope constant.
+11. Gotchas worth stating once: the grid is a canvas so DOM-assertion testing buys little; `RowID`
+    cells are not searchable; the addon ships CSS that must be reachable (it is imported by the
+    component, so this is automatic — say so, since consumers will ask).
+
+**Constraints.** The addon's `README.md` is a build artifact — **do not hand-edit it** (established
+in Phase 6). Every recipe must be copy-pasteable and must actually run; the cheapest way to keep
+that true is to lift them from `<DemoGrid>` once 10a exists, which is the other reason these two
+deliverables are one phase.
+
 ## THE QUEUE — start here (accurate as of 2026-08-08, end of session)
 
-**Done this session** (branch `phase-9-partial`, 7 commits): the four draw-hook passthroughs and
-`@extraCells` (9g/9l), the vitest harness + 425 tests (9a, ongoing), Glint v2, prettier/eslint config
-repair, `getCellsForSelection` (9g), and **all of 9q** — the structural-CSS migration *and* the
-overlay-editor chrome, so the addon's DOM is now fully restylable from a consuming app.
+**Done this session** (branch `phase-9-partial`): 9q both halves (the addon's DOM is now fully
+restylable), 9e search (engine + controller + opt-in `<GlideSearchBar>` + an app-owned-input demo),
+the OKLCH parser fix, the CSS-variable theming bridge with a live DaisyUI demo, two real
+overlay-editor defects, 9d context menus, and 9i column auto-sizing. Test suite 425 -> 547.
 
-**Next, in agreed order:**
+**Next, in agreed order** (user chose features over tests, 2026-08-08):
 
-1. ~~**9q second half — overlay-editor CSS.**~~ **DONE 2026-08-08, browser-verified.** Its sequencing
-   constraint is discharged: a `<GlideSearchBar>` can now be added without shipping an
-   un-restylable component and migrating it twice.
-2. **9e — search.** Unblocked, and now unblocked on the styling side too. **Settle the OPEN DECISION
-   in 9e first** (does the addon ship the UI?). Result highlighting can reuse the `@highlightRegions`
-   arg landed this session. If a `<GlideSearchBar>` is shipped, style it in a fourth stylesheet
-   following the same conventions — `.gdg-root`-scoped, `var(--gdg-*)` for theme values, and the
-   shared `.gdg-editor-input`/`.gdg-editor-button` primitives where they fit.
-3. ~~**DaisyUI/Tailwind theming.**~~ **DONE 2026-08-08, browser-verified.** Two commits: the OKLCH
-   parser fix, then `src/rendering/css-theme.ts` (`CssThemeWatcher` + `themeFromCss` +
-   `resolveCssColor`), a `test-app` demo with a live DaisyUI theme picker, and a THEMING.md section.
-   Tailwind 4 + DaisyUI 5 are **test-app devDependencies only** — the addon has no knowledge of
-   either. Both blockers below were real and are both resolved; see PORTING-NOTES.md for the
-   Embroider/Tailwind wiring trap that cost the most time. Original note kept:
-   Blocker is known and verified: Chrome returns `oklch()` unconverted
-   from `getComputedStyle`, and `parseToRgba` mangles it to garbage — DaisyUI 5 is OKLCH. Must also
-   handle **runtime theme switching** (user switches DaisyUI themes live), which means a
-   `MutationObserver` on `data-theme` producing a *new* theme object only on real change —
-   `theme` is identity-compared by `computeCanBlit`.
-4. **9p — Playwright.** User will prioritise after 2 and 3.
-
-**9e (search) — DONE 2026-08-08, browser-verified.** Three commits: `feat(9e-a)` the engine
-(`src/rendering/search.ts`, 30 tests), `feat(9e-b)` the controller wiring, `wip(9e-c)` the
-`<GlideSearchBar>` (whose message is wrong — see below). Confirmed working end to end: `Ctrl/Cmd+F`
-opens the bar, typing streams results in, matches highlight via `prelightCells`, and next/prev
-navigates *and* scrolls the grid to the match ("2 of 982 results").
-
-> **CORRECTION, and the lesson is the point.** The `wip(9e-c)` commit message and an earlier version
-> of this section both claimed the bar did not render. **That was a false negative from the test
-> harness, not a defect.** The Chrome-automation tool's synthetic clicks do not focus the grid root
-> — `document.activeElement` stayed `BODY` — and `onKeyDown` early-returns on `!this.isFocused`, so
-> the keybinding never fired. Real clicks focus it fine; the user found this immediately by just
-> using it. **Add to the browser-testing gotchas: before concluding a keyboard feature is broken,
-> assert `document.activeElement` is what you think it is.** Two hours of "debugging" a working
-> feature came from not checking that.
->
-> Also learned while confirming: `RowID` cells are **not searchable**, so searching `row-4` in the
-> demo finds nothing. That is faithful — source's match-string switch omits `RowID` (and Loading,
-> Protected, Drilldown) — but it is surprising enough that it belongs in the API docs.
-
-**Consumers can put the search input anywhere**, not just in the grid: set `@showSearch={{true}}`
-(highlighting is gated on search being open) and drive `api.setSearchValue()` from your own input,
-skipping `<GlideSearchBar>`. `@searchResults` replaces the built-in scanner entirely for
-server-side search. This was an explicit user requirement raised on 2026-08-08 — an always-visible
-external search box — and it works today with no addon change.
-
-**Remaining on 9e:** nothing blocking. Worth doing when convenient: fold the correction above into
-PORTING-NOTES.md's browser-testing gotcha list, and document the non-searchable cell kinds.
+1. **9h — fill handle + row reorder + autoscroll.** The last of the four feature items the user
+   picked; the other three are done. **Build autoscroll-past-the-viewport-edge first and once** --
+   drag-extend, row reorder and fill-drag all need it, and doing it three times is how it ends up
+   subtly different three times. Chunkiest remaining item: touches selection, drag state and
+   rendering.
+2. **Phase 10 — fully-featured demo + `COOKBOOK.md`** (see the section above). Worth doing soon
+   after 9h, because 9h's features would otherwise inherit the same "no demo switches it on"
+   problem that 10a exists to end.
+3. **9p — Playwright.** Deferred by the user in favour of features, but note what it would have
+   caught: this session produced a *false negative* where a working search feature was declared
+   broken because the automation harness never focused the grid root.
 
 **Explicitly parked:** lint/format cleanup (user: "id prefer doing feature than fixing linting for
 now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
 deferred by user decision.
 
-**Loose end:** `getCellsForSelection` has never been exercised in a browser. Low risk — `rowEnd` is
+**Loose ends** (all cheap, all folded into Phase 10a's checklist): `getCellsForSelection` has never
+been exercised in a browser; 9d's group-header context menu and row-marker offset have not either
+(`<DemoGrid>` has neither groups nor row markers); 9i auto-sizing is demoed only by `<DaisyDemo>`.
+Original note follows. `getCellsForSelection` has never been exercised in a browser. Low risk — `rowEnd` is
 clamped to `args.rows` at every call site, so the default path is provably identical to the previous
 behaviour — but the click hasn't happened.
 
