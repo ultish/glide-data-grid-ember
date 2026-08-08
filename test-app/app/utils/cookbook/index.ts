@@ -5,10 +5,12 @@ import type { Section } from "./types.ts";
 import { renderSection } from "./render.ts";
 import { columnsSection } from "./columns.ts";
 import { dataSection } from "./data.ts";
+import { emberSection } from "./ember.ts";
 import { editingSection } from "./editing.ts";
 import { selectionSection } from "./selection.ts";
 import { sortingSection } from "./sorting.ts";
 import { themingSection } from "./theming.ts";
+import { themeReferenceSection } from "./theme-reference.ts";
 import { searchSection } from "./search.ts";
 import { contextMenusSection } from "./context-menus.ts";
 import { customCellsSection } from "./custom-cells.ts";
@@ -19,10 +21,12 @@ export const SECTIONS: readonly Section[] = [
     renderSection,
     columnsSection,
     dataSection,
+    emberSection,
     editingSection,
     selectionSection,
     sortingSection,
     themingSection,
+    themeReferenceSection,
     searchSection,
     contextMenusSection,
     customCellsSection,
