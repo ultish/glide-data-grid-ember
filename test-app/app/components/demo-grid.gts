@@ -9,7 +9,11 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { on } from "@ember/modifier";
-import GlideDataGrid, { type GlideDataGridApi } from "glide-data-grid-ember/components/glide-data-grid";
+import { htmlSafe } from "@ember/template";
+import GlideDataGrid, {
+    type GlideDataGridApi,
+    type ContextMenuEventArgs,
+} from "glide-data-grid-ember/components/glide-data-grid";
 import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";
 import type { SearchState } from "glide-data-grid-ember/components/glide-search-bar";
 import { demoColumns, demoGetCellContent, demoGetRowThemeOverride, DEMO_ROW_COUNT } from "test-app/utils/demo-data";
@@ -168,6 +172,48 @@ export default class DemoGrid extends Component {
         this.gridApi?.setSearchValue("");
     }
 
+    // --- Phase 9d: context menus ------------------------------------------------------------------
+    // The addon fires the event and hands over the geometry; the menu itself is consumer chrome,
+    // exactly like the sort menu in `glide-demo.gts`. All three targets are wired so the demo
+    // proves each one is reachable, including the group header -- which only exists on grids that
+    // set `column.group`, so this demo shows the cell/header pair and `<GlideDemo>` is where a
+    // grouped grid lives.
+    @tracked contextMenu: { x: number; y: number; label: string } | undefined;
+
+    private openContextMenu(label: string, event: ContextMenuEventArgs): void {
+        // Suppressing the browser menu is opt-in -- the addon deliberately does not do it for you.
+        event.preventDefault();
+        this.contextMenu = { x: event.clientX, y: event.clientY, label };
+    }
+
+    @action
+    handleCellContextMenu(location: Item, event: ContextMenuEventArgs): void {
+        this.openContextMenu(`Cell ${location[0]}, ${location[1]}`, event);
+    }
+
+    @action
+    handleHeaderContextMenu(col: number, event: ContextMenuEventArgs): void {
+        this.openContextMenu(`Column ${col} header`, event);
+    }
+
+    @action
+    handleGroupHeaderContextMenu(col: number, event: ContextMenuEventArgs): void {
+        this.openContextMenu(`Group header over column ${col}`, event);
+    }
+
+    @action
+    closeContextMenu(): void {
+        this.contextMenu = undefined;
+    }
+
+    /** `position: fixed` off the event's viewport coordinates. `htmlSafe` over two numbers this
+     *  component produced itself -- no external input reaches it. */
+    get contextMenuStyle(): ReturnType<typeof htmlSafe> {
+        const menu = this.contextMenu;
+        if (menu === undefined) return htmlSafe("");
+        return htmlSafe(`position: fixed; left: ${menu.x}px; top: ${menu.y}px;`);
+    }
+
     @action
     handleExternalSearchInput(ev: Event): void {
         this.gridApi?.setSearchValue((ev.target as HTMLInputElement).value);
@@ -303,6 +349,9 @@ export default class DemoGrid extends Component {
                     @showSearch={{this.showSearch}}
                     @onReady={{this.handleReady}}
                     @onSearchStateChange={{this.handleSearchStateChange}}
+                    @onCellContextMenu={{this.handleCellContextMenu}}
+                    @onHeaderContextMenu={{this.handleHeaderContextMenu}}
+                    @onGroupHeaderContextMenu={{this.handleGroupHeaderContextMenu}}
                     {{! UI #1: the addon's own bar. The block renders inside the grid's own root,
                         which is where its `.gdg-root`-scoped CSS and `--gdg-*` theme variables live.
                         Both values come from the block, so no `@onReady` plumbing is needed for it. }}
@@ -311,6 +360,23 @@ export default class DemoGrid extends Component {
                     <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
                 </GlideDataGrid>
             </div>
+
+            {{#if this.contextMenu}}
+                {{! Consumer-owned chrome, positioned from the event's viewport coordinates. }}
+                <div
+                    class="gdg-demo-sort-menu"
+                    role="menu"
+                    data-test-context-menu
+                    style={{this.contextMenuStyle}}
+                >
+                    <div class="gdg-demo-sort-menu__title">{{this.contextMenu.label}}</div>
+                    <button
+                        type="button"
+                        class="gdg-demo-sort-menu__item"
+                        {{on "click" this.closeContextMenu}}
+                    >Close</button>
+                </div>
+            {{/if}}
         </div>
     </template>
 }

@@ -407,6 +407,38 @@ export interface GridHostArgs {
      * search state reaches Ember reactivity at all.
      */
     readonly onSearchStateChange?: (state: SearchState) => void;
+
+    // --- Phase 9d: context menus ---------------------------------------------------------------
+    // The grid ships no menu UI, only the events -- exactly the precedent `onHeaderMenuClick` set,
+    // and what source does too. Each hands you the hit-tested target plus enough geometry to
+    // position your own menu.
+    //
+    // **The browser's own menu is NOT suppressed unless you call `preventDefault()`**, matching
+    // source. That keeps "right-click still works normally" the default and makes taking it over an
+    // explicit act.
+
+    /** Right-click on a data cell. `location` is in your coordinate space (no row-marker column). */
+    readonly onCellContextMenu?: (location: Item, event: ContextMenuEventArgs) => void;
+    /** Right-click on a column header. `col` is in your coordinate space. */
+    readonly onHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
+    /** Right-click on a column *group* header (the band above the headers, when `column.group` is
+     *  set). `col` is in your coordinate space. */
+    readonly onGroupHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
+}
+
+/** What a context-menu callback receives alongside the target. */
+export interface ContextMenuEventArgs {
+    /** Bounds of the cell/header that was hit, in canvas space -- the same space
+     *  `onHeaderMenuClick`'s `bounds` uses, so a menu can be positioned identically. */
+    readonly bounds: Rectangle;
+    /** Pointer position relative to the grid root. */
+    readonly localEventX: number;
+    readonly localEventY: number;
+    /** Pointer position in viewport coordinates, for a `position: fixed` menu. */
+    readonly clientX: number;
+    readonly clientY: number;
+    /** Suppresses the browser's native context menu. Not called for you. */
+    readonly preventDefault: () => void;
 }
 
 /** A snapshot of everything a search UI needs to render. Handed to `onSearchStateChange`. */
@@ -492,6 +524,10 @@ interface ResolvedGridHostArgs {
     readonly searchResults: CellList | undefined;
     readonly onSearchResultsChanged: ((results: CellList, navIndex: number) => void) | undefined;
     readonly onSearchStateChange: ((state: SearchState) => void) | undefined;
+
+    readonly onCellContextMenu: ((location: Item, event: ContextMenuEventArgs) => void) | undefined;
+    readonly onHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
+    readonly onGroupHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -864,6 +900,7 @@ export class GridHostController {
         this.scrollerEl.addEventListener("scroll", this.onScroll);
         this.root.addEventListener("mousemove", this.onMouseMove);
         this.root.addEventListener("mousedown", this.onMouseDown);
+        this.root.addEventListener("contextmenu", this.onContextMenu);
         this.root.addEventListener("focus", this.onFocus);
         this.root.addEventListener("blur", this.onBlur);
         // Keyboard nav (Phase 3b) lives on `root`, consistent with the mouse listeners above.
@@ -963,6 +1000,10 @@ export class GridHostController {
             searchResults: args.searchResults,
             onSearchResultsChanged: args.onSearchResultsChanged,
             onSearchStateChange: args.onSearchStateChange,
+
+            onCellContextMenu: args.onCellContextMenu,
+            onHeaderContextMenu: args.onHeaderContextMenu,
+            onGroupHeaderContextMenu: args.onGroupHeaderContextMenu,
         };
     }
 
@@ -1313,6 +1354,7 @@ export class GridHostController {
         this.scrollerEl.removeEventListener("scroll", this.onScroll);
         this.root.removeEventListener("mousemove", this.onMouseMove);
         this.root.removeEventListener("mousedown", this.onMouseDown);
+        this.root.removeEventListener("contextmenu", this.onContextMenu);
         this.root.removeEventListener("focus", this.onFocus);
         this.root.removeEventListener("blur", this.onBlur);
         this.root.removeEventListener("keydown", this.onKeyDown);
@@ -1967,6 +2009,62 @@ export class GridHostController {
         if (!this.isFocused) return;
         this.isFocused = false;
         this.scheduleFullRedraw();
+    };
+
+    /**
+     * Right-click dispatch (Phase 9d). Ports source's `onContextMenuImpl` (`data-grid.tsx:1251`)
+     * plus `data-editor.tsx`'s routing of it to the three per-target props.
+     *
+     * This is deliberately thin: the hit test (`resolveMouseHit`) and the bounds computation
+     * (`computeCellRect`) already existed and are used unchanged by click handling, so the whole
+     * feature is one more listener over machinery that works. That is why 9d was sized `S`.
+     *
+     * Coordinate space: `location`/`col` are handed out in the **consumer's** space, with the
+     * row-marker column subtracted, exactly as source does (`args.location[0] - rowMarkerOffset`).
+     * A right-click on the row-marker column itself yields a negative column and is dropped rather
+     * than reported as column -1, since no consumer callback could do anything sensible with it.
+     */
+    private readonly onContextMenu = (ev: MouseEvent): void => {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+        if (
+            args.onCellContextMenu === undefined &&
+            args.onHeaderContextMenu === undefined &&
+            args.onGroupHeaderContextMenu === undefined
+        ) {
+            return;
+        }
+
+        const hit = this.resolveMouseHit(args, ev);
+        if (hit.kind === "out-of-bounds") return;
+
+        const [mangledCol, row] = hit.location;
+        const col = mangledCol - args.rowMarkerOffset;
+        if (col < 0) return;
+
+        const eventArgs: ContextMenuEventArgs = {
+            bounds: this.computeCellRect(args, mangledCol, row),
+            localEventX: hit.localX,
+            localEventY: hit.localY,
+            clientX: ev.clientX,
+            clientY: ev.clientY,
+            // Not called for us -- the browser menu stays unless the consumer suppresses it.
+            preventDefault: () => ev.preventDefault(),
+        };
+
+        if (hit.kind === "cell") {
+            args.onCellContextMenu?.([col, row], eventArgs);
+            return;
+        }
+
+        // `resolveMouseHit` reports both header rows as `kind: "header"`, distinguished by the row
+        // index: -1 is the column header, -2 the group header above it (see `onItemHovered`'s note
+        // on the same encoding).
+        if (row === -2) {
+            args.onGroupHeaderContextMenu?.(col, eventArgs);
+        } else {
+            args.onHeaderContextMenu?.(col, eventArgs);
+        }
     };
 
     private readonly onMouseDown = (ev: MouseEvent): void => {

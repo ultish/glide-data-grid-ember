@@ -29,13 +29,14 @@ import {
     GridHostController,
     type GridHostArgs,
     type SearchState,
+    type ContextMenuEventArgs,
     type RowMarkerKind,
     type CellsForSelectionCallback,
 } from "../-private/grid-host-controller.ts";
 
 // Part of this component's public contract (`@onSearchStateChange`), so re-exported here rather
 // than making consumers import from `-private/`.
-export type { SearchState } from "../-private/grid-host-controller.ts";
+export type { SearchState, ContextMenuEventArgs } from "../-private/grid-host-controller.ts";
 
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
 import { createCombinedCellRenderer } from "../rendering/extra-cells/index.ts";
@@ -212,6 +213,13 @@ export interface GlideDataGridSignature {
         searchResults?: CellList;
         onSearchResultsChanged?: (results: CellList, navIndex: number) => void;
         onSearchStateChange?: (state: SearchState) => void;
+
+        // Context menus (Phase 9d). The grid ships no menu UI, only the events -- same precedent as
+        // `@onHeaderMenuClick`. The browser's native menu is NOT suppressed unless you call the
+        // event's `preventDefault()`.
+        onCellContextMenu?: (location: Item, event: ContextMenuEventArgs) => void;
+        onHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
+        onGroupHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
     };
 }
 
@@ -300,6 +308,9 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         searchResults: this.args.searchResults,
         onSearchResultsChanged: this.args.onSearchResultsChanged,
         onSearchStateChange: this.handleSearchStateChange,
+        onCellContextMenu: this.args.onCellContextMenu,
+        onHeaderContextMenu: this.args.onHeaderContextMenu,
+        onGroupHeaderContextMenu: this.args.onGroupHeaderContextMenu,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s
