@@ -11,23 +11,66 @@ import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 import { demoColumns, demoGetCellContent, demoGetRowThemeOverride, DEMO_ROW_COUNT } from "test-app/utils/demo-data";
+import { cached } from "@glimmer/tracking";
 import {
-    getCellRenderer as defaultGetCellRenderer,
-    createCombinedCellRenderer,
     allExtraCells,
     getDataEditorDarkTheme,
     type GridColumn,
     type GridCell,
     type Item,
     type Theme,
+    type CellList,
+    type DrawCellCallback,
+    type DrawHeaderCallback,
+    type Highlight,
 } from "glide-data-grid-ember/rendering/index";
 
-// Phase 5a: combines the Phase 4 built-in registry (text/number/boolean/uri/markdown/bubble/
-// drilldown/image/etc, dispatched by `cell.kind`) with Phase 5's `CustomRenderer`-based "extra
-// cells" (sparkline/star/range/spinner/..., dispatched via `isMatch` against `GridCellKind.Custom`
-// cells) -- see `glide-data-grid-ember/src/rendering/extra-cells/index.ts` for the combinator's
-// architecture note. Built once at module scope since neither input ever changes.
-const getCellRenderer = createCombinedCellRenderer(defaultGetCellRenderer, allExtraCells);
+// Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
+// call. The grid now combines Phase 5's `CustomRenderer` cells (sparkline/star/range/...) with the
+// Phase 4 built-in registry itself, behind a `@cached` getter that keeps the resulting
+// `getCellRenderer` reference-stable for the scroll blit fast path. `allExtraCells` is a
+// module-scope constant, which is the stable reference that arg wants.
+
+// --- Phase 9: consumer draw hooks (`@drawCell` / `@drawHeader` / `@prelightCells` /
+// `@highlightRegions`) -------------------------------------------------------------------------
+// All four are `DrawGridArg` fields the render engine has supported since Phase 1 but which the
+// controller hardcoded to `undefined` until Phase 9. This demo exists to prove they are actually
+// reachable from a consumer -- toggled, so the difference is visible rather than asserted.
+//
+// Both callbacks are module-scope constants on purpose: a fresh arrow per render is the exact shape
+// that silently broke the blit path in Phase 6.
+const drawCellHook: DrawCellCallback = (args, drawContent) => {
+    drawContent();
+    const { ctx, rect, col, row } = args;
+    if ((col + row) % 7 !== 0) return;
+    ctx.save();
+    ctx.fillStyle = "#e5484d";
+    ctx.beginPath();
+    ctx.arc(rect.x + rect.width - 8, rect.y + 8, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+};
+
+const drawHeaderHook: DrawHeaderCallback = (args, drawContent) => {
+    drawContent();
+    const { ctx, rect, columnIndex } = args;
+    if (columnIndex % 3 !== 0) return;
+    ctx.save();
+    ctx.fillStyle = "#0090ff";
+    ctx.fillRect(rect.x, rect.y + rect.height - 3, rect.width, 3);
+    ctx.restore();
+};
+
+// `Highlight`/`CellList` values must be reference-stable across draws -- `computeCanBlit`
+// identity-compares both. Frozen module-scope constants, swapped in wholesale by the toggle.
+const DEMO_HIGHLIGHT_REGIONS: readonly Highlight[] = [
+    { color: "#4f9ffb33", range: { x: 1, y: 2, width: 3, height: 4 } },
+];
+const DEMO_PRELIGHT_CELLS: CellList = [
+    [1, 8],
+    [2, 8],
+    [3, 8],
+];
 
 // Phase 6: the stock dark theme, resolved once at module scope. `getDataEditorDarkTheme()` returns
 // a `Partial<Theme>` overlay meant to be layered over the base theme -- passing it as `@theme` is
@@ -48,6 +91,35 @@ export default class DemoGrid extends Component {
 
     // Phase 6: light/dark toggle. `undefined` = no global overlay, i.e. the stock light theme.
     @tracked isDark = false;
+
+    // Phase 9: draw-hooks toggle (see the module-scope hooks above).
+    @tracked showDrawHooks = false;
+
+    get drawCell(): DrawCellCallback | undefined {
+        return this.showDrawHooks ? drawCellHook : undefined;
+    }
+
+    get drawHeader(): DrawHeaderCallback | undefined {
+        return this.showDrawHooks ? drawHeaderHook : undefined;
+    }
+
+    // `@cached` isn't strictly needed while these return frozen module-scope constants, but it is
+    // the pattern a real consumer building regions from tracked state must use -- an ordinary getter
+    // that allocates would return a fresh array on every draw and kill the blit path.
+    @cached
+    get highlightRegions(): readonly Highlight[] | undefined {
+        return this.showDrawHooks ? DEMO_HIGHLIGHT_REGIONS : undefined;
+    }
+
+    @cached
+    get prelightCells(): CellList | undefined {
+        return this.showDrawHooks ? DEMO_PRELIGHT_CELLS : undefined;
+    }
+
+    @action
+    toggleDrawHooks(): void {
+        this.showDrawHooks = !this.showDrawHooks;
+    }
 
     get theme(): Partial<Theme> | undefined {
         return this.isDark ? DARK_THEME : undefined;
@@ -101,12 +173,15 @@ export default class DemoGrid extends Component {
                 <button type="button" data-test-theme-toggle {{on "click" this.toggleTheme}}>
                     {{if this.isDark "Switch to light theme" "Switch to dark theme"}}
                 </button>
+                <button type="button" data-test-draw-hooks-toggle {{on "click" this.toggleDrawHooks}}>
+                    {{if this.showDrawHooks "Hide draw hooks" "Show draw hooks"}}
+                </button>
             </div>
             <div style="flex: 1 1 auto; min-height: 0;">
                 <GlideDataGrid
                     @columns={{this.columns}}
                     @getCellContent={{this.getCellContent}}
-                    @getCellRenderer={{getCellRenderer}}
+                    @extraCells={{allExtraCells}}
                     @rows={{this.rows}}
                     @theme={{this.theme}}
                     @getRowThemeOverride={{this.getRowThemeOverride}}
@@ -115,6 +190,10 @@ export default class DemoGrid extends Component {
                     @onCellsEdited={{this.handleCellsEdited}}
                     @showTrailingBlankRow={{true}}
                     @onRowAppended={{this.handleRowAppended}}
+                    @drawCell={{this.drawCell}}
+                    @drawHeader={{this.drawHeader}}
+                    @prelightCells={{this.prelightCells}}
+                    @highlightRegions={{this.highlightRegions}}
                 />
             </div>
         </div>

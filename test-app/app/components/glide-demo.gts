@@ -29,8 +29,6 @@ import { registerDestructor } from "@ember/destroyable";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 import { withColumnSort, type ColumnSort, type ColumnSortResult } from "glide-data-grid-ember/data-source/index";
 import {
-    getCellRenderer as defaultGetCellRenderer,
-    createCombinedCellRenderer,
     allExtraCells,
     type GridCell,
     type GridColumn,
@@ -44,8 +42,10 @@ import {
 } from "test-app/utils/glide-demo-data";
 
 // The "Performance" column is a Phase 5a sparkline `CustomCell`; the Phase 4 built-in registry
-// alone can't render it. Built once at module scope -- neither input ever changes.
-const getCellRenderer = createCombinedCellRenderer(defaultGetCellRenderer, allExtraCells);
+// alone can't render it. `@extraCells` (Phase 9) hands the array straight to the grid, which
+// combines it with the built-in registry behind a `@cached` getter -- so this demo no longer builds
+// a `getCellRenderer` itself. `allExtraCells` is a module-scope constant, i.e. the stable reference
+// that arg wants.
 
 // `rowMarkers: "both"` prepends one synthetic marker column inside the grid, so the `col` index
 // handed to `onHeaderMenuClick` (and every other mangled-space index) is one greater than the
@@ -290,7 +290,7 @@ export default class GlideDemo extends Component {
             <GlideDataGrid
                 @columns={{this.displayColumns}}
                 @getCellContent={{this.getCellContent}}
-                @getCellRenderer={{getCellRenderer}}
+                @extraCells={{allExtraCells}}
                 @rows={{GLIDE_DEMO_ROW_COUNT}}
                 @rowMarkers="both"
                 @rowSelect="multi"

@@ -24,6 +24,7 @@ export type {
     InnerGridCell,
     InnerGridColumn,
     CellArray,
+    GetCellsThunk,
     CellList,
     EditableGridCell,
     ReadWriteGridCell,
@@ -103,7 +104,7 @@ export { getDataEditorTheme, getDataEditorDarkTheme, mergeAndRealizeTheme, makeC
 // Per-row theme override callback (Phase 6) -- `(row: number) => Partial<Theme> | undefined`.
 // Defined next to the cell renderer that consumes it; re-exported here so consumers of
 // `<GlideDataGrid @getRowThemeOverride={{...}}>` can type their callback without a deep import.
-export type { GetRowThemeCallback } from "./render/data-grid-render.cells.ts";
+export type { GetRowThemeCallback, Highlight } from "./render/data-grid-render.cells.ts";
 
 // Selection writer (Phase 3a) -- pure GridSelection transform functions, ported from source's
 // `use-selection-behavior.ts` hook.

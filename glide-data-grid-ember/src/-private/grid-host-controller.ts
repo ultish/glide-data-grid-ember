@@ -53,6 +53,7 @@ import {
     booleanCellIsEditable,
     toggleBoolean,
 } from "../rendering/index.ts";
+import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
 import type {
     DrawGridArg,
     DragAndDropState,
@@ -71,6 +72,12 @@ import type {
     Theme,
     FullTheme,
     GetRowThemeCallback,
+    CellArray,
+    GetCellsThunk,
+    DrawCellCallback,
+    DrawHeaderCallback,
+    CellList,
+    Highlight,
     HoverInfo,
     SelectionBehaviorOptions,
     CellBuffer,
@@ -192,9 +199,19 @@ export interface GridHostArgs {
      * enabled purely by the *presence* of any one of these three callbacks, matching source's
      * `canResize = (onColumnResize ?? onColumnResizeEnd ?? onColumnResizeStart) !== undefined`.
      */
-    readonly onColumnResizeStart?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+    readonly onColumnResizeStart?: (
+        column: GridColumn,
+        newSize: number,
+        colIndex: number,
+        newSizeWithGrow: number
+    ) => void;
     readonly onColumnResize?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
-    readonly onColumnResizeEnd?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
+    readonly onColumnResizeEnd?: (
+        column: GridColumn,
+        newSize: number,
+        colIndex: number,
+        newSizeWithGrow: number
+    ) => void;
 
     /**
      * Live veto check during a column-reorder drag: return `false` to reject the current candidate
@@ -273,7 +290,77 @@ export interface GridHostArgs {
      * backtracking-rerender assertion.
      */
     readonly onVisibleRegionChanged?: (region: Rectangle) => void;
+
+    /**
+     * Reads a whole rectangle of cells at once, rather than one at a time through
+     * {@link getCellContent}. Mirrors source's `getCellsForSelection` prop.
+     *
+     * Pass **`true`** for the common case: the grid then synthesises one from your
+     * `getCellContent`, which is all a fully in-memory data source needs.
+     *
+     * Pass a **function** when a range can be fetched more cheaply in bulk than cell-by-cell (one
+     * query instead of N), or when cells outside the rendered window are not in memory at all — an
+     * `AsyncRecordsSource`-style paged source, say. `rect` is in **your** coordinate space (no
+     * row-marker column), the same space `getCellContent` sees.
+     *
+     * Return either a `CellArray` directly, or a `GetCellsThunk` (`() => Promise<CellArray>`) to
+     * load asynchronously.
+     *
+     * **The thunk form is not usable for copy, by design.** A `copy` event's `clipboardData` stops
+     * accepting `setData` once the handler has awaited anything, so this port only consults
+     * `getCellsForSelection` for copy when it answers synchronously, and otherwise falls back to
+     * reading cell-by-cell through `getCellContent`. Source instead awaits the thunk inside its
+     * copy handler and writes afterwards, which reads as a latent bug rather than something to
+     * reproduce. Deliberate divergence; see PORTING-NOTES.md.
+     */
+    readonly getCellsForSelection?: CellsForSelectionCallback | true;
+
+    // --- Phase 9: consumer draw hooks / overlays ---------------------------------------------------
+    // All four of these are `DrawGridArg` fields the render engine has supported since Phase 1
+    // (ported verbatim from source) but which the controller hardcoded to `undefined` until now.
+    // Exposing them is a pure passthrough -- no new rendering code was written for any of them.
+
+    /**
+     * Draw *over* a cell after the grid has drawn it, or replace the drawing entirely. Called for
+     * every painted cell; return `true` to signal you handled the cell and the built-in renderer
+     * should be skipped. Mirrors source's `drawCell` prop (`DataGridProps.drawCell`).
+     *
+     * This runs inside the paint loop for every visible cell, so keep it cheap and hoist it to a
+     * stable reference (see `prelightCells` below for why references matter here generally).
+     */
+    readonly drawCell?: DrawCellCallback;
+
+    /**
+     * The same hook for header cells. Mirrors source's `drawHeader` prop.
+     */
+    readonly drawHeader?: DrawHeaderCallback;
+
+    /**
+     * Cells to "prelight" -- drawn with a subtle highlight, used by source for things like showing
+     * which cells a pending fill/paste would touch. A plain `readonly Item[]`.
+     *
+     * **Must be a stable reference when its contents haven't changed.** `computeCanBlit`
+     * (`render/data-grid-render.blit.ts`) identity-compares this field, so returning a fresh array
+     * every draw silently disables the scroll blit fast path with no visible symptom -- the exact
+     * defect that went undetected from Phase 2 to Phase 6. Pass `undefined` (not `[]`) for "none",
+     * and build the array in a `@cached` getter, not inline in the template.
+     */
+    readonly prelightCells?: CellList;
+
+    /**
+     * Rectangular regions to tint/outline, e.g. to mark a search hit or a validation error. Mirrors
+     * source's `highlightRegions` prop. **Identity-compared by `computeCanBlit` exactly like
+     * `prelightCells` above -- the same stability rule applies.**
+     */
+    readonly highlightRegions?: readonly Highlight[];
 }
+
+/**
+ * Reads a rectangle of cells at once. `selection` is in the consumer's own coordinate space (no
+ * row-marker column). Returns the cells directly, or a thunk to load them asynchronously.
+ * Mirrors source's `DataGridSearchProps["getCellsForSelection"]`.
+ */
+export type CellsForSelectionCallback = (selection: Rectangle, abortSignal: AbortSignal) => GetCellsThunk | CellArray;
 
 export interface GridHostControllerOptions {
     readonly root: HTMLElement;
@@ -303,14 +390,11 @@ interface ResolvedGridHostArgs {
     readonly onHeaderMenuClick: ((col: number, bounds: Rectangle) => void) | undefined;
     readonly onCellsEdited: ((edits: readonly { location: Item; value: GridCell }[]) => void) | undefined;
     readonly onColumnResizeStart:
-        | ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void)
-        | undefined;
+        ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void) | undefined;
     readonly onColumnResize:
-        | ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void)
-        | undefined;
+        ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void) | undefined;
     readonly onColumnResizeEnd:
-        | ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void)
-        | undefined;
+        ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void) | undefined;
     readonly onColumnProposeMove: ((startIndex: number, endIndex: number) => boolean) | undefined;
     readonly onColumnMoved: ((startIndex: number, endIndex: number) => void) | undefined;
 
@@ -320,6 +404,13 @@ interface ResolvedGridHostArgs {
     readonly getRowThemeOverride: GetRowThemeCallback | undefined;
 
     readonly onVisibleRegionChanged: ((region: Rectangle) => void) | undefined;
+
+    readonly getCellsForSelection: CellsForSelectionCallback | true | undefined;
+
+    readonly drawCell: DrawCellCallback | undefined;
+    readonly drawHeader: DrawHeaderCallback | undefined;
+    readonly prelightCells: CellList | undefined;
+    readonly highlightRegions: readonly Highlight[] | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -538,6 +629,11 @@ export class GridHostController {
     private lastFullDrawArg: DrawGridArg | undefined = undefined;
     private cursorOverride: string | undefined = undefined;
     private destroyed = false;
+
+    // Phase 9. Handed to every `getCellsForSelection` call so a consumer loading a range
+    // asynchronously can cancel when the grid goes away. Aborted in `destroy()`. One per
+    // controller, matching source's `abortControllerRef`.
+    private readonly cellsForSelectionAbort = new AbortController();
     // Real DOM focus state (Phase 3a follow-up fix). The ported render engine deliberately
     // suppresses the selection ring when `isSelected && !isFocused && drawFocus`
     // (`render/data-grid-render.cells.ts:283`) -- mirrors source's behavior of dimming/hiding the
@@ -587,8 +683,8 @@ export class GridHostController {
     // `onColumnProposeMove` rejected the current `dropCol` (no drag-offset visual is drawn while
     // vetoed, mirrors source's `dragOffset` memo returning `undefined` in that case).
     private dragColState:
-        | { srcCol: number; startClientX: number; active: boolean; dropCol: number; vetoed: boolean }
-        | undefined = undefined;
+        { srcCol: number; startClientX: number; active: boolean; dropCol: number; vetoed: boolean } | undefined =
+        undefined;
 
     // Overlay editor state (Phase 4a) -- see `OverlayState` above. `undefined` = no editor open.
     private overlayState: OverlayState | undefined = undefined;
@@ -597,70 +693,45 @@ export class GridHostController {
         this.root = options.root;
         this.getArgsFn = options.getArgs;
 
+        // Everything structural now lives in `components/glide-data-grid.css`, scoped under
+        // `.gdg-root`, so a consuming app can restyle the grid's DOM with ordinary CSS (Tailwind,
+        // DaisyUI) instead of fighting inline styles with `!important`. Source ships the equivalent
+        // as a Linaria block; see that file's header for the full rationale.
+        this.root.classList.add("gdg-root");
+
+        // Stays in JS deliberately: this is a runtime *decision*, not a style. Forcing
+        // `position: relative` from the stylesheet would override a consumer who has deliberately
+        // positioned the container themselves; we only need to guarantee a positioning context
+        // exists for the absolutely-positioned children.
         if (getComputedStyle(this.root).position === "static") {
             this.root.style.position = "relative";
         }
-        this.root.style.overflow = "hidden";
         // Focusable so the grid can receive real DOM focus on click (see `isFocused` field comment
         // above). `tabIndex = 0` puts it in the natural tab order, matching source's grid being a
-        // normal focusable/tabbable element. The engine draws its own focus indication (the
-        // selection ring), so the browser's default focus outline is suppressed here.
+        // normal focusable/tabbable element. Behaviour, not style -- the matching `outline: none`
+        // is in the stylesheet.
         this.root.tabIndex = 0;
-        this.root.style.outline = "none";
 
         // --- .dvn-underlay + canvases -------------------------------------------------------
         this.underlayEl = document.createElement("div");
         this.underlayEl.className = "dvn-underlay";
-        Object.assign(this.underlayEl.style, {
-            position: "absolute",
-            left: "0",
-            top: "0",
-            right: "0",
-            bottom: "0",
-            pointerEvents: "none",
-        } satisfies Partial<CSSStyleDeclaration>);
 
         this.canvasEl = document.createElement("canvas");
         this.headerCanvasEl = document.createElement("canvas");
-        for (const canvas of [this.canvasEl, this.headerCanvasEl]) {
-            canvas.style.position = "absolute";
-            canvas.style.left = "0";
-            canvas.style.top = "0";
-            canvas.style.outline = "none";
-        }
         this.underlayEl.append(this.canvasEl, this.headerCanvasEl);
 
         // --- .dvn-scroller / .dvn-scroll-inner / .dvn-stack / .dvn-spacer -------------------
         this.scrollerEl = document.createElement("div");
         this.scrollerEl.className = "dvn-scroller";
-        Object.assign(this.scrollerEl.style, {
-            position: "absolute",
-            left: "0",
-            top: "0",
-            right: "0",
-            bottom: "0",
-            overflow: "auto",
-            transform: "translate3d(0,0,0)",
-        } satisfies Partial<CSSStyleDeclaration>);
 
         this.scrollInnerEl = document.createElement("div");
         this.scrollInnerEl.className = "dvn-scroll-inner";
-        Object.assign(this.scrollInnerEl.style, {
-            display: "flex",
-            pointerEvents: "none",
-        } satisfies Partial<CSSStyleDeclaration>);
 
         this.stackEl = document.createElement("div");
         this.stackEl.className = "dvn-stack";
-        Object.assign(this.stackEl.style, {
-            display: "flex",
-            flexDirection: "column",
-            flexShrink: "0",
-        } satisfies Partial<CSSStyleDeclaration>);
 
         this.spacerEl = document.createElement("div");
         this.spacerEl.className = "dvn-spacer";
-        this.spacerEl.style.flexGrow = "1";
 
         this.scrollInnerEl.append(this.stackEl, this.spacerEl);
         this.scrollerEl.append(this.scrollInnerEl);
@@ -691,9 +762,8 @@ export class GridHostController {
         // empty icon map, so `column.icon` reserves its layout space and then paints nothing --
         // silently, with no error. That was the state from Phase 1 until Phase 7c: `sprites.ts` was
         // never imported anywhere, i.e. 28 ported glyphs were dead code.
-        this.spriteManager = new SpriteManager(
-            { ...sprites, ...this.getArgsFn().headerIcons },
-            () => this.scheduleFullRedraw()
+        this.spriteManager = new SpriteManager({ ...sprites, ...this.getArgsFn().headerIcons }, () =>
+            this.scheduleFullRedraw()
         );
         this.renderStateProvider = new RenderStateProvider();
         this.imageLoader = new ImageWindowLoaderImpl();
@@ -795,6 +865,13 @@ export class GridHostController {
             getRowThemeOverride: args.getRowThemeOverride,
 
             onVisibleRegionChanged: args.onVisibleRegionChanged,
+
+            getCellsForSelection: args.getCellsForSelection,
+
+            drawCell: args.drawCell,
+            drawHeader: args.drawHeader,
+            prelightCells: args.prelightCells,
+            highlightRegions: args.highlightRegions,
         };
     }
 
@@ -1116,9 +1193,7 @@ export class GridHostController {
         // every damaged cell lands one column to the left whenever `rowMarkers !== "none"` --
         // silently, since an unmatched damage entry just repaints the wrong cell.
         const { rowMarkerOffset } = this.resolveArgs();
-        this.drawWithDamage(
-            new CellSet(cells.map(c => [c.cell[0] + rowMarkerOffset, c.cell[1]] as Item))
-        );
+        this.drawWithDamage(new CellSet(cells.map(c => [c.cell[0] + rowMarkerOffset, c.cell[1]] as Item)));
     }
 
     /** Current selection. Read-only snapshot -- mutate via user interaction, not directly. */
@@ -1129,6 +1204,8 @@ export class GridHostController {
     public destroy(): void {
         if (this.destroyed) return;
         this.destroyed = true;
+        // Signals any in-flight `getCellsForSelection` thunk that its result is no longer wanted.
+        this.cellsForSelectionAbort.abort();
 
         if (this.overlayState !== undefined) {
             window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
@@ -1219,10 +1296,14 @@ export class GridHostController {
             },
             getGroupDetails: DEFAULT_GROUP_DETAILS,
             getRowThemeOverride: args.getRowThemeOverride,
-            drawHeaderCallback: undefined,
-            drawCellCallback: undefined,
-            prelightCells: undefined,
-            highlightRegions: undefined,
+            // Phase 9: consumer draw hooks. Passed straight through -- `prelightCells` and
+            // `highlightRegions` are identity-compared by `computeCanBlit`, so the stability
+            // requirement is documented on the `GridHostArgs` fields rather than defended here
+            // (the controller has no way to know whether two equal-looking arrays are "the same").
+            drawHeaderCallback: args.drawHeader,
+            drawCellCallback: args.drawCell,
+            prelightCells: args.prelightCells,
+            highlightRegions: args.highlightRegions,
             imageLoader: this.imageLoader,
             lastBlitData: this.lastBlitData,
             damage,
@@ -1313,10 +1394,7 @@ export class GridHostController {
         // `getEffectiveColumns` returns every sticky column first, then the visible non-sticky ones
         // starting at `cellXOffset` -- so the sticky prefix is exactly `freezeColumns` long.
         const x = Math.max(0, this.cellXOffset - args.rowMarkerOffset);
-        const width = Math.max(
-            0,
-            Math.min(effectiveColumns.length - freezeColumns, args.columns.length - x)
-        );
+        const width = Math.max(0, Math.min(effectiveColumns.length - freezeColumns, args.columns.length - x));
 
         const rows = args.rows;
         if (rows <= 0) return { x, y: 0, width, height: 0 };
@@ -1355,8 +1433,7 @@ export class GridHostController {
     private rebuildScrollContent(args: ResolvedGridHostArgs): void {
         const { mappedColumns } = this.computeMangledLayout(args);
         const totalWidth = mappedColumns.reduce((sum, c) => sum + c.width, 0);
-        const totalHeight =
-            this.totalHeaderHeight(args) + totalRowsHeight(this.effectiveRows(args), args.rowHeight);
+        const totalHeight = this.totalHeaderHeight(args) + totalRowsHeight(this.effectiveRows(args), args.rowHeight);
 
         this.stackEl.replaceChildren();
 
@@ -1435,7 +1512,13 @@ export class GridHostController {
         const y = ev.clientY - rect.top;
 
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
-        const effectiveColumns = getEffectiveColumns(mappedColumns, this.cellXOffset, this.width, undefined, this.translateX);
+        const effectiveColumns = getEffectiveColumns(
+            mappedColumns,
+            this.cellXOffset,
+            this.width,
+            undefined,
+            this.translateX
+        );
         const col = getColumnIndexForX(x, effectiveColumns, this.translateX);
         const row = getRowIndexForY(
             y,
@@ -1483,7 +1566,11 @@ export class GridHostController {
             }
             if (col !== -1 && col >= freezeColumns && col !== ds.dropCol) {
                 const proposedDest = col;
-                ds.vetoed = args.onColumnProposeMove?.(ds.srcCol - args.rowMarkerOffset, proposedDest - args.rowMarkerOffset) === false;
+                ds.vetoed =
+                    args.onColumnProposeMove?.(
+                        ds.srcCol - args.rowMarkerOffset,
+                        proposedDest - args.rowMarkerOffset
+                    ) === false;
                 ds.dropCol = proposedDest;
             }
             this.scheduleFullRedraw();
@@ -1496,7 +1583,7 @@ export class GridHostController {
         // clamping (out of scope -- no fill handle or row grouping ported yet).
         if (this.mouseDownState !== undefined && ev.buttons !== 0) {
             const dragLocation: Item = [
-                col !== -1 ? col : (x < 0 ? 0 : mappedColumns.length - 1),
+                col !== -1 ? col : x < 0 ? 0 : mappedColumns.length - 1,
                 row ?? this.effectiveRows(args) - 1,
             ];
             this.handleDragMove(args, this.mouseDownState, dragLocation);
@@ -1608,7 +1695,13 @@ export class GridHostController {
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
 
-        const effectiveColumns = getEffectiveColumns(mappedColumns, this.cellXOffset, this.width, undefined, this.translateX);
+        const effectiveColumns = getEffectiveColumns(
+            mappedColumns,
+            this.cellXOffset,
+            this.width,
+            undefined,
+            this.translateX
+        );
         const col = getColumnIndexForX(x, effectiveColumns, this.translateX);
         const row = getRowIndexForY(
             y,
@@ -1628,7 +1721,10 @@ export class GridHostController {
         const metaKey = ev.metaKey;
 
         if (col === -1 || row === undefined || x < 0 || y < 0 || x > this.width || y > this.height) {
-            const location: Item = [col !== -1 ? col : (x < 0 ? 0 : mappedColumns.length - 1), row ?? this.effectiveRows(args) - 1];
+            const location: Item = [
+                col !== -1 ? col : x < 0 ? 0 : mappedColumns.length - 1,
+                row ?? this.effectiveRows(args) - 1,
+            ];
             // `offsetWidth - clientWidth` is 0 for overlay scrollbars (nothing to guard against
             // there) and approximates the classic scrollbar width otherwise -- good enough for this
             // best-effort guard, source's own `getScrollBarWidth()` isn't ported.
@@ -1636,7 +1732,16 @@ export class GridHostController {
             const isMaybeScrollbar =
                 (x > this.width && x < this.width + scrollbarWidth) ||
                 (y > this.height && y < this.height + scrollbarWidth);
-            return { kind: "out-of-bounds", location, localX: x, localY: y, shiftKey, ctrlKey, metaKey, isMaybeScrollbar };
+            return {
+                kind: "out-of-bounds",
+                location,
+                localX: x,
+                localY: y,
+                shiftKey,
+                ctrlKey,
+                metaKey,
+                isMaybeScrollbar,
+            };
         }
         if (row <= -1) {
             return {
@@ -1905,7 +2010,11 @@ export class GridHostController {
             // trailing blank row -- there's no marker cell there (`mangledGetCellContent` returns a
             // plain loading cell for it), mirrors source's `showTrailingBlankRow === true && row ===
             // rows` guard in the same branch.
-            if ((args.showTrailingBlankRow && row === args.rows) || args.rowMarkers === "number" || args.rowSelect === "none")
+            if (
+                (args.showTrailingBlankRow && row === args.rows) ||
+                args.rowMarkers === "number" ||
+                args.rowSelect === "none"
+            )
                 return;
 
             const selectedRows = this.selection.rows;
@@ -1938,7 +2047,13 @@ export class GridHostController {
             } else if (args.rowSelect === "multi" && (isMultiRow || DEFAULT_ROW_SELECTION_MODE === "multi")) {
                 if (isSelected) {
                     this.applySelection(
-                        writerSetSelectedRows(this.selection, selectedRows.remove(row), undefined, true, DEFAULT_SELECTION_OPTIONS)
+                        writerSetSelectedRows(
+                            this.selection,
+                            selectedRows.remove(row),
+                            undefined,
+                            true,
+                            DEFAULT_SELECTION_OPTIONS
+                        )
                     );
                 } else {
                     this.applySelection(
@@ -1948,7 +2063,13 @@ export class GridHostController {
                 }
             } else if (isSelected && selectedRows.length === 1) {
                 this.applySelection(
-                    writerSetSelectedRows(this.selection, CompactSelection.empty(), undefined, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                    writerSetSelectedRows(
+                        this.selection,
+                        CompactSelection.empty(),
+                        undefined,
+                        isMultiKey,
+                        DEFAULT_SELECTION_OPTIONS
+                    )
                 );
             } else {
                 this.applySelection(
@@ -2087,7 +2208,13 @@ export class GridHostController {
                     );
                 } else {
                     this.applySelection(
-                        writerSetSelectedRows(this.selection, CompactSelection.empty(), undefined, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                        writerSetSelectedRows(
+                            this.selection,
+                            CompactSelection.empty(),
+                            undefined,
+                            isMultiKey,
+                            DEFAULT_SELECTION_OPTIONS
+                        )
                     );
                 }
             }
@@ -2095,7 +2222,12 @@ export class GridHostController {
         }
 
         const lastCol = this.lastSelectedCol;
-        if (args.columnSelect === "multi" && hit.shiftKey && lastCol !== undefined && selectedColumns.hasIndex(lastCol)) {
+        if (
+            args.columnSelect === "multi" &&
+            hit.shiftKey &&
+            lastCol !== undefined &&
+            selectedColumns.hasIndex(lastCol)
+        ) {
             const newSlice: Slice = [Math.min(lastCol, col), Math.max(lastCol, col) + 1];
             if (isMultiKey || DEFAULT_COLUMN_SELECTION_MODE === "multi") {
                 this.applySelection(
@@ -2115,7 +2247,13 @@ export class GridHostController {
         } else if (args.columnSelect === "multi" && (isMultiKey || DEFAULT_COLUMN_SELECTION_MODE === "multi")) {
             if (selectedColumns.hasIndex(col)) {
                 this.applySelection(
-                    writerSetSelectedColumns(this.selection, selectedColumns.remove(col), undefined, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                    writerSetSelectedColumns(
+                        this.selection,
+                        selectedColumns.remove(col),
+                        undefined,
+                        isMultiKey,
+                        DEFAULT_SELECTION_OPTIONS
+                    )
                 );
             } else {
                 this.applySelection(
@@ -2126,7 +2264,13 @@ export class GridHostController {
         } else if (args.columnSelect !== "none") {
             if (selectedColumns.hasIndex(col)) {
                 this.applySelection(
-                    writerSetSelectedColumns(this.selection, selectedColumns.remove(col), undefined, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                    writerSetSelectedColumns(
+                        this.selection,
+                        selectedColumns.remove(col),
+                        undefined,
+                        isMultiKey,
+                        DEFAULT_SELECTION_OPTIONS
+                    )
                 );
             } else {
                 this.applySelection(
@@ -2187,7 +2331,10 @@ export class GridHostController {
             return;
         }
 
-        if (this.selection.current !== undefined && (args.rangeSelect === "rect" || args.rangeSelect === "multi-rect")) {
+        if (
+            this.selection.current !== undefined &&
+            (args.rangeSelect === "rect" || args.rangeSelect === "multi-rect")
+        ) {
             const [selectedCol, selectedRow] = this.selection.current.cell;
             const targetRow = row < 0 ? this.cellYOffset : row;
             const targetCol = Math.max(col, args.rowMarkerOffset);
@@ -2913,6 +3060,32 @@ export class GridHostController {
         return undefined;
     }
 
+    // Phase 9. Reads a rectangle of cells in the CONSUMER's coordinate space (no row-marker column),
+    // using `getCellsForSelection` when one is available and falling back to a per-cell
+    // `getCellContent` sweep otherwise. Returns `undefined` when the consumer's callback answered
+    // with a thunk, i.e. asynchronously -- see the caller for why that can't be used for copy.
+    //
+    // Mirrors source's `useCellsForSelection`'s *direct* (unmangled) half. Source also builds a
+    // *mangled* variant that shifts by `rowMarkerOffset` and prepends a Loading cell for the marker
+    // column; that one exists purely for its search subsystem, so it is deliberately NOT ported yet
+    // -- it would be dead code until search lands (PHASES.md 9e), and this project has learned what
+    // dormant code costs. Add it there, next to the consumer that needs it.
+    private cellsForSelectionSync(args: ResolvedGridHostArgs, rect: Rectangle): CellArray | undefined {
+        const provider = args.getCellsForSelection;
+
+        if (provider !== undefined && provider !== true) {
+            const result = provider(rect, this.cellsForSelectionAbort.signal);
+            // A thunk means "loading asynchronously" -- unusable here, the caller decides what to do.
+            if (typeof result === "function") return undefined;
+            return result;
+        }
+
+        // `true`, or absent: synthesise from `getCellContent`. Identical either way -- the flag only
+        // exists in source to let a consumer opt into the feature without writing the callback, and
+        // the synthesised sweep is exactly what the copy path did before this existed.
+        return synthesizeCellsForSelection(rect, args.rows, args.getCellContent);
+    }
+
     private buildCopyBuffer(args: ResolvedGridHostArgs): { textPlain: string; textHtml: string } | undefined {
         const region = this.selectedRegion(args);
         if (region === undefined) return undefined;
@@ -2924,14 +3097,31 @@ export class GridHostController {
         const columnIndexes: number[] = [];
         for (let col = colStart; col < region.colEnd; col++) columnIndexes.push(col - args.rowMarkerOffset);
 
-        const cells: GridCell[][] = [];
-        for (let row = region.rowStart; row < region.rowEnd; row++) {
-            const rowCells: GridCell[] = [];
-            for (let col = colStart; col < region.colEnd; col++) {
-                rowCells.push(args.getCellContent([col - args.rowMarkerOffset, row]));
+        // Consumer coordinate space: strip the row-marker offset before asking.
+        const cells = this.cellsForSelectionSync(args, {
+            x: colStart - args.rowMarkerOffset,
+            y: region.rowStart,
+            width: region.colEnd - colStart,
+            height: region.rowEnd - region.rowStart,
+        });
+
+        if (cells === undefined) {
+            // The consumer's `getCellsForSelection` answered with a thunk. We cannot await it: this
+            // runs inside a `copy` event, and `clipboardData.setData` stops working once the handler
+            // has awaited. Fall back to the synchronous per-cell sweep, which at worst yields the
+            // Loading cells a paged source would report for unloaded rows -- strictly better than
+            // silently writing nothing to the clipboard. Documented on `GridHostArgs`.
+            const fallback: GridCell[][] = [];
+            for (let row = region.rowStart; row < region.rowEnd; row++) {
+                const rowCells: GridCell[] = [];
+                for (let col = colStart; col < region.colEnd; col++) {
+                    rowCells.push(args.getCellContent([col - args.rowMarkerOffset, row]));
+                }
+                fallback.push(rowCells);
             }
-            cells.push(rowCells);
+            return getCopyBufferContents(fallback, columnIndexes);
         }
+
         return getCopyBufferContents(cells, columnIndexes);
     }
 

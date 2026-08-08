@@ -8,10 +8,21 @@
 //      rather than any manual dependency list.
 //   4. Surface the controller's imperative `updateCells` API to the consumer via `@onReady`.
 import Component from "@glimmer/component";
+// Structural CSS for the grid's DOM (the `.dvn-*` scroll scaffolding), ported from source's
+// Linaria block. Imported here so any bundler picks it up automatically -- consumers never need a
+// separate CSS import. See the file header for why this is a stylesheet rather than inline styles.
+import "./glide-data-grid.css";
+import { cached } from "@glimmer/tracking";
 import { registerDestructor } from "@ember/destroyable";
 import { modifier } from "ember-modifier";
-import { GridHostController, type GridHostArgs, type RowMarkerKind } from "../-private/grid-host-controller.ts";
+import {
+    GridHostController,
+    type GridHostArgs,
+    type RowMarkerKind,
+    type CellsForSelectionCallback,
+} from "../-private/grid-host-controller.ts";
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
+import { createCombinedCellRenderer } from "../rendering/extra-cells/index.ts";
 import type {
     GridColumn,
     GridCell,
@@ -22,6 +33,11 @@ import type {
     GetCellRendererCallback,
     GetRowThemeCallback,
     SpriteMap,
+    CustomRenderer,
+    DrawCellCallback,
+    DrawHeaderCallback,
+    CellList,
+    Highlight,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -45,6 +61,21 @@ export interface GlideDataGridSignature {
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
         // (`../rendering/cells/index.ts`, text/number/boolean/loading/protected/row-id).
         getCellRenderer?: GetCellRendererCallback;
+        /**
+         * Extra cell types to make available, on top of the built-in ones -- the 13 `CustomRenderer`
+         * cells from `glide-data-grid-ember/rendering/extra-cells/index` (sparkline, star, tags,
+         * date-picker, ...) or your own. Mirrors source's `customRenderers` prop.
+         *
+         * This is the recommended way to get the extra cells: the component combines them with the
+         * built-in registry via `createCombinedCellRenderer` in a `@cached` getter, which keeps the
+         * resulting `getCellRenderer` reference-stable (it is one of `computeCanBlit`'s
+         * identity-compared fields -- building the combined renderer inline would silently disable
+         * the scroll blit fast path). Pass a stable array; a fresh literal each render defeats the
+         * cache.
+         *
+         * Ignored if you pass `@getCellRenderer` explicitly -- that arg is the full manual override.
+         */
+        extraCells?: readonly CustomRenderer<any>[];
         /**
          * Extra/override header-icon glyphs (`column.icon`), merged over the built-in set. The
          * built-ins are always available, so this is only for adding custom glyphs. Read once when
@@ -88,6 +119,24 @@ export interface GlideDataGridSignature {
         // `region` is in this component's own coordinate space (no row-marker column, real data
         // rows only). See `GridHostArgs.onVisibleRegionChanged` for the full contract.
         onVisibleRegionChanged?: (region: Rectangle) => void;
+
+        /**
+         * Read a whole rectangle of cells at once instead of one at a time. Pass `true` for the
+         * common in-memory case (the grid synthesises one from `@getCellContent`), or a function
+         * when a bulk fetch is cheaper or cells outside the rendered window aren't in memory.
+         * See `GridHostArgs.getCellsForSelection` — in particular, the async thunk form is
+         * deliberately not used by copy.
+         */
+        getCellsForSelection?: CellsForSelectionCallback | true;
+
+        // Consumer draw hooks / overlays (Phase 9) -- forwarded straight through to `GridHostArgs`.
+        // See that interface's doc comments; note especially that `prelightCells` and
+        // `highlightRegions` are identity-compared by `computeCanBlit`, so they must be stable
+        // references (build them in a `@cached` getter, not inline in the template).
+        drawCell?: DrawCellCallback;
+        drawHeader?: DrawHeaderCallback;
+        prelightCells?: CellList;
+        highlightRegions?: readonly Highlight[];
     };
 }
 
@@ -96,6 +145,25 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
     // an autotracking dependency of `setupGrid` below, or every `scheduleFullRedraw()`-triggering
     // rerun would also register as a change to `this.controller` and could cause redundant reruns.
     private controller: GridHostController | undefined;
+
+    // The effective cell-renderer registry. `@cached` is load-bearing, not tidiness:
+    // `getCellRenderer` is one of `computeCanBlit`'s ~18 identity-compared `DrawGridArg` fields, so
+    // calling `createCombinedCellRenderer` inline in `buildGridHostArgs()` -- which runs on every
+    // draw, scroll and hover pass -- would hand the render engine a fresh closure every frame and
+    // silently disable the scroll blit fast path, with no error and no visual difference. This is
+    // the exact defect Phase 6 found and fixed for three other fields; see PORTING-NOTES.md.
+    //
+    // `@cached` recomputes only when a tracked value it read changes -- here, the `@extraCells` and
+    // `@getCellRenderer` args -- which is precisely the invalidation rule we want, and is why this
+    // belongs on a component getter rather than in the (deliberately untracked) controller.
+    @cached
+    private get cellRenderer(): GetCellRendererCallback {
+        const explicit = this.args.getCellRenderer;
+        if (explicit !== undefined) return explicit;
+        const extras = this.args.extraCells;
+        if (extras === undefined || extras.length === 0) return defaultGetCellRenderer;
+        return createCombinedCellRenderer(defaultGetCellRenderer, extras);
+    }
 
     // Reads every `@arg` this component exposes and shapes them into `GridHostArgs`. Called both:
     //   (a) synchronously inside `setupGrid` below -- reading `this.args.*` here, inside that
@@ -112,7 +180,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         groupHeaderHeight: this.args.groupHeaderHeight,
         theme: this.args.theme,
         freezeColumns: this.args.freezeColumns,
-        getCellRenderer: this.args.getCellRenderer ?? defaultGetCellRenderer,
+        getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,
         rowMarkerWidth: this.args.rowMarkerWidth,
@@ -132,6 +200,11 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onRowAppended: this.args.onRowAppended,
         getRowThemeOverride: this.args.getRowThemeOverride,
         onVisibleRegionChanged: this.args.onVisibleRegionChanged,
+        getCellsForSelection: this.args.getCellsForSelection,
+        drawCell: this.args.drawCell,
+        drawHeader: this.args.drawHeader,
+        prelightCells: this.args.prelightCells,
+        highlightRegions: this.args.highlightRegions,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s
