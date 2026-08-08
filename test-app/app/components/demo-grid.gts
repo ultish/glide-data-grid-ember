@@ -40,7 +40,6 @@ import { cached } from "@glimmer/tracking";
 import {
     allExtraCells,
     getDataEditorDarkTheme,
-    GridColumnIcon,
     isSizedGridColumn,
     type AutoGridColumn,
     type SizedGridColumn,
@@ -113,36 +112,14 @@ const DARK_THEME: Partial<Theme> = getDataEditorDarkTheme();
 
 // --- Phase 10a: column groups, header icons, and one deliberately auto-sized column ------------
 //
-// `demoColumns` (shared with `<DaisyDemo>`) is plain: titles and widths, nothing else. Rather than
-// enrich it there and drag another demo along, this one derives its own columns -- which is also
-// what a real consumer does, since column metadata is presentation and usually belongs next to the
-// grid rather than next to the data.
+// `demoColumns` owns each column's title, width and icon -- those are properties of the column, so
+// `<DaisyDemo>` reuses them for free. What this demo adds on top is *presentation for this demo*:
+// group headings, `hasMenu`, one deliberately auto-sized column, and a custom header glyph.
 //
 // Groups are what make `@onGroupHeaderContextMenu` reachable at all (no groups, no group header to
 // right-click), and header icons were dead code for six phases because nothing ever set
-// `column.icon`. Both are here for that reason.
+// `column.icon`.
 const COLUMN_GROUPS = ["Identity", "Content", "Media", "Signals", "Records"] as const;
-
-// Roughly matched to each column's actual cell kind for the first 16 (which are the typed ones --
-// see `demo-data.ts`); after that it just cycles, since those columns are all plain text.
-const COLUMN_ICONS: readonly GridColumnIcon[] = [
-    GridColumnIcon.HeaderRowID,
-    GridColumnIcon.HeaderNumber,
-    GridColumnIcon.HeaderBoolean,
-    GridColumnIcon.HeaderUri,
-    GridColumnIcon.HeaderMarkdown,
-    GridColumnIcon.HeaderImage,
-    GridColumnIcon.HeaderArray,
-    GridColumnIcon.HeaderReference,
-    GridColumnIcon.HeaderMath,
-    GridColumnIcon.HeaderEmoji,
-    GridColumnIcon.HeaderSingleValue,
-    GridColumnIcon.HeaderTime,
-    GridColumnIcon.HeaderArray,
-    GridColumnIcon.HeaderLookup,
-    GridColumnIcon.HeaderJoinStrings,
-    GridColumnIcon.HeaderUri,
-];
 
 // A custom glyph merged **over** the built-in set via `@headerIcons`. The built-ins are always
 // present, so this is only needed to add a glyph of your own or restyle a stock one. The `fg`/`bg`
@@ -167,7 +144,7 @@ function groupFor(index: number): string | undefined {
 // The one auto-sized column. Omitting `width` makes a column an `AutoGridColumn`, which the addon
 // measures from its content (Phase 9i) instead of falling back to a fixed default.
 //
-// Column 3 is chosen deliberately: it is the uri column, whose values (`https://example.com/items/N`)
+// Column 3 is chosen deliberately: it is the Profile uri column, whose values
 // are far wider than its nominal fixed width, so a working measurement is obvious at a glance -- the
 // column comes out visibly wider than its neighbours and is then clamped by `@maxColumnWidth`. Pick a
 // `Custom` cell instead and you get the flat `DEFAULT_COLUMN_WIDTH` fallback, because auto-sizing
@@ -184,7 +161,9 @@ function buildDemoColumns(): readonly GridColumn[] {
             // `hasMenu` is what draws the chevron and makes `@onHeaderMenuClick` fire. The menu UI
             // itself is consumer chrome -- the addon ships none, by design.
             hasMenu: true,
-            icon: i === 0 ? "demoStar" : (COLUMN_ICONS[i % COLUMN_ICONS.length] ?? GridColumnIcon.HeaderString),
+            // Every column's own `icon` comes from `demo-data.ts`; column 0 is overridden with
+            // the custom glyph below purely to prove `@headerIcons` merges over the built-in set.
+            icon: i === 0 ? "demoStar" : column.icon,
         };
         // The distinction is exactly this: a column WITH `width` is a `SizedGridColumn`, one
         // WITHOUT is an `AutoGridColumn` that the grid measures. There is no `width: "auto"`.
@@ -615,7 +594,7 @@ export default class DemoGrid extends Component {
                     <input
                         id="external-search"
                         type="text"
-                        placeholder="Try &quot;Row note&quot; or &quot;items/4&quot;"
+                        placeholder="Try &quot;Lovelace&quot; or &quot;Renewal&quot;"
                         value={{this.searchValue}}
                         style="width: 260px;"
                         {{on "input" this.handleExternalSearchInput}}

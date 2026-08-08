@@ -22,6 +22,7 @@ import {
     type GridColumn,
     type Item,
 } from "glide-data-grid-ember/rendering/index";
+import { PHOTO_PALETTE, avatarUrl, photoUrl } from "test-app/utils/demo-fixtures";
 
 export const GLIDE_DEMO_ROW_COUNT = 3000;
 
@@ -39,87 +40,14 @@ function mulberry32(seed: number): () => number {
     };
 }
 
-// --- Inlined image generation ----------------------------------------------------------------
-// Tiny 8x8 solid PNG, the same constant `demo-data.ts` uses -- only reached if there is no DOM.
-// Both copies were a corrupt (truncated-`IDAT`) PNG until 2026-08-08; see the fuller note in
-// `demo-data.ts`. This copy never showed the symptom because the browser path always wins here --
-// which is exactly why it went unnoticed. Keep the two in sync.
-const FALLBACK_PNG =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR42mPwXf39Pz7MMDIUAABoaLuBoJ3iNwAAAABJRU5ErkJggg==";
-
-function makeCanvasDataUrl(size: number, paint: (ctx: CanvasRenderingContext2D) => void): string {
-    if (typeof document === "undefined") return FALLBACK_PNG;
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    if (ctx === null) return FALLBACK_PNG;
-    paint(ctx);
-    return canvas.toDataURL("image/png");
-}
-
-// A simple "portrait" glyph -- tinted background + a lighter head/shoulders silhouette. Enough for
-// each row's thumbnail to be obviously a distinct image rather than N copies of one swatch.
-function makePhotoDataUrl(bg: string, fg: string): string {
-    return makeCanvasDataUrl(48, ctx => {
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, 48, 48);
-        ctx.fillStyle = fg;
-        ctx.beginPath();
-        ctx.arc(24, 18, 9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(24, 46, 16, Math.PI, Math.PI * 2);
-        ctx.fill();
-    });
-}
-
-// A round initials chip, used as the small avatar on the Manager drilldown chip.
-function makeAvatarDataUrl(bg: string, initials: string): string {
-    return makeCanvasDataUrl(32, ctx => {
-        ctx.fillStyle = bg;
-        ctx.beginPath();
-        ctx.arc(16, 16, 16, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 15px system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(initials, 16, 17);
-    });
-}
-
-const PHOTO_PALETTE: readonly (readonly [string, string])[] = [
-    ["#f97362", "#ffe3de"],
-    ["#4dabf7", "#dbeeff"],
-    ["#69db7c", "#e0f8e4"],
-    ["#da77f2", "#f7e2ff"],
-    ["#ffa94d", "#ffeedd"],
-    ["#4c6ef5", "#dfe5ff"],
-    ["#20c997", "#dcf7ee"],
-    ["#f06595", "#ffe0eb"],
-    ["#845ef7", "#e8e0ff"],
-    ["#fcc419", "#fff5d6"],
-    ["#15aabf", "#d9f4f8"],
-    ["#ff8787", "#ffe5e5"],
-];
-
-// Lazily built on first `getCellContent` call: canvas generation needs a DOM, and this module is
-// imported (but not exercised) by the build. Memoized, so it happens once per page load.
-let photoUrls: readonly string[] | undefined;
-function photoUrl(index: number): string {
-    photoUrls ??= PHOTO_PALETTE.map(([bg, fg]) => makePhotoDataUrl(bg, fg));
-    return photoUrls[index % photoUrls.length]!;
-}
-
-let managerAvatarUrls: readonly string[] | undefined;
+// --- Images ------------------------------------------------------------------------------------
+// Canvas-generated `data:` URIs, shared with `demo-data.ts` via `demo-fixtures.ts`. They used to
+// live here in full, with a "keep the two copies in sync" note about the fallback PNG -- which is
+// exactly the hazard the shared module removes.
 function managerAvatarUrl(index: number): string {
-    managerAvatarUrls ??= MANAGERS.map((m, i) => {
-        const [bg] = PHOTO_PALETTE[i % PHOTO_PALETTE.length]!;
-        const parts = m.split(" ");
-        return makeAvatarDataUrl(bg, `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`);
-    });
-    return managerAvatarUrls[index % managerAvatarUrls.length]!;
+    const manager = MANAGERS[index % MANAGERS.length] ?? "";
+    const parts = manager.split(" ");
+    return avatarUrl(`${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`, index);
 }
 
 // --- Name / title / manager pools -------------------------------------------------------------

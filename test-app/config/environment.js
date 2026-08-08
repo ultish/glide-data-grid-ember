@@ -41,7 +41,15 @@ module.exports = function (environment) {
   }
 
   if (environment === 'production') {
-    // here you can enable a production-specific feature
+    // GitHub Pages project sites need a non-root base path, e.g. `/glide-data-grid-ember/`.
+    // Local `vite build` keeps `/` unless ROOT_URL is set.
+    if (process.env.ROOT_URL !== undefined) {
+      ENV.rootURL = process.env.ROOT_URL;
+    }
+    // Optional override (default remains `history`; CI may set `hash`).
+    if (process.env.LOCATION_TYPE) {
+      ENV.locationType = process.env.LOCATION_TYPE;
+    }
   }
 
   return ENV;

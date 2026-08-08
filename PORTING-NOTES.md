@@ -4632,3 +4632,59 @@ three things that surprise everyone (`@rows` is a count, `[column, row]` orderin
 needs a height), and links out to the deployed demos/cookbook and to `DATA.md`/`THEMING.md`.
 
 The GitHub Pages URL is a placeholder with local-run instructions until the deploy exists.
+
+## Demo fixtures: making `<DemoGrid>` read as data (2026-08-09)
+
+Prompted by a direct user observation — *"the glide demo grid has nicer looking cells than the full
+grid demo"*. It was right, and the cause was entirely in the fixture, not the grid. `demo-data.ts`
+produced `Column 12` / `row-7` / `R7C34` at widths that clipped half of it.
+
+Four things made `<GlideDemo>` look better, all of them fixture concerns: real domain values,
+column titles that mean something, widths fitted to content, and per-row generated images.
+`demo-data.ts` now does all four **while staying a pure function of `[col, row]`** — a small integer
+hash (`fieldHash`) per field, so there is no PRNG state, nothing is materialized, and output is
+byte-identical on every reload. The 21 typed columns get real titles/widths/icons; the 29 filler
+columns get plausible headings and values.
+
+- **`demo-fixtures.ts` is new and shared.** Canvas-generated `data:` URI images, the palette, and
+  the name pools used to live in `glide-demo-data.ts` with a "keep the two copies in sync" note.
+  Two copies of a sync-hazard is one too many.
+- **`icon` moved onto `demoColumns`.** It is a property of the column, so `<DaisyDemo>` gets it for
+  free; `<DemoGrid>` only adds group headings, `hasMenu`, the auto-sized column and its custom glyph.
+- **Independently-salted picks collide.** Chip lists showed `Ember  Ember`, which reads as a
+  renderer bug. `distinctPicks` walks the pool with a stride forced coprime to its length — with a
+  non-coprime stride the walk revisits (length 8, stride 4 → start, start+4, start).
+- **Markdown samples are one short line each.** The markdown cell draws its *raw source* on the
+  canvas (source does too), so a multi-line sample renders as a clipped fragment of syntax.
+
+### Open: cell images do not paint here
+
+The Photo column and the drilldown chip avatars are blank; the column *header glyphs* render fine,
+which is an easy thing to mistake for success. Full investigation state, including what is already
+ruled out and the instrumentation trap, is in PHASES.md's queue item 1 — read it before touching
+this.
+
+## CI, Pages and npm publishing (2026-08-09)
+
+`.github/` was replaced wholesale from `/Users/jxhui/Developer/choices-ember`, at user request, and
+renamed to this package. Four workflows: `ci.yml` (tests + floating deps + a 7-scenario `ember-try`
+matrix), `pages.yml` (deploys `test-app` to GitHub Pages), `push-dist.yml`, and `release.yml` (npm
+**Trusted Publishing via OIDC** — no `NPM_TOKEN`, no OTP in CI).
+
+The workflows assume things this repo did not have; all four are now wired:
+
+- **`test-app/config/ember-try.js`** — copied from choices-ember. Without it the `try-scenarios`
+  job fails outright. Also added `ember-try`, `@embroider/test-setup` and `ember-source-channel-url`
+  to `test-app`'s devDependencies.
+- **`ROOT_URL` / `LOCATION_TYPE`** in `test-app/config/environment.js`. A GitHub Pages *project*
+  site is served from `/<repo>/`, and `pages.yml` passes that in. **Not yet verified under Vite** —
+  the workflow was written for an `ember-cli` build.
+- **`repository.url`** on the addon package. Trusted publishing rejects the publish without it, and
+  it must match the GitHub repo.
+
+`pages.yml` copies `dist/index.html` to `404.html` — the app uses `history` location, so unknown
+paths must fall back to the SPA shell.
+
+**Both `ci.yml` and `release.yml` run `pnpm lint`, which currently fails** (117 eslint + 65
+prettier). The lint cleanup had been parked by explicit user preference; that parking is void now
+that a pipeline depends on it.

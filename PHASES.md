@@ -1019,39 +1019,113 @@ one phase.
 > local-run instructions until it exists; a Pages build will likely need a base-path setting in
 > `test-app`'s vite config.
 
-## THE QUEUE — start here (accurate as of 2026-08-08, end of session)
+## THE QUEUE — start here (accurate as of 2026-08-09, end of session)
 
-**Done on branch `phase-9-partial`**: 9q both halves (the addon's DOM is now fully
-restylable), 9e search (engine + controller + opt-in `<GlideSearchBar>` + an app-owned-input demo),
-the OKLCH parser fix, the CSS-variable theming bridge with a live DaisyUI demo, two real
-overlay-editor defects, 9d context menus, 9i column auto-sizing, **9h's three items (autoscroll,
-row reorder, fill handle) plus two more real defects**, and **all of Phase 10** (the fully-featured
-`<DemoGrid>`, the cookbook as a live page, a user-facing README, and one more real defect). Test
-suite 425 -> 589.
+**Done on branch `phase-9-partial`**: 9q both halves (the addon's DOM is fully restylable), 9e
+search (engine + controller + opt-in `<GlideSearchBar>` + an app-owned-input demo), the OKLCH parser
+fix, the CSS-variable theming bridge with a live DaisyUI demo, two overlay-editor defects, 9d
+context menus, 9i column auto-sizing, **9h** (autoscroll + row reorder + fill handle, plus two real
+defects) and **all of Phase 10** (the fully-featured `<DemoGrid>`, the cookbook as a live page, a
+user-facing README, plus the auto-sizing font defect). Vitest suite: **589**.
 
-**All four feature items the user picked are done, and so is Phase 10.** Next, in agreed order:
+### ⚠️ UNCOMMITTED WORK IN THE TREE (2026-08-09)
 
-1. **Deploy the test-app to GitHub Pages** (user, 2026-08-08). The cookbook and every demo live
-   there, and the README's link to them is a placeholder until it exists. Expect to need a base
-   path in `test-app`'s vite config.
-2. **9p — Playwright.** Deferred by the user in favour of features, but note what it would have
-   caught: an earlier session produced a *false negative* where a working search feature was
-   declared broken because the automation harness never focused the grid root, and 9h lost several
-   minutes to a probe that ran before the grid's `ResizeObserver` had given it a size. Both are
-   exactly the flakiness a committed harness removes.
-3. The rest of the Phase 9 backlog, on request.
+Two independent bodies of work are staged in the working tree and **not committed**, held back
+pending the user's call. Check `git status` first; both type-check and build clean.
 
-**Explicitly parked:** lint/format cleanup (user: "id prefer doing feature than fixing linting for
-now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
-deferred by user decision.
+1. **The demo-fixture overhaul** (`test-app/app/utils/demo-data.ts`, the new
+   `demo-fixtures.ts`, `glide-demo-data.ts`, `demo-grid.gts`). Answers a direct user observation —
+   "the glide demo grid has nicer looking cells than the full grid demo". See PORTING-NOTES.md's
+   "Demo fixtures" section. **Carries one open defect: item 1 below.**
+2. **The whole CI/publish pipeline** (`.github/workflows/*`, `test-app/config/ember-try.js`,
+   `ROOT_URL` support, the addon's `repository` field, three test-app devDeps). Self-contained and
+   landable on its own. See PORTING-NOTES.md's "CI, Pages and npm publishing" section.
+
+### The work queue, in the order it was agreed
+
+Items 1–7 all came from the user reviewing the demo and the cookbook on 2026-08-09.
+
+1. **Cell images don't paint in `<DemoGrid>`** — the Photo column and the drilldown chip avatars.
+   *Column header glyphs render fine; it is the cell content that is blank.* Exactly one of the
+   twelve generated palette URLs ever loads, consistently and reproducibly. **What is already ruled
+   out** (don't redo): the URLs are valid — all twelve were pulled out of the running page and
+   loaded as 48×48 `Image`s with no error; the same generation path works in `<GlideDemo>`; it is
+   not multiple-vs-single URL, not lazy-vs-eager generation, and not the pooled-`Image` `src`-reuse
+   hazard in `ImageWindowLoader` (tried, made it *worse*, reverted). Suspicion points at the
+   `cancel()` / `imgPool` / `clearOutOfWindow` interaction. **Instrument the SOURCE and rebuild** —
+   patching `dist/` to instrument the loader produced *false readings* (it logged nothing even for
+   the demo that visibly works), which cost an hour.
+
+   **⚠️ CONFIRM THE SYMPTOM BEFORE CHASING IT.** The user reported seeing a person image in every
+   Photo cell; the assistant reproduced blank cells in a brand-new tab on a fresh load. Both grids
+   now have a column titled **"Photo"** (`<GlideDemo>`'s renders a portrait per row and is
+   healthy), so the two observations may simply be of different tabs — establish which grid is
+   being looked at before spending anything on this.
+2. **Ember 6+ idioms.** The user targets Ember 6+, where **`@action` is no longer recommended**. The
+   cookbook and every test-app demo use it throughout. Move to class-field arrows
+   (`onEdit = () => {}`) — and say in the cookbook that a class-field arrow is *also*
+   identity-stable, which is exactly what the identity-compared args need. The two rules reinforce
+   each other; that is worth stating rather than leaving as coincidence.
+3. **Editing recipes should write to a model, not a `Map`.** The cookbook's `@onCellsEdited` recipe
+   keys edits into a `Map` by `"col,row"`. It works and teaches nothing. Show the real shape: an
+   `onEdit` class-field arrow mutating a tracked field on an Ember Data model or tracked class, and
+   why that repaints.
+4. **A new cookbook page: using the grid in Ember.** The one the user actually asked for. Fetching
+   from an Ember Data store *and* from GraphQL; turning a result into cells with and without
+   `object-scan` (`<ScaleProof>` already has a worked `object-scan` example to lift); how reactivity
+   holds when a GQL query refetches or the store updates; and the performance/identity rules in
+   context rather than as a closing chapter.
+5. **Migrate `DATA.md` + `THEMING.md` into the cookbook, then delete them.** ~900 lines that hold
+   detail the cookbook only summarises, so they are still needed — but they belong in the deployed
+   test-app cookbook, not the addon directory. `DATA.md` is the spine of item 4; `THEMING.md`
+   becomes its own page (precedence chain, full `Theme` field reference, `--gdg-*` properties, the
+   CSS-variable bridge). Update every link (README, cookbook, PHASES, PORTING-NOTES) and delete
+   both. **Keep exactly one copy** — a half-migration is worse than either end state.
+6. **The theming chapter must show the real DaisyUI code.** It currently mentions DaisyUI and shows
+   none. Lift the working integration from `<DaisyDemo>`: `CssThemeWatcher` setup, the `data-theme`
+   wiring, and the non-obvious Tailwind 4 bit (written up in PORTING-NOTES.md).
+7. **Demo/addon interaction gaps, found by the user driving `<DemoGrid>`.** Mixed causes — do not
+   assume all six are addon bugs:
+   - *Files* (tree-view): expand/collapse does nothing. The demo cell is `readonly: true`; suspect
+     the controller drops the renderer's committed cell. Likely a real gap.
+   - *Notes* (markdown): editing appears not to work despite `allowOverlay: true`. Verify; likely
+     real.
+   - *Rating* (star): no hover preview of the value you are about to set. Check `needsHover` against
+     source.
+   - *Actions* (button): only `console.log`s — the demo's own choice, make it visibly do something.
+   - *Profile* (uri): click-to-open does nothing because the demo deliberately omits `onClickUri`
+     (documented in `demo-data.ts`, to avoid spawning real tabs in automated tests). Wire a
+     non-navigating handler instead.
+   - *Skills* / *Projects*: display-only **by design** — source ships no bubble/drilldown editor
+     (Phase 4c). Not a bug; say so in the demo rather than leaving it a mystery.
+8. **Make CI green.** `.github/workflows/ci.yml` and `release.yml` both run `pnpm lint`, which
+   currently fails on **117 eslint + 65 prettier**. This was parked by explicit user preference
+   ("id prefer doing feature than fixing linting for now") — **that parking is now void**: it is a
+   prerequisite for the pipeline, not a tidiness task.
+9. **Release prerequisites**, before any first publish:
+   - the addon version is still `0.0.0` — pick a real first version;
+   - no git remote is configured in this repo yet;
+   - one-time npm Trusted Publisher setup on npmjs.com (org `ultish`, repo
+     `glide-data-grid-ember`, workflow filename `release.yml`) — the full checklist is in the header
+     comment of `.github/workflows/release.yml`;
+   - GitHub repo Settings → Pages → Source: **GitHub Actions**, for `pages.yml`;
+   - **verify `pnpm --filter test-app build` actually honours `ROOT_URL` under Vite.** The
+     choices-ember original this was copied from is an `ember-cli` build; the env var is read in
+     `config/environment.js` either way, but this has not been run.
+
+Then, when asked: **9p (Playwright)** — deferred in favour of features, but note what it would have
+caught. An earlier session produced a *false negative* where a working search feature was declared
+broken because the harness never focused the grid root; 9h lost minutes to a probe that ran before
+the `ResizeObserver` had given the grid a size; and this session lost an hour to instrumentation
+that silently wasn't running. All three are exactly the flakiness a committed harness removes.
+
+**Still deferred by explicit user decision:** 9b (accessibility) and 9c (touch). 9b remains the item
+nothing else substitutes for if a consumer ever needs it.
 
 **Loose ends — all closed by Phase 10a.** `<DemoGrid>` now drives row markers,
 `@getCellsForSelection`, column groups (so 9d's group-header context menu runs), `@freezeColumns`
 and an auto-sized column. The last of those is what surfaced the auto-sizing font defect, which is
 the argument for 10a in one sentence.
-
-**9b** (accessibility) and **9c** (touch) remain deferred by explicit user decision; 9b is still the
-item nothing else substitutes for if a consumer ever needs it.
 
 ## How to resume cold (fresh session, no memory of this conversation)
 

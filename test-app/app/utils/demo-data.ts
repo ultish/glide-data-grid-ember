@@ -1,13 +1,73 @@
-// Demo dataset for the `<GlideDataGrid>` smoke-test route (`app/templates/application.gts`).
+// Demo dataset for `<DemoGrid>`, the fully-featured reference grid.
 //
-// ~50 columns x ~200,000 rows of plain text cells, generated on demand via a pure
-// `getCellContent` function -- nothing is materialized up front. This is what actually proves the
-// virtualization/scroll pipeline works: only cells the render engine asks for (the visible window)
-// ever get a `GridCell` object built.
+// 50 columns x 200,000 rows, generated on demand via a **pure function of `[col, row]`** --
+// nothing is materialized up front. That is what actually proves the virtualization/scroll pipeline
+// works: only cells the render engine asks for (the visible window) ever get a `GridCell` built.
+//
+// **The content is realistic on purpose** (2026-08-08). It used to be `Column 12` / `row-7` /
+// `R7C12` filler at widths that clipped half of it, which made the port look worse than it is next
+// to `<GlideDemo>`'s replica -- and clipped cells hide rendering defects rather than exposing them,
+// which is the opposite of what a coverage demo is for. Every field now comes from
+// `demo-fixtures.ts`'s `fieldHash`, so it stays a pure `[col, row]` function with no PRNG state and
+// byte-identical output on every reload.
+//
+// Column widths are fitted to their content for the same reason. If you add a column, size it.
 import { GridCellKind, type CustomCell, type GridCell, type GridColumn, type Item, type Theme } from "glide-data-grid-ember/rendering/index";
+import {
+    FIRST_NAMES,
+    LAST_NAMES,
+    PHOTO_PALETTE,
+    avatarUrl,
+    fieldHash,
+    photoUrl,
+    pickFrom,
+} from "test-app/utils/demo-fixtures";
 
 export const DEMO_ROW_COUNT = 200_000;
 export const DEMO_COLUMN_COUNT = 50;
+
+// --- per-row derived fields ---------------------------------------------------------------------
+// Each takes a distinct `salt` so fields vary independently -- without it every column in a row
+// would move together and the table would look like a pattern rather than data.
+
+function firstName(row: number): string {
+    return pickFrom(FIRST_NAMES, row, 1);
+}
+function lastName(row: number): string {
+    return pickFrom(LAST_NAMES, row, 2);
+}
+export function personName(row: number): string {
+    return `${firstName(row)} ${lastName(row)}`;
+}
+function slug(row: number): string {
+    return `${firstName(row)}.${lastName(row)}`.toLowerCase().replace(/[^a-z.]/g, "");
+}
+function initials(row: number): string {
+    return `${firstName(row)[0] ?? ""}${lastName(row)[0] ?? ""}`;
+}
+
+/**
+ * `count` DISTINCT picks from `pool`. Independently salted picks collide surprisingly often, and a
+ * chip list reading "Ember  Ember" looks like a bug in the renderer rather than a coincidence in
+ * the fixture. Walks forward from the first pick, so it stays a pure function of `[row, salt]`.
+ */
+function distinctPicks<T>(pool: readonly T[], row: number, salt: number, count: number): T[] {
+    const start = fieldHash(row, salt) % pool.length;
+    // The stride must be coprime with the pool length or the walk revisits: length 8 with stride 4
+    // yields start, start+4, start again. Nudging until `gcd === 1` is cheaper than a Set here and
+    // keeps the result a pure function of `[row, salt]`.
+    let stride = 1 + (fieldHash(row, salt + 100) % Math.max(1, pool.length - 1));
+    while (gcd(stride, pool.length) !== 1) stride++;
+    const out: T[] = [];
+    for (let i = 0; i < Math.min(count, pool.length); i++) {
+        out.push(pool[(start + i * stride) % pool.length]!);
+    }
+    return out;
+}
+
+function gcd(a: number, b: number): number {
+    return b === 0 ? a : gcd(b, a % b);
+}
 
 // Phase 6: a per-column theme override on column 1, so `column.themeOverride` is visibly exercised
 // end to end in the demo. `bgCell` is deliberately semi-transparent: `mergeAndRealizeTheme` treats
@@ -20,13 +80,63 @@ const DEMO_COLUMN_THEME_OVERRIDE: Partial<Theme> = {
     baseFontStyle: "600 13px",
 };
 
-// Varied widths (visually obvious horizontal scrolling) and distinct titles per column.
-export const demoColumns: readonly GridColumn[] = Array.from({ length: DEMO_COLUMN_COUNT }, (_, i) => ({
-    id: `col-${i}`,
-    title: `Column ${i}`,
-    width: 90 + ((i * 37) % 220),
-    themeOverride: i === 1 ? DEMO_COLUMN_THEME_OVERRIDE : undefined,
-}));
+// The 21 typed columns, each sized to what it actually draws. Order matters: `demoGetCellContent`
+// below switches on the column index, and `<DemoGrid>`'s groups/icons are indexed to match.
+//
+// `icon` lives here rather than in the component because it is a property of the column, not of the
+// demo -- `<DaisyDemo>` reuses these columns and gets the icons for free.
+const TYPED_COLUMNS: readonly { title: string; width: number; icon: string }[] = [
+    { title: "Employee ID", width: 120, icon: "headerRowID" },
+    { title: "Salary", width: 110, icon: "headerNumber" },
+    { title: "Active", width: 80, icon: "headerBoolean" },
+    { title: "Profile", width: 240, icon: "headerUri" },
+    { title: "Notes", width: 260, icon: "headerMarkdown" },
+    { title: "Photo", width: 90, icon: "headerImage" },
+    { title: "Skills", width: 230, icon: "headerArray" },
+    { title: "Projects", width: 230, icon: "headerReference" },
+    { title: "Trend", width: 150, icon: "headerMath" },
+    { title: "Rating", width: 130, icon: "headerEmoji" },
+    { title: "Progress", width: 160, icon: "headerSingleValue" },
+    { title: "Sync", width: 70, icon: "headerTime" },
+    { title: "Labels", width: 210, icon: "headerArray" },
+    { title: "Status", width: 150, icon: "headerLookup" },
+    { title: "Browsers", width: 230, icon: "headerJoinStrings" },
+    { title: "Links", width: 210, icon: "headerUri" },
+    { title: "Hired", width: 180, icon: "headerDate" },
+    { title: "Actions", width: 130, icon: "headerIfThenElse" },
+    { title: "Files", width: 210, icon: "headerArray" },
+    { title: "Owner", width: 210, icon: "headerReference" },
+    { title: "Summary", width: 280, icon: "headerTextTemplate" },
+];
+
+// Everything past the typed columns is ordinary text, but with plausible headings and values --
+// 29 columns of `R7C34` was the single biggest reason this demo read as placeholder art.
+const FILLER_COLUMNS = [
+    "Region", "Team", "Cost centre", "Office", "Timezone", "Manager", "Department", "Contract",
+    "Seniority", "Locale", "Badge", "Desk", "Shift", "Cohort", "Program", "Segment", "Channel",
+    "Tier", "Vendor", "Account", "Category", "Stage", "Priority", "Source", "Owner group",
+    "Workstream", "Portfolio", "Initiative", "Milestone",
+] as const;
+
+export const demoColumns: readonly GridColumn[] = Array.from({ length: DEMO_COLUMN_COUNT }, (_, i) => {
+    const typed = TYPED_COLUMNS[i];
+    if (typed !== undefined) {
+        return {
+            id: `col-${i}`,
+            title: typed.title,
+            width: typed.width,
+            icon: typed.icon,
+            themeOverride: i === 1 ? DEMO_COLUMN_THEME_OVERRIDE : undefined,
+        };
+    }
+    return {
+        id: `col-${i}`,
+        title: FILLER_COLUMNS[(i - TYPED_COLUMNS.length) % FILLER_COLUMNS.length] ?? `Field ${i}`,
+        // Still varied, so horizontal scrolling stays visually obvious -- just not clipping-varied.
+        width: 140 + ((i * 23) % 60),
+        icon: "headerString",
+    };
+});
 
 // Phase 6: zebra striping via `getRowThemeOverride`. **Module scope on purpose** -- the render
 // engine's blit fast path compares this callback by identity across draws
@@ -49,32 +159,30 @@ export function demoGetRowThemeOverride(row: number): Partial<Theme> | undefined
 // Phase 4c sample data: a handful of tags per row for the bubble column, and a small chip list
 // (one with an icon, mixing in a data-URI so the demo has zero external network dependency) for
 // the drilldown column.
-const BUBBLE_TAGS = ["urgent", "bug", "feature", "design", "backend", "frontend", "ops", "docs"] as const;
+const BUBBLE_TAGS = ["TypeScript", "Canvas", "Ember", "Rust", "GraphQL", "CSS", "Testing", "Infra"] as const;
 
-// A tiny 8x8 solid-colour (#4dabf7) RGBA PNG, inlined as a data URI -- used as the drilldown chip
-// icon and the image column's thumbnail so the demo never depends on an external image URL (avoids
-// flaky network-dependent browser tests).
+// Images come from `demo-fixtures.ts` now: canvas-generated `data:` URIs, distinct per row, still
+// with zero network dependency. They replaced a single tiny 8x8 solid-blue PNG reused for every
+// thumbnail, chip icon and avatar -- which is a large part of why this demo used to look like
+// placeholder art next to `<GlideDemo>`.
 //
-// FIXED 2026-08-08: the previous constant here was a CORRUPT PNG -- valid 8x8 RGBA `IHDR`, but a
-// truncated `IDAT` zlib stream with a failing CRC and no terminating `IEND`. Chrome partially
-// decodes such a file rather than rejecting it, so Column 5 rendered a couple of thin horizontal
-// bars (the handful of scanlines that survived) instead of a thumbnail, and the Column 7 chips got
-// a matching sliver. It looked like a renderer bug in the port and was not -- the input data was
-// broken. Verified valid this time: all three chunks CRC-check and the IDAT stream round-trips.
-const DRILLDOWN_ICON =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAE0lEQVR42mPwXf39Pz7MMDIUAABoaLuBoJ3iNwAAAABJRU5ErkJggg==";
-
-// Phase 4d: same tiny inlined data-URI PNG reused for the image column's thumbnail(s) -- keeps the
-// demo free of any external network dependency (a real consumer would pass real image URLs;
-// `ImageWindowLoader` doesn't care whether the URL is a data URI or a network one).
-const IMAGE_SAMPLE = DRILLDOWN_ICON;
+// **Built eagerly, at module load.** `getCellContent` runs inside the canvas draw loop, and
+// `photoUrl` generates its whole palette on first call -- twelve offscreen canvases and twelve
+// `toDataURL()` calls, mid-paint. `<GlideDemo>` never hit that because it materialises its records
+// up front, so its first `photoUrl` call happens long before any drawing.
+const PHOTOS: readonly string[] = Array.from({ length: PHOTO_PALETTE.length }, (_, i) => photoUrl(i));
 
 // Phase 4b sample content for the markdown column -- exercises headings, bold/italic, and a list
 // so the rendered-HTML preview (vs. the raw-text canvas draw) is visually obvious in the browser.
+// Kept to ONE short line each. The markdown cell draws its raw source on the canvas (source does
+// the same), so a multi-line sample renders as a clipped fragment of syntax -- which is what made
+// this column read as broken rather than as a feature.
 const MARKDOWN_SAMPLES = [
-    "# Heading\n\nSome **bold** and _italic_ text.",
-    "**Bold row** with a [link](https://example.com).\n\n- one\n- two",
-    "## Row note\n\nJust a *simple* paragraph.",
+    "Renewal due in **March**",
+    "Pending _security review_",
+    "Approved by **Finance**",
+    "Contract awaiting _signature_",
+    "Escalated to **Owner**",
 ] as const;
 
 // Phase 5b sample data for the tags/dropdown/multi-select/links `CustomRenderer` columns.
@@ -86,7 +194,7 @@ const POSSIBLE_TAGS = [
     { tag: "ops", color: "#da77f2" },
 ] as const;
 
-const DROPDOWN_OPTIONS = ["Backlog", "In Progress", "In Review", "Done"] as const;
+const DROPDOWN_OPTIONS = ["Backlog", "In Progress", "In Review", "Done", "Blocked"] as const;
 
 const MULTI_SELECT_OPTIONS = [
     { value: "chrome", label: "Chrome", color: "#4dabf7" },
@@ -96,11 +204,19 @@ const MULTI_SELECT_OPTIONS = [
 ] as const;
 
 // Phase 5c sample data for the date-picker/button/tree-view/user-profile/article `CustomRenderer`
-// columns. `USER_NAMES`/`USER_TINTS` feed the user-profile column; `IMAGE_SAMPLE` (defined above,
-// Phase 4d's tiny inlined data-URI PNG) is reused as every row's avatar so this demo stays free of
-// external network dependencies.
-const USER_NAMES = ["Ada Lovelace", "Grace Hopper", "Alan Turing", "Katherine Johnson", "Margaret Hamilton"] as const;
-const USER_TINTS = ["#ff6b6b", "#4dabf7", "#69db7c", "#da77f2", "#ffa94d"] as const;
+// columns.
+const PROJECT_NAMES = ["Atlas", "Beacon", "Cascade", "Delta", "Ember", "Foundry", "Harbour", "Ionic"] as const;
+const FILE_NAMES = ["Contracts", "Onboarding", "Reviews", "Payroll", "Equipment", "Travel"] as const;
+
+// Values for the 29 plain-text filler columns. One shared pool rather than a per-column one: the
+// `salt` in `pickFrom` already keeps neighbouring columns from moving together, and the point is
+// that the table reads as data, not that every column is semantically correct.
+const FILLER_VALUES = [
+    "EMEA", "AMER", "APAC", "Platform", "Growth", "Core", "Research", "London", "Berlin", "Toronto",
+    "Sydney", "UTC+0", "UTC+1", "UTC-5", "UTC+10", "Permanent", "Contract", "Intern", "Tier 1",
+    "Tier 2", "Tier 3", "Active", "On hold", "Renewing", "Q1", "Q2", "Q3", "Q4", "Approved",
+    "Pending", "Draft", "Archived", "Internal", "Partner", "Direct", "Referral",
+] as const;
 
 // Phase 4a: varies cell kind by column so text/number/boolean/row-id editing can all be exercised
 // in the browser -- col 0 is a row-id (readonly), col 1 a number, col 2 a boolean. Phase 4b adds
@@ -116,7 +232,7 @@ export function demoGetCellContent(item: Item): GridCell {
     if (col === 0) {
         return {
             kind: GridCellKind.RowID,
-            data: `row-${row}`,
+            data: `EMP-${String(row).padStart(5, "0")}`,
             allowOverlay: false,
             // Phase 6: per-cell `themeOverride`, the most specific level of the precedence chain
             // (it wins over both the column and the row override). Every 10th row is flagged red
@@ -126,10 +242,11 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 1) {
+        const salary = 62_000 + (fieldHash(row, 3) % 118) * 1000;
         return {
             kind: GridCellKind.Number,
-            data: row,
-            displayData: String(row),
+            data: salary,
+            displayData: `$${salary.toLocaleString("en-US")}`,
             allowOverlay: true,
         };
     }
@@ -137,7 +254,7 @@ export function demoGetCellContent(item: Item): GridCell {
     if (col === 2) {
         return {
             kind: GridCellKind.Boolean,
-            data: row % 2 === 0,
+            data: fieldHash(row, 4) % 4 !== 0,
             allowOverlay: false,
         };
     }
@@ -150,7 +267,7 @@ export function demoGetCellContent(item: Item): GridCell {
         // flow, which would spawn a real new browser tab during automated click-testing -- not
         // worth the risk for a demo. The renderer's click-to-open affordance is still fully
         // implemented and would work for any real consumer that supplies `onClickUri`.
-        const uri = `https://example.com/items/${row}`;
+        const uri = `https://example.com/u/${slug(row)}`;
         return {
             kind: GridCellKind.Uri,
             data: uri,
@@ -163,27 +280,29 @@ export function demoGetCellContent(item: Item): GridCell {
     if (col === 4) {
         return {
             kind: GridCellKind.Markdown,
-            data: MARKDOWN_SAMPLES[row % MARKDOWN_SAMPLES.length]!,
+            data: pickFrom(MARKDOWN_SAMPLES, row, 5),
             allowOverlay: true,
         };
     }
 
     if (col === 5) {
-        // 1 or 2 thumbnails per row, exercising `image-cell.ts`'s multi-image layout math.
-        const count = 1 + (row % 2);
+        // One portrait per row, generated on a canvas so each is visibly distinct. A second
+        // thumbnail every fifth row still exercises `image-cell.ts`'s multi-image layout math
+        // without making the common case look cramped.
+        const urls = [PHOTOS[fieldHash(row, 6) % PHOTOS.length]!];
+        if (row % 5 === 4) urls.push(PHOTOS[fieldHash(row, 7) % PHOTOS.length]!);
         return {
             kind: GridCellKind.Image,
-            data: Array.from({ length: count }, () => IMAGE_SAMPLE),
+            data: urls,
             allowOverlay: true,
         };
     }
 
     if (col === 6) {
-        const tagCount = 2 + (row % 3); // 2-4 tags
-        const tags = Array.from(
-            { length: tagCount },
-            (_, i) => BUBBLE_TAGS[(row + i * 3) % BUBBLE_TAGS.length]!
-        );
+        // 2-3 short skills. Deliberately not 4: at this column width a fourth would clip, and a
+        // clipped chip hides the renderer's own truncation behaviour rather than showing it.
+        const tagCount = 2 + (fieldHash(row, 8) % 2);
+        const tags = distinctPicks(BUBBLE_TAGS, row, 8, tagCount);
         return {
             kind: GridCellKind.Bubble,
             data: tags,
@@ -192,10 +311,10 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 7) {
-        const chipCount = 2 + (row % 2); // 2-3 chips
-        const chips = Array.from({ length: chipCount }, (_, i) => ({
-            text: `Item ${row}-${i}`,
-            img: i === 0 ? DRILLDOWN_ICON : undefined,
+        const chipCount = 1 + (fieldHash(row, 11) % 2); // 1-2 chips
+        const chips = distinctPicks(PROJECT_NAMES, row, 11, chipCount).map((name, i) => ({
+            text: name,
+            img: avatarUrl(name.slice(0, 2).toUpperCase(), fieldHash(row, 11 + i)),
         }));
         return {
             kind: GridCellKind.Drilldown,
@@ -210,7 +329,8 @@ export function demoGetCellContent(item: Item): GridCell {
     if (col === 8) {
         // A wavy-ish deterministic series per row so every row's chart looks visibly different,
         // alternating graph kind by row so line/bar/area are all exercised in one column.
-        const values = Array.from({ length: 12 }, (_, i) => 50 + 40 * Math.sin(row / 3 + i / 2) + (row % 7) * 2);
+        const phase = fieldHash(row, 14) % 100;
+        const values = Array.from({ length: 12 }, (_, i) => 50 + 40 * Math.sin(phase / 8 + i / 2) + (phase % 7) * 2);
         const graphKinds = ["line", "bar", "area"] as const;
         return {
             kind: GridCellKind.Custom,
@@ -221,13 +341,13 @@ export function demoGetCellContent(item: Item): GridCell {
                 values,
                 displayValues: values.map(v => v.toFixed(0)),
                 yAxis: [0, 100],
-                graphKind: graphKinds[row % graphKinds.length],
+                graphKind: pickFrom(graphKinds, row, 15),
             },
         };
     }
 
     if (col === 9) {
-        const rating = 1 + (row % 5);
+        const rating = 1 + (fieldHash(row, 16) % 5);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: false,
@@ -240,7 +360,7 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 10) {
-        const value = row % 101;
+        const value = fieldHash(row, 17) % 101;
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
@@ -271,8 +391,8 @@ export function demoGetCellContent(item: Item): GridCell {
     // (native `<select multiple>` + "add new" for `allowCreation`), links (list of clickable
     // titles). All `GridCellKind.Custom`, matched via `extra-cells/index.ts`'s combinator.
     if (col === 12) {
-        const tagCount = 1 + (row % 3); // 1-3 tags
-        const tags = Array.from({ length: tagCount }, (_, i) => POSSIBLE_TAGS[(row + i * 2) % POSSIBLE_TAGS.length]!.tag);
+        const tagCount = 1 + (fieldHash(row, 18) % 2); // 1-2 labels
+        const tags = distinctPicks(POSSIBLE_TAGS, row, 18, tagCount).map(t => t.tag);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
@@ -286,7 +406,7 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 13) {
-        const value = DROPDOWN_OPTIONS[row % DROPDOWN_OPTIONS.length]!;
+        const value = pickFrom(DROPDOWN_OPTIONS, row, 20);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
@@ -300,8 +420,8 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 14) {
-        const count = 1 + (row % 3); // 1-3 selected browsers
-        const values = Array.from({ length: count }, (_, i) => MULTI_SELECT_OPTIONS[(row + i) % MULTI_SELECT_OPTIONS.length]!.value);
+        const count = 1 + (fieldHash(row, 21) % 2); // 1-2 selected browsers
+        const values = distinctPicks(MULTI_SELECT_OPTIONS, row, 21, count).map(o => o.value);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
@@ -321,8 +441,8 @@ export function demoGetCellContent(item: Item): GridCell {
         // the draw/hover-underline and editor's add/remove/edit-title-and-url affordances are all
         // fully real and exercised.
         const links = [
-            { title: `Issue #${row}`, href: `https://example.com/issues/${row}` },
-            { title: "Docs", href: "https://example.com/docs" },
+            { title: `Issue #${1000 + (fieldHash(row, 23) % 8999)}`, href: `https://example.com/issues/${row}` },
+            { title: "Handbook", href: "https://example.com/handbook" },
         ];
         return {
             kind: GridCellKind.Custom,
@@ -344,8 +464,11 @@ export function demoGetCellContent(item: Item): GridCell {
     if (col === 16) {
         // Alternates date-only vs. date+time format by row so both native input types are
         // exercised in one column.
-        const isDateTime = row % 2 === 1;
-        const date = new Date(Date.UTC(2024, 0, 1 + (row % 365), isDateTime ? row % 24 : 0, isDateTime ? (row * 7) % 60 : 0));
+        const isDateTime = fieldHash(row, 24) % 2 === 1;
+        const dayOfYear = fieldHash(row, 25) % 365;
+        const date = new Date(
+            Date.UTC(2024, 0, 1 + dayOfYear, isDateTime ? fieldHash(row, 26) % 24 : 0, isDateTime ? fieldHash(row, 27) % 60 : 0)
+        );
         const displayDate = isDateTime ? date.toISOString().slice(0, 16).replace("T", " ") : date.toISOString().slice(0, 10);
         return {
             kind: GridCellKind.Custom,
@@ -361,7 +484,7 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 17) {
-        const title = `Run #${row}`;
+        const title = "Run report";
         return {
             kind: GridCellKind.Custom,
             readonly: true,
@@ -386,7 +509,8 @@ export function demoGetCellContent(item: Item): GridCell {
         // in `DemoGrid`'s `edits` override map exactly like any other cell edit -- no extra plumbing
         // needed here, `isOpen` for a given row just starts `false` until the user toggles it.
         const depth = row % 3;
-        const text = depth === 0 ? `Folder ${row}` : depth === 1 ? `Subfolder ${row}` : `File ${row}`;
+        const name = pickFrom(FILE_NAMES, row, 28);
+        const text = depth === 0 ? name : depth === 1 ? `${name} / 2024` : `${name.toLowerCase()}-2024.pdf`;
         return {
             kind: GridCellKind.Custom,
             readonly: true,
@@ -407,23 +531,24 @@ export function demoGetCellContent(item: Item): GridCell {
     }
 
     if (col === 19) {
-        const name = USER_NAMES[row % USER_NAMES.length]!;
+        const name = personName(row);
+        const tintIndex = fieldHash(row, 29);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
             copyData: name,
             data: {
                 kind: "user-profile-cell",
-                image: IMAGE_SAMPLE,
+                image: avatarUrl(initials(row), tintIndex),
                 initial: name[0]!,
-                tint: USER_TINTS[row % USER_TINTS.length]!,
+                tint: PHOTO_PALETTE[tintIndex % PHOTO_PALETTE.length]![0],
                 name,
             },
         };
     }
 
     if (col === 20) {
-        const markdown = MARKDOWN_SAMPLES[row % MARKDOWN_SAMPLES.length]!;
+        const markdown = pickFrom(MARKDOWN_SAMPLES, row, 30);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
@@ -435,7 +560,9 @@ export function demoGetCellContent(item: Item): GridCell {
         };
     }
 
-    const text = `R${row}C${col}`;
+    // Plain text for every remaining column, but plausible: `R7C34` in 29 columns was the single
+    // biggest reason this demo read as filler.
+    const text = pickFrom(FILLER_VALUES, row, 40 + col);
     return {
         kind: GridCellKind.Text,
         data: text,

@@ -22,7 +22,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          # Node 22+: @embroider/addon-dev requires package-up (ESM) via require()
+          node-version: 22
           cache: pnpm
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
@@ -41,7 +42,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          # Node 22+: @embroider/addon-dev requires package-up (ESM) via require()
+          node-version: 22
           cache: pnpm
       - name: Install Dependencies
         run: pnpm install --no-lockfile
@@ -58,8 +60,9 @@ jobs:
       fail-fast: false
       matrix:
         try-scenario:
-          - ember-lts-4.12
-          - ember-lts-5.4
+          # Peer is ember-source >= 6 (test-app default ~6.12 covered by Tests job)
+          - ember-lts-6.4
+          - ember-lts-6.8
           - ember-release
           - ember-beta
           - ember-canary
@@ -71,7 +74,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          # Node 22+: @embroider/addon-dev requires package-up (ESM) via require()
+          node-version: 22
           cache: pnpm
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile

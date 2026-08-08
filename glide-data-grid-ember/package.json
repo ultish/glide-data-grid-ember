@@ -5,7 +5,10 @@
   "keywords": [
     "ember-addon"
   ],
-  "repository": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ultish/glide-data-grid-ember.git"
+  },
   "license": "MIT",
   "author": "",
   "exports": {

@@ -1,0 +1,109 @@
+# Publish glide-data-grid-ember to npm when a version tag is pushed.
+#
+# Auth: npm Trusted Publishing (OIDC) — no NPM_TOKEN, no OTP in CI.
+#
+# One-time on npmjs.com (package Settings → Trusted Publisher → GitHub Actions):
+#   Organization or user:  ultish
+#   Repository:            glide-data-grid-ember
+#   Workflow filename:     release.yml   ← filename only, not a path
+#   Environment name:      (leave empty unless you use a GitHub Environment)
+#   Allowed actions:       npm publish
+#
+# package.json repository.url must match the GitHub repo (see glide-data-grid-ember/package.json).
+#
+# Release: bump glide-data-grid-ember/package.json version, commit, then:
+#   git tag vX.Y.Z && git push origin vX.Y.Z
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Pack only — do not publish to npm'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish glide-data-grid-ember
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Trusted publishing: Node >= 22.14 and npm >= 11.5.1
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: pnpm
+
+      - name: Ensure modern npm (OIDC trusted publishing)
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package.json version
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./glide-data-grid-ember/package.json').version")"
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match glide-data-grid-ember/package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build addon
+        run: pnpm --filter glide-data-grid-ember build
+
+      - name: Pack (inspect contents)
+        working-directory: glide-data-grid-ember
+        run: |
+          set -euo pipefail
+          pnpm pack
+          echo "--- tarball contents (first 80 entries) ---"
+          tar -tzf glide-data-grid-ember-*.tgz | head -80
+
+      - name: Publish to npm (OIDC trusted publishing)
+        if: >-
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+        working-directory: glide-data-grid-ember
+        run: |
+          set -euo pipefail
+          echo "npm $(npm --version) node $(node --version)"
+          # No NODE_AUTH_TOKEN — OIDC via id-token: write
+          # 404 on PUT usually means Trusted Publisher config mismatch
+          # (wrong workflow filename, user/repo, or repository.url)
+          npm publish --access public
+
+      - name: Dry-run notice
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run != false
+        run: |
+          echo "Dry run complete — tarball built, nothing published."
