@@ -625,7 +625,9 @@ only by nobody having needed them. Each is small on its own — the value is in 
 - `rowMarkerStartIndex`, `rowMarkerTheme` — 1-based/offset row numbering, and theming the marker
   column separately.
 - ~~`highlightRegions`, `drawCell`, `drawHeader`, `prelightCells`~~ — **DONE 2026-08-08,
-  browser-verified.** All four were live `DrawGridArg` fields hardcoded to `undefined`; they are now
+  browser-verified.** (`highlightRegions` shipped with a defect, found and fixed in 9h: it was a
+  pure passthrough and so ignored the row-marker column offset, drawing every region one column to
+  the left on any grid with row markers.) All four were live `DrawGridArg` fields hardcoded to `undefined`; they are now
   `GridHostArgs` + `<GlideDataGrid>` args (`@drawCell` / `@drawHeader` / `@prelightCells` /
   `@highlightRegions`), a pure passthrough with no new rendering code. `prelightCells` and
   `highlightRegions` are two of `computeCanBlit`'s identity-compared fields, so both carry a
@@ -653,14 +655,22 @@ only by nobody having needed them. Each is small on its own — the value is in 
 
 ### 9h — Interaction gaps
 
-- **Row reordering** (dragging rows via the row-marker column) — column resize/reorder landed in
-  Phase 3d, row reorder did not; `onRowMoved` isn't ported at all. `M`.
-- **Autoscroll while dragging past the viewport edge** — source: `use-autoscroll.ts` (41 lines).
-  Applies to drag-extend, row reorder and fill-handle drag alike, so it's worth doing once as shared
-  infrastructure rather than three times. Currently a drag simply stops at the edge. `S`.
-- **Fill-handle drag-to-fill** — `DEFAULT_FILL_HANDLE` exists as ported static data and the handle
-  can draw, but the drag-to-replicate interaction was never built. Also unported: `onFillPattern`,
-  `allowedFillDirections`. `M`.
+> **The first three items below LANDED 2026-08-08, browser-verified** (autoscroll, row reorder,
+> fill handle — built in that order, autoscroll first and once as shared infrastructure exactly as
+> this entry recommended). Implementation record, including the two real addon defects they
+> surfaced, is in `PORTING-NOTES.md`'s "Phase 9h" section. The remaining items in this group are
+> untouched.
+
+- ~~**Row reordering**~~ — **DONE 2026-08-08.** `@onRowMoved` (which also enables the marker cells'
+  drag handles) + a live preview remap + the 20px dead-zone, ported from `data-grid-dnd.tsx`.
+  Requires `@rowMarkers` to be on: the drag is grabbed from the marker column.
+- ~~**Autoscroll while dragging past the viewport edge**~~ — **DONE 2026-08-08.**
+  `rendering/autoscroll.ts` (`Autoscroller` + `computeScrollEdge` +
+  `adjustDragLocationForScroll`), shared by all three drags, with 18 unit tests. Needed a new
+  window-level `mousemove` listener, since this port's main one is scoped to the grid root.
+- ~~**Fill-handle drag-to-fill**~~ — **DONE 2026-08-08.** `@fillHandle` (opt-in, off by default,
+  matching source), `@allowedFillDirections`, `@onFillPattern`. **Fixed a real defect**: the handle
+  had been drawn unconditionally since Phase 2 and did nothing at all when dragged.
 - **Controlled-selection mode** — `GridHostController` always owns `selection` internally; there's no
   `GridHostArgs.selection` for a consumer to pass in/manage externally (source's
   `gridSelection`/`onGridSelectionChange` pair). Phase 3a already sketched the implementation: an
@@ -984,35 +994,35 @@ deliverables are one phase.
 
 ## THE QUEUE — start here (accurate as of 2026-08-08, end of session)
 
-**Done this session** (branch `phase-9-partial`): 9q both halves (the addon's DOM is now fully
+**Done on branch `phase-9-partial`**: 9q both halves (the addon's DOM is now fully
 restylable), 9e search (engine + controller + opt-in `<GlideSearchBar>` + an app-owned-input demo),
 the OKLCH parser fix, the CSS-variable theming bridge with a live DaisyUI demo, two real
-overlay-editor defects, 9d context menus, and 9i column auto-sizing. Test suite 425 -> 547.
+overlay-editor defects, 9d context menus, 9i column auto-sizing, and **9h's three items (autoscroll,
+row reorder, fill handle) plus two more real defects**. Test suite 425 -> 586.
 
-**Next, in agreed order** (user chose features over tests, 2026-08-08):
+**All four feature items the user picked are now done.** Next, in agreed order:
 
-1. **9h — fill handle + row reorder + autoscroll.** The last of the four feature items the user
-   picked; the other three are done. **Build autoscroll-past-the-viewport-edge first and once** --
-   drag-extend, row reorder and fill-drag all need it, and doing it three times is how it ends up
-   subtly different three times. Chunkiest remaining item: touches selection, drag state and
-   rendering.
-2. **Phase 10 — fully-featured demo + `COOKBOOK.md`** (see the section above). Worth doing soon
-   after 9h, because 9h's features would otherwise inherit the same "no demo switches it on"
-   problem that 10a exists to end.
-3. **9p — Playwright.** Deferred by the user in favour of features, but note what it would have
-   caught: this session produced a *false negative* where a working search feature was declared
-   broken because the automation harness never focused the grid root.
+1. **Phase 10 — fully-featured demo + `COOKBOOK.md`** (see the section above). 9h already moved
+   `<DemoGrid>` partway there — it now has row markers, `@onRowMoved`, `@fillHandle` and
+   `@getCellsForSelection` — which is precisely how 9h's `@highlightRegions` defect surfaced. Keep
+   going: `freezeColumns` and column groups are still switched on by no demo.
+2. **9p — Playwright.** Deferred by the user in favour of features, but note what it would have
+   caught: an earlier session produced a *false negative* where a working search feature was
+   declared broken because the automation harness never focused the grid root, and 9h lost several
+   minutes to a probe that ran before the grid's `ResizeObserver` had given it a size. Both are
+   exactly the flakiness a committed harness removes.
+3. The rest of the Phase 9 backlog, on request.
 
 **Explicitly parked:** lint/format cleanup (user: "id prefer doing feature than fixing linting for
 now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
 deferred by user decision.
 
-**Loose ends** (all cheap, all folded into Phase 10a's checklist): `getCellsForSelection` has never
-been exercised in a browser; 9d's group-header context menu and row-marker offset have not either
-(`<DemoGrid>` has neither groups nor row markers); 9i auto-sizing is demoed only by `<DaisyDemo>`.
-Original note follows. `getCellsForSelection` has never been exercised in a browser. Low risk — `rowEnd` is
-clamped to `args.rows` at every call site, so the default path is provably identical to the previous
-behaviour — but the click hasn't happened.
+**Loose ends** (all cheap, all folded into Phase 10a's checklist). 9h closed two of them:
+`<DemoGrid>` now sets `@rowMarkers` (so 9d's row-marker context-menu offset does run) and
+`@getCellsForSelection={{true}}`, which the fill path drives on every drag — so that arg has now
+been exercised in a browser. **Still open**: 9d's *group-header* context menu (`<DemoGrid>` has no
+column groups), `freezeColumns` (no demo sets it), and 9i auto-sizing (demoed only by
+`<DaisyDemo>`).
 
 **9b** (accessibility) and **9c** (touch) remain deferred by explicit user decision; 9b is still the
 item nothing else substitutes for if a consumer ever needs it.

@@ -95,12 +95,21 @@ auditing your own notes only finds what you already knew you skipped. **Both rep
 `codebase-memory` knowledge graph** (`Users-jxhui-Developer-glide-data-grid` and
 `...-glide-data-grid-ember`) — use it before hand-grepping either tree.
 
-**Two Phase 9 items have landed** (2026-08-08, browser-verified, see PORTING-NOTES.md's "Phase 9
-(partial)" section): the four consumer draw hooks (`@drawCell`/`@drawHeader`/`@prelightCells`/
-`@highlightRegions` — previously hardcoded `undefined` in `runDraw`) and **`@extraCells`**, which
-replaces every demo's hand-built `createCombinedCellRenderer(...)`. The blit fast path was
-re-measured with all five live and still engages. **9b (accessibility) and 9c (touch) are deferred by
-explicit user decision** — don't propose them as next steps.
+**Several Phase 9 items have landed** on branch `phase-9-partial`, all browser-verified — see
+PORTING-NOTES.md for each: the four consumer draw hooks + `@extraCells` ("Phase 9 (partial)"), 9q
+(the addon ships real stylesheets), 9e (search + opt-in `<GlideSearchBar>`), 9d (context menus), 9i
+(column auto-sizing), and **9h (autoscroll + row reorder + fill handle)**. Vitest suite: **586**.
+**9b (accessibility) and 9c (touch) are deferred by explicit user decision** — don't propose them as
+next steps. **Next up is Phase 10** (fully-featured demo + `COOKBOOK.md`); see PHASES.md's "THE
+QUEUE".
+
+Phase 9h is worth reading before touching drag/mouse code: `Autoscroller`
+(`src/rendering/autoscroll.ts`) is shared by drag-extend, row reorder and fill-drag, and there is
+now a **second, window-level `mousemove` listener** that wakes only for an in-flight drag outside
+the grid (the main one is on `root`, so it stops firing exactly when autoscroll needs it). It found
+two more latent defects of the usual kind: the fill handle had been *drawn* unconditionally since
+Phase 2 while doing nothing when dragged, and `@highlightRegions` ignored the row-marker column
+offset because no demo had ever switched on both at once.
 
 Consumer-facing docs are the spec for future work — keep them in sync rather than letting them go
 stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and `glide-data-grid-ember/DATA.md` (how

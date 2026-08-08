@@ -4423,3 +4423,140 @@ browser (achromatic `oklch(0.7 none 250)` is 158,158,158 not 161; plus two `-0` 
 now 8 for 8 on the standing "assume your expectation is wrong first" rule.
 
 `THEMING.md` §6 gained a "What a color value may be" subsection stating the supported syntaxes.
+
+## Phase 9h — autoscroll, row reorder, fill handle (COMPLETE, browser-verified, 2026-08-08)
+
+The last of the four feature items the user picked. All three share one gesture pipeline, which is
+the whole reason they landed together.
+
+### The shared piece, built first and once: `rendering/autoscroll.ts`
+
+Port of source's `use-autoscroll.ts` (41 lines, a React hook) as a plain `Autoscroller` class,
+de-hooked exactly like `use-animation-queue` → `animation-queue.ts` in Phase 2. Curve is source's
+verbatim: `speedScalar` ramps to 1 over `MS_TO_FULL_SPEED = 1300`, `motion = speedScalar ** 1.618 *
+step * 2`. Also exported from the same module: `computeScrollEdge` and `adjustDragLocationForScroll`
+(source's `adjustSelectionOnScroll`).
+
+Three things worth not re-deriving:
+
+- **The vertical edge test is against `totalHeaderHeight`, not `0`** (`data-grid.tsx:569-572`).
+  Dragging *up into the header* must scroll up, because the header covers the top of the body.
+  Verified in a browser: scrolled from 3000 → 2617.
+- **`setDirection` must be idempotent for an unchanged direction.** The controller calls it on every
+  mousemove tick; if an unchanged direction restarted the timing baseline, the ramp would never
+  build and autoscroll would creep forever. Changing direction mid-drag (sliding along an edge into
+  a corner) resets the frame baseline but **keeps** the speed already built — source gets this free
+  from `speedScalar` being a ref while `lastTime` is an effect-local.
+- **Deliberate divergence: `lastTime` is `number | undefined`, not source's `0` sentinel.** A real
+  rAF timestamp of exactly 0 is possible, and there source silently swallows a second frame. This
+  bit the first version of the unit test before it bit anyone else.
+
+`requestFrame`/`cancelFrame` are constructor options purely so the class is testable in bare Node —
+`autoscroll.test.ts` (18 tests) cranks the clock by hand.
+
+### Row reorder (`@onRowMoved`)
+
+Faithful to `data-grid-dnd.tsx`: grabbed from the row-marker column (so `@rowMarkers` must be on),
+20px vertical dead-zone before it activates, and **the drag is a pure preview** — `previewRowOrder`
+remaps which underlying row each screen row reads from, and the preview is thrown away on mouseup.
+The consumer owns row order, same contract as `onColumnMoved`.
+
+`InnerGridCell.drawHandle` is now `onRowMoved !== undefined` (it was hardcoded `false` with a
+comment saying "Phase 3d didn't port this"), which is both the affordance and the enable flag.
+
+The remap is applied **outermost**, before the marker/trailing-row mangling, matching source's
+layering (`DataGridDnd` wraps `DataEditor`, so its remap runs first). One consequence that looks
+like a bug and is not: mid-drag the row-marker *numbers* show the underlying row, not the screen
+position — source does exactly the same, because its marker cell is built from the remapped row.
+
+`previewRowOrder` is a pure exported function with its own tests, including the property that
+matters: **it is a permutation for every (src, drop) pair.** A remap that loses or duplicates a row
+renders a plausible-looking table with a row silently missing.
+
+### Fill handle (`@fillHandle`, `@allowedFillDirections`, `@onFillPattern`)
+
+**This one fixed a real defect on the way in.** From Phase 2 to 9g `runDraw` passed
+`fillHandle: DEFAULT_FILL_HANDLE` unconditionally, so the handle was **always drawn and did nothing
+at all when dragged** — an affordance that lies. It is now `args.fillHandle ? DEFAULT_FILL_HANDLE :
+false`, opt-in and off by default, matching source (`fillHandle?: boolean`, no default).
+
+Geometry, ported from `data-grid.tsx:662-687`: the handle's centre sits on the selection's
+bottom-right corner offset by `DEFAULT_FILL_HANDLE.offsetX/Y` (`-2,-2`) minus half its `size` (4),
+plus 0.5 to land on the gridline. The hit box is deliberately generous — within `size` px of the
+centre in each axis, i.e. 8×8 for a 4px handle. Measured in-browser: crosshair cursor over exactly
+x∈[267,274], y∈[136,143] for a cell whose bottom-right corner is (274,142). Matches.
+
+The fill itself is `computeFillEdits` (pure, tested): the pattern tiles by modulo in both axes,
+cells inside the pattern rect are skipped (they are the source), non-read-write cells are skipped
+rather than replaced, and every filled cell gets its **own** object rather than an alias. Edits go
+out through `onCellsEdited` in one batch and are repainted via `updateCells`, exactly like paste.
+
+The in-progress preview is a `Highlight` with `style: "dashed"` and `withAlpha(accentColor, 0)`,
+appended to `highlightRegions` — source's approach, not a new render path.
+
+Cursor is the one place where two independent inputs collide (the render engine's `overrideCursor`
+for the hovered cell, and the fill state), so both now funnel through a single `applyCursor()`.
+Note the subtlety that needed a fix: **a fill drag suppresses the hover path entirely**, so on
+mouseup `overFillHandle` has to be *recomputed* from the mouseup position — the handle has just
+moved to the corner of the grown selection. Without that the crosshair stayed stranded until the
+next mouse move.
+
+### The window-level mousemove listener (new, and the reason autoscroll works at all)
+
+This port's `mousemove` listener is on `root`, so it stops firing the moment a drag leaves the grid
+— which is exactly when autoscroll needs to know where the pointer is. Source sidesteps this by
+listening for `pointermove` on the window (`data-grid.tsx:1374`). Rather than widen the main
+listener (hover state is deliberately scoped to the grid), a second window listener wakes up only
+for an in-flight drag *outside* the grid. **Events inside the grid reach it too, by bubbling** — the
+`this.root.contains(ev.target)` check is what stops them being processed twice.
+
+### Second real defect fixed here: `@highlightRegions` ignored the row-marker offset
+
+`@highlightRegions` landed in the earlier Phase 9 work as a pure passthrough. Source shifts
+`range.x` by `rowMarkerOffset` and clamps the width (`data-editor.tsx:1249-1263`); this port did
+not. No demo had ever switched on row markers *and* a highlight region at the same time, so every
+region drew one column to the left on any grid with row markers — invisible until 9h turned row
+markers on in `<DemoGrid>`. **This is the Phase 7e pattern for the fourth time**: a feature no demo
+has ever combined with another is not verified, only unfalsified.
+
+`prelightCells` is deliberately *not* translated — source leaves it unmangled because its own
+search subsystem feeds it already-mangled coordinates. The two props genuinely differ; both now
+match source.
+
+### Verification actually performed (not delegated)
+
+`ember-tsc` clean, `pnpm build` clean, `vite build` clean, **586 vitest tests** (up from 547).
+In Chrome against the built `dist/`, all by raw-DOM-event dispatch in single `javascript_tool`
+scripts per the standing rule:
+
+- Fill: selected a cell, hovered the handle (crosshair), dragged down 4 rows (dashed preview drawn
+  over exactly those rows, solid ring still on the source cell), released → the four cells took the
+  source's value and the selection grew to cover both. Cursor reverted correctly.
+- Row reorder: dragged row 2 down to row 6 — live preview showed the whole block shifted, mouseup
+  committed it and the marker numbers renumbered 1..n. Then dragged row 8 up to position 2 *after*
+  a fill, and confirmed the earlier edits stayed with their **records**, not their positions.
+- Autoscroll: measured `scrollTop` 0 → 87 → 516 → 1420 over three 500ms samples (accelerating,
+  not linear), stopping dead on mouseup. Horizontal: 1.5 → 841.5 over 1.2s. Both axes at once in a
+  corner. Up-scroll by dragging into the header strip. The selection kept growing throughout, i.e.
+  `adjustSelectionOnScroll` is live.
+- **Blit fast path re-measured** (the standing rule for anything touching `DrawGridArg`): 6/6 scroll
+  draws blit-eligible with **zero** differing identity-compared fields, both with `@highlightRegions`
+  off and on — the latter being the new translated path. `mappedColumns` still churns identity
+  (known, backlog 9k) and still blits via the ≤100-column `deepEqual` branch.
+
+### Browser-testing gotchas (add to the standing list — both cost real time here)
+
+- **Probe a freshly-loaded grid too early and every coordinate is nonsense.** `this.width`/
+  `this.height` come from the `ResizeObserver`'s first callback; before it fires they are `0`, so
+  `computeScrollEdge` reports "past the right edge" for every point and hit-testing silently
+  disagrees with what is drawn. A first attempt at the autoscroll test failed this way and looked
+  exactly like a logic bug. **Sleep ~1s after navigation before dispatching anything.**
+- **Vite caches the linked addon's `dist/`.** Editing `dist` (to instrument it) or even rebuilding
+  it while the dev server runs does *not* reach the page — not on reload, not on a cache-busting
+  query string. Every instrumentation cycle needs `pkill -f vite && rm -rf
+  test-app/node_modules/.vite` and a restart. Several minutes were lost concluding "the new code
+  isn't running" when the real answer was "the new code isn't being served".
+- Calibrating client coordinates to cells is *much* easier through a real hit test than by
+  eyeballing a screenshot: dispatch `contextmenu` and read the demo's own menu label
+  (`Cell <col>, <row>`). A binary search over x found a column's exact right edge in seconds, after
+  eyeball estimates from zoomed screenshots had been wrong by ~30px twice.

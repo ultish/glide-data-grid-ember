@@ -147,6 +147,19 @@ export {
 } from "./search.ts";
 export type { SearchStatus, IncrementalSearchOptions } from "./search.ts";
 
+// Autoscroll-while-dragging (Phase 9h) -- shared by drag-extend, row reorder and fill-handle drag.
+// Ported from source's `use-autoscroll.ts`; exported so it can be unit-tested and reused, not
+// because consumers are expected to drive it (`<GlideDataGrid>` wires it internally).
+export { Autoscroller, computeScrollEdge, adjustDragLocationForScroll, scrollEdgesAreEqual, NO_SCROLL_EDGE } from "./autoscroll.ts";
+export type { ScrollEdge, AutoscrollerOptions } from "./autoscroll.ts";
+
+// Fill-handle drag-to-fill geometry (Phase 9h). `getClosestRect` turns "the pointer is here, the
+// pattern source is there" into the region to fill; `combineRects` is what grows the selection to
+// cover both once the drag commits.
+export { getClosestRect, combineRects } from "./common/math.ts";
+export { previewRowOrder, computeFillEdits } from "./drag-and-fill.ts";
+export type { FillEditsArgs } from "./drag-and-fill.ts";
+
 // Supporting engine pieces
 export { CellSet } from "./cell-set.ts";
 export { AnimationManager } from "./animation-manager.ts";
@@ -166,4 +179,5 @@ export type {
     GridMouseCellEventArgs,
     GridKeyEventArgs,
     CellActivatedEventArgs,
+    FillPatternEventArgs,
 } from "./event-args.ts";

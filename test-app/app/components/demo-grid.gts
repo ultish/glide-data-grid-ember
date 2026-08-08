@@ -258,7 +258,8 @@ export default class DemoGrid extends Component {
     }
 
     getCellContent = (item: Item): GridCell => {
-        return this.edits.get(`${item[0]},${item[1]}`) ?? demoGetCellContent(item);
+        const row = this.sourceRow(item[1]);
+        return this.edits.get(`${item[0]},${row}`) ?? demoGetCellContent([item[0], row]);
     };
 
     @action
@@ -278,8 +279,41 @@ export default class DemoGrid extends Component {
     @action
     handleCellsEdited(edits: readonly { location: Item; value: GridCell }[]): void {
         const next = new Map(this.edits);
-        for (const edit of edits) next.set(`${edit.location[0]},${edit.location[1]}`, edit.value);
+        // Keyed by the *underlying* row, not the displayed one -- otherwise an edit made after a row
+        // reorder would follow the position rather than the record. Same read/write coordinate-space
+        // rule `withColumnSort` settled in Phase 8, here in its simplest possible form.
+        for (const edit of edits) next.set(`${edit.location[0]},${this.sourceRow(edit.location[1])}`, edit.value);
         this.edits = next;
+    }
+
+    // --- Phase 9h: row reorder + fill handle ------------------------------------------------------
+    // `@onRowMoved` enables dragging a row by its marker cell and draws the handle dots there; the
+    // grid previews the move live and then throws the preview away on drop, so the consumer has to
+    // actually reorder its data. This demo's rows are generated from their index by
+    // `demoGetCellContent`, so "reordering the data" means keeping a permutation and reading through
+    // it -- which is what a real consumer's array `splice` does, just spelled out.
+    @tracked rowOrder: readonly number[] | undefined = undefined;
+
+    private sourceRow(row: number): number {
+        return this.rowOrder?.[row] ?? row;
+    }
+
+    @action
+    handleRowMoved(startIndex: number, endIndex: number): void {
+        const order = [...(this.rowOrder ?? Array.from({ length: this.rows }, (_, i) => i))];
+        const [moved] = order.splice(startIndex, 1);
+        if (moved === undefined) return;
+        order.splice(endIndex, 0, moved);
+        this.rowOrder = order;
+    }
+
+    // Fill handle is opt-in (`@fillHandle`), matching source. Toggled here so the "handle drawn but
+    // inert" state this port shipped before 9h can't quietly come back unnoticed.
+    @tracked useFillHandle = true;
+
+    @action
+    toggleFillHandle(): void {
+        this.useFillHandle = !this.useFillHandle;
     }
 
     // Phase 4d: `demoGetCellContent` is a pure function of `[col, row]` (no upper bound baked in),
@@ -301,6 +335,9 @@ export default class DemoGrid extends Component {
                 </button>
                 <button type="button" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
                     {{if this.useExternalSearch "Hide external search input" "Show external search input"}}
+                </button>
+                <button type="button" data-test-fill-handle-toggle {{on "click" this.toggleFillHandle}}>
+                    {{if this.useFillHandle "Disable fill handle" "Enable fill handle"}}
                 </button>
             </div>
 
@@ -340,6 +377,13 @@ export default class DemoGrid extends Component {
                     @onColumnResize={{this.handleColumnResize}}
                     @onColumnMoved={{this.handleColumnMoved}}
                     @onCellsEdited={{this.handleCellsEdited}}
+                    {{! Phase 9h. Row markers are what a row reorder is grabbed from, so they have to
+                        be on for `@onRowMoved` to do anything -- and turning them on here is also
+                        what first exercised the row-marker offset in `@highlightRegions`. }}
+                    @rowMarkers="both"
+                    @onRowMoved={{this.handleRowMoved}}
+                    @fillHandle={{this.useFillHandle}}
+                    @getCellsForSelection={{true}}
                     @showTrailingBlankRow={{true}}
                     @onRowAppended={{this.handleRowAppended}}
                     @drawCell={{this.drawCell}}

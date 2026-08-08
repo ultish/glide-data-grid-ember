@@ -52,6 +52,13 @@ import {
     isObjectEditorCallbackResult,
     booleanCellIsEditable,
     toggleBoolean,
+    Autoscroller,
+    computeScrollEdge,
+    adjustDragLocationForScroll,
+    getClosestRect,
+    combineRects,
+    previewRowOrder,
+    computeFillEdits,
 } from "../rendering/index.ts";
 import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
 import { sizeColumns } from "../rendering/column-sizer.ts";
@@ -89,6 +96,9 @@ import type {
     BooleanCell,
     ProvideEditorCallbackResult,
     CellEditorHandle,
+    FillHandleDirection,
+    FillPatternEventArgs,
+    ScrollEdge,
 } from "../rendering/index.ts";
 import {
     computeBounds,
@@ -97,10 +107,12 @@ import {
     getRowIndexForY,
     getStickyWidth,
     itemsAreEqual,
+    rectBottomRight,
     type MappedGridColumn,
 } from "../rendering/render/data-grid-lib.ts";
 import { computeHeaderLayout } from "../rendering/render/data-grid-render.header.ts";
 import { pointInRect } from "../rendering/common/math.ts";
+import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
 import { browserIsSafari, browserIsOSX } from "../rendering/common/browser-detect.ts";
 
@@ -232,6 +244,51 @@ export interface GridHostArgs {
      */
     readonly onColumnMoved?: (startIndex: number, endIndex: number) => void;
 
+    // --- Phase 9h: row reorder / fill handle ------------------------------------------------------
+    /**
+     * Fired once at the end of a row-reorder drag. Setting it **enables** row reordering by
+     * dragging a row from the row-marker column, exactly as source does (`data-grid-dnd.tsx`'s
+     * `onRowMoved !== undefined` gate) -- and it is also what makes the marker cells draw their
+     * drag-handle dots (`InnerGridCell.drawHandle`).
+     *
+     * Requires a row-marker column (`rowMarkers !== "none"`): the drag is grabbed from the marker
+     * cell, so with no marker column there is nothing to grab. Row-marker *selection* clicks still
+     * work — a click that never crosses the drag threshold is still a selection click.
+     *
+     * **Consumer owns row order.** Same non-mutating contract as `onColumnMoved`/`onCellsEdited`:
+     * the grid shows a live preview during the drag and then throws it away on mouseup, so the
+     * consumer must reorder its own data for the move to stick.
+     */
+    readonly onRowMoved?: (startIndex: number, endIndex: number) => void;
+
+    /**
+     * Draws the fill handle (the small square at the bottom-right of the current selection) and
+     * enables drag-to-fill from it. `false` by default, matching source (`fillHandle?: boolean`
+     * with no default, so falsy).
+     *
+     * Note this is a behavioural change from Phase 2–9g of this port, which passed
+     * `DEFAULT_FILL_HANDLE` to the render engine unconditionally: the handle was always *drawn* and
+     * did nothing at all when dragged. An affordance that does nothing is worse than no affordance,
+     * so it is now opt-in and functional.
+     *
+     * Filling reads the pattern through {@link getCellsForSelection} (synthesised from
+     * `getCellContent` when that is absent or `true`) and reports the writes through
+     * {@link onCellsEdited}, in one batch, exactly like paste.
+     */
+    readonly fillHandle?: boolean;
+    /**
+     * Which way the fill handle may be dragged. `"orthogonal"` (source's default) snaps the fill to
+     * whichever single axis the pointer is furthest along; `"any"` allows a free rectangle.
+     * @defaultValue "orthogonal"
+     */
+    readonly allowedFillDirections?: FillHandleDirection;
+    /**
+     * Fired just before a fill's edits are computed, with both rectangles in the consumer's own
+     * column space. Call `preventDefault()` to take over the fill entirely -- no edits are computed
+     * and {@link onCellsEdited} does not fire. Mirrors source's `onFillPattern`.
+     */
+    readonly onFillPattern?: (event: FillPatternEventArgs) => void;
+
     // --- Phase 4d: trailing blank row / "add row" affordance -------------------------------------
     /**
      * When `true`, renders one extra virtual row immediately past `rows` whose every cell is the
@@ -353,6 +410,12 @@ export interface GridHostArgs {
      * Rectangular regions to tint/outline, e.g. to mark a search hit or a validation error. Mirrors
      * source's `highlightRegions` prop. **Identity-compared by `computeCanBlit` exactly like
      * `prelightCells` above -- the same stability rule applies.**
+     *
+     * `range.x` is in **your** column space, with no row-marker column -- the same space as
+     * `getCellContent`'s `Item`. The grid shifts it internally when `rowMarkers !== "none"`, and
+     * drops a region that starts past the last column rather than clipping it. (Note the contrast
+     * with `prelightCells` above, which source leaves unmangled because its own search subsystem
+     * feeds it already-mangled coordinates; this port matches source on both.)
      */
     readonly highlightRegions?: readonly Highlight[];
 
@@ -511,6 +574,11 @@ interface ResolvedGridHostArgs {
     readonly onColumnProposeMove: ((startIndex: number, endIndex: number) => boolean) | undefined;
     readonly onColumnMoved: ((startIndex: number, endIndex: number) => void) | undefined;
 
+    readonly onRowMoved: ((startIndex: number, endIndex: number) => void) | undefined;
+    readonly fillHandle: boolean;
+    readonly allowedFillDirections: FillHandleDirection;
+    readonly onFillPattern: ((event: FillPatternEventArgs) => void) | undefined;
+
     readonly showTrailingBlankRow: boolean;
     readonly onRowAppended: (() => void) | undefined;
 
@@ -594,6 +662,15 @@ const DEFAULT_GROUP_DETAILS = (name: string): { name: string } => ({ name });
 // `data-grid-dnd.tsx` `Math.abs(event.clientX - dragStartX) > 20` exactly.
 const RESIZE_EDGE_PX = 6;
 const COLUMN_DRAG_THRESHOLD_PX = 20;
+// Phase 9h: the vertical twin of the above, for row reorder -- source uses the same literal 20 in
+// the same function (`Math.abs(event.clientY - dragStartY) > 20`).
+const ROW_DRAG_THRESHOLD_PX = 20;
+
+function rectanglesEqual(a: Rectangle | undefined, b: Rectangle | undefined): boolean {
+    if (a === b) return true;
+    if (a === undefined || b === undefined) return false;
+    return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
 
 // Browser's maximum div height limit (varies a bit by browser) and the max height of a single
 // padder segment, both taken from `infinite-scroller.tsx` verbatim.
@@ -810,6 +887,29 @@ export class GridHostController {
         { srcCol: number; startClientX: number; active: boolean; dropCol: number; vetoed: boolean } | undefined =
         undefined;
 
+    // Row reorder drag state (Phase 9h). Set on mousedown in the row-marker column when
+    // `onRowMoved` is configured; `active` flips true only once the pointer has moved more than
+    // `ROW_DRAG_THRESHOLD_PX` vertically, matching source's dead-zone (`data-grid-dnd.tsx`'s
+    // `dragStartY`/`dragRowActive`). While active, `mangledGetCellContent` renders a live preview
+    // of the move; nothing is committed until mouseup fires `onRowMoved`.
+    private dragRowState: { srcRow: number; startClientY: number; active: boolean; dropRow: number } | undefined =
+        undefined;
+
+    // Fill-handle drag state (Phase 9h). Set on a mousedown that landed on the fill handle itself;
+    // `highlight` is the region the pointer has dragged out so far (source's
+    // `fillHighlightRegion`), drawn as a dashed highlight and turned into edits on mouseup.
+    private fillState: { previousSelection: GridSelection; highlight: Rectangle | undefined } | undefined = undefined;
+    // Whether the pointer is currently hovering the fill handle -- cursor feedback only (source's
+    // `overFill`).
+    private overFillHandle = false;
+
+    // Autoscroll-while-dragging (Phase 9h), shared by drag-extend, row reorder and fill drag.
+    private readonly autoscroller: Autoscroller;
+    // The last drag-relevant pointer position, in the hit-test space, remembered so an autoscroll
+    // tick can re-resolve what the drag is now over after the grid has slid underneath the
+    // (stationary) pointer. Mirrors source's `hoveredRef` feeding `adjustSelectionOnScroll`.
+    private lastDragHover: { location: Item; edge: ScrollEdge } | undefined = undefined;
+
     // Overlay editor state (Phase 4a) -- see `OverlayState` above. `undefined` = no editor open.
     private overlayState: OverlayState | undefined = undefined;
 
@@ -901,6 +1001,15 @@ export class GridHostController {
         this.animationManager = new AnimationManager(onAnimationFrame);
         this.animationQueue = new AnimationQueue(items => this.drawWithDamage(items));
 
+        // Phase 9h. One shared autoscroller for every drag that can run past the viewport edge.
+        // `scrollBy` on the real scroller fires the ordinary `scroll` event, so the redraw path is
+        // the existing one -- `onAutoscrollTick` only has to re-resolve what the (stationary)
+        // pointer is now over.
+        this.autoscroller = new Autoscroller({
+            scrollBy: (dx, dy) => this.scrollerEl.scrollBy(dx, dy),
+            onTick: this.onAutoscrollTick,
+        });
+
         // --- listeners ---------------------------------------------------------------------------
         this.scrollerEl.addEventListener("scroll", this.onScroll);
         this.root.addEventListener("mousemove", this.onMouseMove);
@@ -918,6 +1027,14 @@ export class GridHostController {
         // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderMenuClick`
         // in that case.
         window.addEventListener("mouseup", this.onMouseUp);
+        // Phase 9h. The main `mousemove` listener is on `root`, so it stops firing the moment a drag
+        // leaves the grid -- which is exactly when autoscroll needs to know where the pointer is.
+        // Source sidesteps this by listening for `pointermove` on the window (`data-grid.tsx:1374`);
+        // this port keeps its narrower root listener (hover state is scoped to the grid) and adds a
+        // window listener that only wakes up for an in-flight drag *outside* the grid. Events inside
+        // the grid reach this one too, by bubbling -- the `contains` check is what stops them being
+        // processed twice.
+        window.addEventListener("mousemove", this.onWindowMouseMove);
         // Copy/cut/paste (Phase 3c): native clipboard events, attached at `window` level (not a
         // specific DOM node) and gated on `this.isFocused` inside each handler -- mirrors source's
         // own `useEventListener("copy"/"cut"/"paste", ..., safeWindow, ...)` plus its
@@ -1066,6 +1183,11 @@ export class GridHostController {
             onColumnResizeEnd: args.onColumnResizeEnd,
             onColumnProposeMove: args.onColumnProposeMove,
             onColumnMoved: args.onColumnMoved,
+
+            onRowMoved: args.onRowMoved,
+            fillHandle: args.fillHandle === true,
+            allowedFillDirections: args.allowedFillDirections ?? "orthogonal",
+            onFillPattern: args.onFillPattern,
 
             showTrailingBlankRow: args.showTrailingBlankRow === true,
             onRowAppended: args.onRowAppended,
@@ -1264,14 +1386,29 @@ export class GridHostController {
               readonly rows: number;
               readonly rowMarkers: RowMarkerKind;
               readonly rowMarkerOffset: number;
+              readonly canReorderRows: boolean;
               readonly value: (item: Item) => InnerGridCell;
           }
         | undefined;
+
+    // Row-reorder live preview (Phase 9h). While a row drag is active, the grid shows the rows as
+    // they *would* be after the drop by remapping which source row each screen row reads from --
+    // nothing is committed until mouseup. Port of `data-grid-dnd.tsx`'s `getMangledCellContent`.
+    //
+    // Read lazily inside the cell-content closure rather than baked into it, so the closure's
+    // identity stays stable across the drag (`getCellContent` is identity-compared by
+    // `computeCanBlit`).
+    private previewRowIndex(screenRow: number): number {
+        const ds = this.dragRowState;
+        if (ds === undefined || !ds.active) return screenRow;
+        return previewRowOrder(screenRow, ds.srcRow, ds.dropRow);
+    }
 
     private mangledGetCellContent(args: ResolvedGridHostArgs): (item: Item) => InnerGridCell {
         if (!args.hasRowMarkers && !args.showTrailingBlankRow) {
             return args.getCellContent as (item: Item) => InnerGridCell;
         }
+        const canReorderRows = args.onRowMoved !== undefined;
         const cached = this.mangledCellContentCache;
         if (
             cached !== undefined &&
@@ -1280,12 +1417,18 @@ export class GridHostController {
             cached.showTrailingBlankRow === args.showTrailingBlankRow &&
             cached.rows === args.rows &&
             cached.rowMarkers === args.rowMarkers &&
-            cached.rowMarkerOffset === args.rowMarkerOffset
+            cached.rowMarkerOffset === args.rowMarkerOffset &&
+            cached.canReorderRows === canReorderRows
         ) {
             return cached.value;
         }
         const { rowMarkerOffset } = args;
-        const value = ([col, row]: Item): InnerGridCell => {
+        const value = ([col, screenRow]: Item): InnerGridCell => {
+            // Phase 9h: row-reorder preview, applied before everything else so the marker number,
+            // the trailing-row check and the consumer read all agree on which row this is. Matches
+            // source's layering (`DataGridDnd` wraps `DataEditor`'s mangled content, so its remap is
+            // the outermost one).
+            const row = this.previewRowIndex(screenRow);
             const isTrailing = args.showTrailingBlankRow && row === args.rows;
             if (args.hasRowMarkers && col === 0) {
                 if (isTrailing) {
@@ -1304,9 +1447,10 @@ export class GridHostController {
                     checked: this.selection.rows.hasIndex(row),
                     markerKind,
                     row: row + 1,
-                    // Row reordering (`onRowMoved`) isn't ported (Phase 3d) -- source only sets
-                    // `drawHandle: onRowMoved !== undefined`, which is always `false` here.
-                    drawHandle: false,
+                    // Phase 9h: the marker cell's drag-handle dots, which are both the affordance
+                    // for row reorder and its enable flag -- source sets exactly
+                    // `drawHandle: onRowMoved !== undefined` (`data-editor.tsx:1338`).
+                    drawHandle: canReorderRows,
                     cursor: args.rowMarkers === "clickable-number" ? "pointer" : undefined,
                 };
             }
@@ -1326,6 +1470,7 @@ export class GridHostController {
             rows: args.rows,
             rowMarkers: args.rowMarkers,
             rowMarkerOffset: args.rowMarkerOffset,
+            canReorderRows,
             value,
         };
         return value;
@@ -1450,6 +1595,8 @@ export class GridHostController {
         this.root.removeEventListener("blur", this.onBlur);
         this.root.removeEventListener("keydown", this.onKeyDown);
         window.removeEventListener("mouseup", this.onMouseUp);
+        window.removeEventListener("mousemove", this.onWindowMouseMove);
+        this.autoscroller.stop();
         window.removeEventListener("copy", this.onCopy);
         window.removeEventListener("cut", this.onCut);
         window.removeEventListener("paste", this.onPaste);
@@ -1513,7 +1660,10 @@ export class GridHostController {
             isFocused: this.isFocused,
             drawFocus: true,
             selection: this.selection,
-            fillHandle: DEFAULT_FILL_HANDLE,
+            // Phase 9h: opt-in, matching source (`fillHandle?: boolean`, no default). Before 9h this
+            // was hardcoded to `DEFAULT_FILL_HANDLE`, so the handle was always drawn and dragging it
+            // did nothing whatsoever.
+            fillHandle: args.fillHandle ? DEFAULT_FILL_HANDLE : false,
             freezeTrailingRows: 0,
             hasAppendRow: args.showTrailingBlankRow,
             hyperWrapping: false,
@@ -1521,7 +1671,7 @@ export class GridHostController {
             getCellContent: this.mangledGetCellContent(args),
             overrideCursor: cursor => {
                 this.cursorOverride = cursor;
-                this.scrollerEl.style.cursor = cursor ?? "";
+                this.applyCursor();
             },
             getGroupDetails: DEFAULT_GROUP_DETAILS,
             getRowThemeOverride: args.getRowThemeOverride,
@@ -1532,7 +1682,7 @@ export class GridHostController {
             drawHeaderCallback: args.drawHeader,
             drawCellCallback: args.drawCell,
             prelightCells: this.effectivePrelightCells(args),
-            highlightRegions: args.highlightRegions,
+            highlightRegions: this.effectiveHighlightRegions(args, theme),
             imageLoader: this.imageLoader,
             lastBlitData: this.lastBlitData,
             damage,
@@ -1558,6 +1708,101 @@ export class GridHostController {
         }
 
         this.maybeEmitVisibleRegion(args, mappedColumns, freezeColumns);
+    }
+
+    // --- Phase 9h: fill-handle presentation --------------------------------------------------------
+
+    // The consumer's `highlightRegions` -- translated out of consumer column space into the mangled
+    // space the render engine draws in -- plus the in-progress fill region when the fill handle is
+    // being dragged. Mirrors source's `highlightRegions` memo (`data-editor.tsx:1240-1300`), minus
+    // the selection-range/focus-ring entries source also folds in there: this port draws both of
+    // those from `selection` in the ring pass instead.
+    //
+    // **The row-marker translation was missing until Phase 9h.** `@highlightRegions` landed as a
+    // pure passthrough, and no demo had ever switched on row markers *and* a highlight region at the
+    // same time, so every region drew one column to the left on any grid with row markers. Source
+    // shifts by `rowMarkerOffset` and clamps the width at the same time (a region running off the
+    // right edge is dropped, not clipped to zero width); both are ported here now.
+    //
+    // `highlightRegions` is one of `computeCanBlit`'s identity-compared fields, so both the
+    // no-fill/no-marker case (returns the caller's own array unchanged) and the translated case
+    // (cached) must be reference-stable. While a fill drag is actually in flight the array does
+    // churn per frame, which is fine: the region genuinely changes every frame, and a drag is not a
+    // scroll, so the blit path is not what is being protected there.
+    private highlightRegionsCache:
+        | {
+              readonly base: readonly Highlight[] | undefined;
+              readonly fill: Rectangle | undefined;
+              readonly rowMarkerOffset: number;
+              readonly columnCount: number;
+              readonly theme: FullTheme;
+              readonly value: readonly Highlight[] | undefined;
+          }
+        | undefined;
+
+    private effectiveHighlightRegions(
+        args: ResolvedGridHostArgs,
+        theme: FullTheme
+    ): readonly Highlight[] | undefined {
+        const fill = this.fillState?.highlight;
+        const base = args.highlightRegions;
+        // Nothing to translate and nothing to add: hand back the caller's own reference.
+        if (fill === undefined && (base === undefined || base.length === 0 || args.rowMarkerOffset === 0)) {
+            return base;
+        }
+
+        const columnCount = args.columns.length + args.rowMarkerOffset;
+        const cached = this.highlightRegionsCache;
+        if (
+            cached !== undefined &&
+            cached.base === base &&
+            cached.theme === theme &&
+            cached.rowMarkerOffset === args.rowMarkerOffset &&
+            cached.columnCount === columnCount &&
+            rectanglesEqual(cached.fill, fill)
+        ) {
+            return cached.value;
+        }
+
+        const regions: Highlight[] = [];
+        for (const region of base ?? []) {
+            const maxWidth = columnCount - region.range.x - args.rowMarkerOffset;
+            if (maxWidth <= 0) continue;
+            regions.push({
+                color: region.color,
+                range: {
+                    ...region.range,
+                    x: region.range.x + args.rowMarkerOffset,
+                    width: Math.min(maxWidth, region.range.width),
+                },
+                style: region.style,
+            });
+        }
+        if (fill !== undefined) {
+            // Transparent fill + dashed outline, exactly as source styles the fill preview. Already
+            // in mangled space -- it comes from the selection, not from the consumer.
+            regions.push({ color: withAlpha(theme.accentColor, 0), range: fill, style: "dashed" });
+        }
+
+        const value = regions.length > 0 ? regions : undefined;
+        this.highlightRegionsCache = {
+            base,
+            fill,
+            rowMarkerOffset: args.rowMarkerOffset,
+            columnCount,
+            theme,
+            value,
+        };
+        return value;
+    }
+
+    // Cursor is decided by two independent inputs: whatever the render engine's `overrideCursor`
+    // last reported for the hovered cell, and the fill-handle state. Source computes the same
+    // precedence inline in `data-grid.tsx:972-982`; here the two arrive at different times, so both
+    // funnel through this one writer.
+    private applyCursor(): void {
+        const crosshair = this.fillState !== undefined || this.overFillHandle;
+        this.scrollerEl.style.cursor = crosshair ? "crosshair" : (this.cursorOverride ?? "");
     }
 
     // --- Phase 8: visible-region reporting ---------------------------------------------------------
@@ -1806,20 +2051,50 @@ export class GridHostController {
             return;
         }
 
-        // Drag-extend (Phase 3a): while a button is held from a mousedown that started inside the
-        // grid, growing the selection on every cell the mouse enters. Mirrors source's
-        // `onItemHoveredImpl` (`data-editor.tsx:2728-2809`), minus fill-handle/row-grouping
-        // clamping (out of scope -- no fill handle or row grouping ported yet).
-        if (this.mouseDownState !== undefined && ev.buttons !== 0) {
+        const totalHeaderHeight = this.totalHeaderHeight(args);
+
+        // Phase 9h: drag-extend, row reorder and fill-handle drag all share this block -- they are
+        // three readings of the same gesture ("a button is held and the pointer has moved"), and all
+        // three want the same off-the-edge autoscroll. Source reaches the same place via
+        // `onItemHoveredImpl`, which every drag routes through.
+        if (ev.buttons !== 0 && this.isDragInFlight()) {
             const dragLocation: Item = [
                 col !== -1 ? col : x < 0 ? 0 : mappedColumns.length - 1,
                 row ?? this.effectiveRows(args) - 1,
             ];
-            this.handleDragMove(args, this.mouseDownState, dragLocation);
+            const edge = computeScrollEdge(x, y, this.width, this.height, totalHeaderHeight);
+            this.lastDragHover = { location: dragLocation, edge };
+
+            // Row reorder's dead-zone is measured against the raw pointer, not the resolved cell, so
+            // it has to be crossed here rather than inside `applyDragTo` (which autoscroll also
+            // calls, with no `MouseEvent` to measure against).
+            const rowDrag = this.dragRowState;
+            if (rowDrag !== undefined && !rowDrag.active) {
+                if (Math.abs(ev.clientY - rowDrag.startClientY) > ROW_DRAG_THRESHOLD_PX) rowDrag.active = true;
+            }
+
+            this.autoscroller.setDirection(edge);
+            this.applyDragTo(args, dragLocation);
+
+            // A fill or row-reorder drag owns the pointer completely -- no hover/animation updates
+            // while it runs, mirroring source's `onItemHoveredImpl` not falling through to
+            // `onItemHovered` while `dragRowActive`. Drag-extend deliberately *does* fall through:
+            // its hover highlight is part of the interaction.
+            if (this.fillState !== undefined || rowDrag?.active === true) return;
+        } else if (this.lastDragHover !== undefined) {
+            this.autoscroller.setDirection(undefined);
+            this.lastDragHover = undefined;
         }
 
         const item: Item | undefined = col === -1 || row === undefined ? undefined : [col, row];
-        const totalHeaderHeight = this.totalHeaderHeight(args);
+
+        // Fill-handle hover: cursor feedback only (source's `overFill`). Must be evaluated even when
+        // the hovered *cell* hasn't changed, since the handle is a few px inside one cell's corner.
+        const overFill = item !== undefined && item[1] >= 0 && this.hitTestFillHandle(args, x, y);
+        if (overFill !== this.overFillHandle) {
+            this.overFillHandle = overFill;
+            this.applyCursor();
+        }
 
         const updateHoverInfo = (target: Item) => {
             const cellRect = computeBounds(
@@ -1904,6 +2179,145 @@ export class GridHostController {
 
         this.animationManager.setHovered(cellNeedsHover ? item : undefined);
     };
+
+    // --- Phase 9h: shared drag plumbing (drag-extend / row reorder / fill) -------------------------
+
+    /** True while any pointer drag this class tracks per-cell is in flight. Resize/column-reorder are
+     * deliberately excluded: both are handled and `return`ed above this point, and neither wants
+     * autoscroll (a column resize past the edge would fight the scroll it caused). */
+    private isDragInFlight(): boolean {
+        return this.fillState !== undefined || this.dragRowState !== undefined || this.mouseDownState !== undefined;
+    }
+
+    // See the constructor: this exists only so a drag that has left the grid keeps being tracked.
+    private readonly onWindowMouseMove = (ev: MouseEvent): void => {
+        if (this.destroyed) return;
+        if (ev.buttons === 0 || !this.isDragInFlight()) return;
+        if (ev.target instanceof Node && this.root.contains(ev.target)) return;
+        this.onMouseMove(ev);
+    };
+
+    // One frame of autoscroll has just scrolled the grid under a stationary pointer. Port of
+    // source's `adjustSelectionOnScroll` (`data-editor.tsx:2826-2848`): the pointer's own hit test
+    // is meaningless (it is outside the grid), so the drag follows the leading edge of whatever is
+    // now in view instead.
+    private readonly onAutoscrollTick = (): void => {
+        if (this.destroyed) return;
+        const hover = this.lastDragHover;
+        if (hover === undefined || !this.isDragInFlight()) {
+            this.autoscroller.stop();
+            return;
+        }
+        const args = this.resolveArgs();
+        // `scrollBy` will fire a `scroll` event, but not necessarily before this callback runs --
+        // re-derive the offsets now so the region below is the one that was actually just scrolled to.
+        this.syncScrollOffsets(args);
+        const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        const visible = this.computeVisibleRegion(args, mappedColumns, freezeColumns);
+        const target = adjustDragLocationForScroll(
+            hover.location,
+            hover.edge,
+            visible,
+            // `computeVisibleRegion` reports columns in the consumer's space; the drag works in
+            // mangled space, where the first non-frozen visible column is exactly `cellXOffset`.
+            this.cellXOffset,
+            mappedColumns.length - 1,
+            this.effectiveRows(args) - 1
+        );
+        this.applyDragTo(args, target);
+    };
+
+    /** Applies an in-flight drag to a resolved grid location. Shared by the mousemove path and the
+     * autoscroll tick, which is the point: the two must not drift apart. */
+    private applyDragTo(args: ResolvedGridHostArgs, location: Item): void {
+        const fill = this.fillState;
+        if (fill !== undefined) {
+            const prev = fill.previousSelection.current;
+            if (prev === undefined) return;
+            // Never fill into the trailing blank row, and never into the row-marker column.
+            const row = Math.max(0, Math.min(location[1], args.rows - 1));
+            const col = Math.max(location[0], args.rowMarkerOffset);
+            const next = getClosestRect(prev.range, col, row, args.allowedFillDirections);
+            if (!rectanglesEqual(fill.highlight, next)) {
+                fill.highlight = next;
+                this.scheduleFullRedraw();
+            }
+            return;
+        }
+
+        const rowDrag = this.dragRowState;
+        if (rowDrag !== undefined) {
+            if (!rowDrag.active) return;
+            const next = Math.max(0, Math.min(location[1], args.rows - 1));
+            if (next !== rowDrag.dropRow) {
+                rowDrag.dropRow = next;
+                this.scheduleFullRedraw();
+            }
+            return;
+        }
+
+        if (this.mouseDownState !== undefined) {
+            this.handleDragMove(args, this.mouseDownState, location);
+        }
+    }
+
+    // Is `localX`/`localY` (root-relative pixels) inside the fill handle drawn at the bottom-right
+    // corner of the current selection? Port of source's `isFillHandle` computation
+    // (`data-grid.tsx:662-687`), including its deliberately generous hit box: the handle is
+    // `size` px across but accepts anything within `size` px of its centre in each axis.
+    private hitTestFillHandle(args: ResolvedGridHostArgs, localX: number, localY: number): boolean {
+        if (!args.fillHandle) return false;
+        const current = this.selection.current;
+        if (current === undefined) return false;
+        const [handleCol, handleRow] = rectBottomRight(current.range);
+        if (handleRow >= this.effectiveRows(args)) return false;
+        const bounds = this.computeCellRect(args, handleCol, handleRow);
+        const size = DEFAULT_FILL_HANDLE.size;
+        const half = size / 2;
+        const centerX = bounds.x + bounds.width + DEFAULT_FILL_HANDLE.offsetX - half + 0.5;
+        const centerY = bounds.y + bounds.height + DEFAULT_FILL_HANDLE.offsetY - half + 0.5;
+        return Math.abs(centerX - localX) < size && Math.abs(centerY - localY) < size;
+    }
+
+    // Commits a finished fill drag. Port of source's `fillPattern`
+    // (`data-editor.tsx:2245-2295`), minus the `await`-a-thunk path -- see `cellsForSelectionSync`
+    // and the `getCellsForSelection` doc comment for why this port stays synchronous.
+    // Both rectangles arrive in MANGLED column space and are converted here, once.
+    private fillPattern(args: ResolvedGridHostArgs, patternRange: Rectangle, destRange: Rectangle): void {
+        const offset = args.rowMarkerOffset;
+        const source: Rectangle = { ...patternRange, x: patternRange.x - offset };
+        const destination: Rectangle = { ...destRange, x: destRange.x - offset };
+        if (source.width <= 0 || source.height <= 0) return;
+
+        if (args.onFillPattern !== undefined) {
+            let canceled = false;
+            args.onFillPattern({
+                patternSource: source,
+                fillDestination: destination,
+                preventDefault: () => {
+                    canceled = true;
+                },
+            });
+            if (canceled) return;
+        }
+
+        const pattern = this.cellsForSelectionSync(args, source);
+        // `undefined` means the consumer answered asynchronously with a thunk. Source awaits it;
+        // this port does not (same divergence as the copy path), so the fill is simply skipped
+        // rather than applied against cells nobody has read yet.
+        if (pattern === undefined) return;
+
+        const edits = computeFillEdits({
+            pattern,
+            source,
+            destination,
+            columnCount: args.columns.length,
+            rowCount: args.rows,
+        });
+        if (edits.length === 0) return;
+        args.onCellsEdited?.(edits);
+        this.updateCells(edits.map(e => ({ cell: e.location })));
+    }
 
     // --- click dispatch (Phase 3a) ------------------------------------------------------------------
     // Port of source's `handleSelect` (`data-editor.tsx:1838-2087`), which is the single function
@@ -2220,6 +2634,32 @@ export class GridHostController {
         this.mouseDownState = { location: hit.location, previousSelection: this.selection };
 
         if (hit.kind === "cell") {
+            // Phase 9h: a mousedown on the fill handle starts a fill drag and is exclusive with
+            // ordinary selection dispatch -- source's `if (!isTouch && button === 0 && !fh)
+            // handleSelect(args)` (`data-editor.tsx:2126`). The selection must stay put: it is the
+            // fill's pattern source.
+            if (this.hitTestFillHandle(args, hit.localX, hit.localY)) {
+                this.fillState = { previousSelection: this.selection, highlight: undefined };
+                this.applyCursor();
+                return;
+            }
+
+            // Phase 9h: row reorder. Grabbed from the row-marker column, and configured *alongside*
+            // the normal marker-click selection dispatch below rather than instead of it -- source
+            // wraps rather than replaces here too (`data-grid-dnd.tsx`'s `onMouseDownImpl` records
+            // drag state and then still calls `onMouseDown`). A press that never crosses the 20px
+            // dead-zone therefore remains an ordinary row-select click.
+            if (args.onRowMoved !== undefined && args.hasRowMarkers && hit.location[0] === 0) {
+                const row = hit.location[1];
+                if (row >= 0 && row < args.rows) {
+                    this.dragRowState = {
+                        srcRow: row,
+                        startClientY: ev.clientY,
+                        active: false,
+                        dropRow: row,
+                    };
+                }
+            }
             this.dispatchCellMouseDown(args, hit, isMultiKey);
         } else if (hit.kind === "header") {
             // Column reorder (Phase 3d): a header-body (non-edge) mousedown when `onColumnMoved` is
@@ -2246,6 +2686,53 @@ export class GridHostController {
     private readonly onMouseUp = (ev: MouseEvent): void => {
         if (this.destroyed) return;
         this.mouseDownState = undefined;
+        // Phase 9h: every drag ends here, however it ends -- including a mouseup outside the grid.
+        this.autoscroller.stop();
+        this.lastDragHover = undefined;
+
+        // Phase 9h: fill-handle drag. Mirrors source's `onMouseUp` fill branch
+        // (`data-editor.tsx:2342-2359`): the selection grows to cover pattern + fill, and the
+        // pattern is replicated across the new part only.
+        if (this.fillState !== undefined) {
+            const fill = this.fillState;
+            this.fillState = undefined;
+            const args = this.resolveArgs();
+            const previous = fill.previousSelection.current;
+            if (fill.highlight !== undefined && previous !== undefined) {
+                const combined = combineRects(previous.range, fill.highlight);
+                this.fillPattern(args, previous.range, combined);
+                this.applySelection({
+                    ...this.selection,
+                    current: { ...previous, range: combined },
+                });
+            } else {
+                this.scheduleFullRedraw();
+            }
+            // The handle has just moved to the corner of the *grown* selection, so whether the
+            // pointer is still over it has to be re-decided here -- a fill drag suppresses the hover
+            // path entirely while it runs, and leaving `overFillHandle` as it was would strand the
+            // crosshair cursor until the next mouse move.
+            const hit = this.resolveMouseHit(args, ev);
+            this.overFillHandle = hit.kind === "cell" && this.hitTestFillHandle(args, hit.localX, hit.localY);
+            this.applyCursor();
+            return;
+        }
+
+        // Phase 9h: row reorder. Only a drag that crossed the dead-zone and actually landed
+        // somewhere else counts -- everything below the threshold was a selection click.
+        if (this.dragRowState !== undefined) {
+            const ds = this.dragRowState;
+            this.dragRowState = undefined;
+            if (ds.active && ds.dropRow !== ds.srcRow) {
+                this.resolveArgs().onRowMoved?.(ds.srcRow, ds.dropRow);
+            }
+            if (ds.active) {
+                // Drop the preview remap unconditionally: the consumer may or may not have applied
+                // the move, and either way what is on screen now is the preview, not the truth.
+                this.scheduleFullRedraw();
+                return;
+            }
+        }
 
         if (this.resizeState !== undefined) {
             const rs = this.resizeState;

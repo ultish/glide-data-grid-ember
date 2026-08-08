@@ -55,6 +55,8 @@ import type {
     DrawHeaderCallback,
     CellList,
     Highlight,
+    FillHandleDirection,
+    FillPatternEventArgs,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -165,6 +167,16 @@ export interface GlideDataGridSignature {
         onColumnResizeEnd?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
         onColumnProposeMove?: (startIndex: number, endIndex: number) => boolean;
         onColumnMoved?: (startIndex: number, endIndex: number) => void;
+
+        // Row reorder + fill handle (Phase 9h) -- forwarded straight through to `GridHostArgs`.
+        // `@onRowMoved` both enables row dragging and draws the marker cells' drag handles, and it
+        // needs `@rowMarkers` to be on (that column is what you grab). `@fillHandle` is opt-in and
+        // off by default, matching source; when on, dragging the handle fills through
+        // `@getCellsForSelection` and reports the writes via `@onCellsEdited`.
+        onRowMoved?: (startIndex: number, endIndex: number) => void;
+        fillHandle?: boolean;
+        allowedFillDirections?: FillHandleDirection;
+        onFillPattern?: (event: FillPatternEventArgs) => void;
 
         // Trailing blank row / "add row" affordance (Phase 4d) -- forwarded straight through to
         // `GridHostArgs`; see that interface's doc comments for exact semantics.
@@ -297,6 +309,10 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onColumnResizeEnd: this.args.onColumnResizeEnd,
         onColumnProposeMove: this.args.onColumnProposeMove,
         onColumnMoved: this.args.onColumnMoved,
+        onRowMoved: this.args.onRowMoved,
+        fillHandle: this.args.fillHandle,
+        allowedFillDirections: this.args.allowedFillDirections,
+        onFillPattern: this.args.onFillPattern,
         showTrailingBlankRow: this.args.showTrailingBlankRow,
         onRowAppended: this.args.onRowAppended,
         getRowThemeOverride: this.args.getRowThemeOverride,
