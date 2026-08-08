@@ -4032,6 +4032,72 @@ misalign column indexes in the copy buffer and produce a TSV with values under t
 An `AbortController` is now held per controller and aborted in `destroy()`, matching source's
 `abortControllerRef`, so a consumer loading a range asynchronously can cancel when the grid goes away.
 
+## Phase 9e — search (COMPLETE, browser-verified, 2026-08-08)
+
+Three commits: the engine (`src/rendering/search.ts` + 30 tests), the controller wiring, and the
+opt-in `<GlideSearchBar>`. Design decisions and the full record are in the commit messages; what
+follows is only what a future session would otherwise re-derive.
+
+**The engine is split out of source's component and made testable.** Source's `data-grid-search.tsx`
+fuses scanner, state and Linaria UI into 577 lines that cannot be tested without a browser. Here the
+scanner is framework-agnostic plain TS whose **scheduler and clock are injected** (defaulting to
+`requestAnimationFrame`/`performance.now`), so all 30 tests drive a full chunked scan synchronously
+in bare Node. That is what let the adaptive-stride arithmetic and the wrap-around termination be
+pinned, and it caught a real upstream gap: restarting a scan while a `Promise` chunk is in flight —
+i.e. typing a second character — interleaves the stale query's matches into the new results. A
+generation counter fixes it; source has no equivalent because `AbortController` only covers the
+consumer's fetch, not a restart of the scan itself.
+
+**`getCellsForSelectionMangled` finally has a consumer.** Phase 9g deliberately left it unported as
+it would have been dead code. Search needs it: results become `prelightCells` (mangled space) and
+feed `moveActiveCell` (also mangled), so the scan must produce mangled columns. The row-marker
+placeholder is a `Loading` cell, which the match-string switch reports as unsearchable — so a row
+marker can never itself be a match.
+
+**Search replaces `prelightCells` rather than merging.** Source's `DataGridSearchProps` is
+`Omit<ScrollingDataGridProps, "prelightCells">` — it removes the prop outright. Merging would
+allocate a combined array every draw, and `computeCanBlit` identity-compares that field, so it would
+kill the blit fast path for the grid's whole lifetime instead of only while a scan runs.
+
+### Consumer-facing: the search input does not have to live in the grid
+
+Raised by the user 2026-08-08 ("can I have a search input outside the grid, always visible?").
+Yes, with no addon change: set `@showSearch={{true}}` (highlighting is gated on search being open,
+so this is required, and passing the arg also means Escape/primary+F can no longer close it), then
+drive `api.setSearchValue()` from your own `<input>` and read `@onSearchStateChange` for results and
+counts. Don't also render `<GlideSearchBar>`. `@searchResults` bypasses the built-in scanner
+entirely for server-side search.
+
+### Placement: why `<GlideDataGrid>` gained a yielded block
+
+Three placements were tried; the first two failed for reasons worth not repeating:
+
+1. **Plain sibling of the grid** — renders, but completely *unstyled*. Every stylesheet in this addon
+   is scoped under `.gdg-root`, and the `--gdg-*` theme variables are stamped on that element, so
+   anything outside it gets neither.
+2. **`{{in-element}}` portal** using a root element from `@onReady` — fixes placement, introduces an
+   ordering hazard: the API only exists once the grid's modifier has run, so a sibling reading it in
+   the same render pass reads `undefined` and never re-renders.
+3. **A yielded block rendering inside the grid's own root** — has neither problem, and matches
+   source, whose search overlay is a sibling of the canvas inside the grid wrapper.
+
+### THE LESSON: a false negative that cost hours
+
+The `wip(9e-c)` commit message claims the bar does not render. **It is wrong.** The Chrome-automation
+tool's synthetic clicks never focused the grid root — `document.activeElement` stayed `BODY` — and
+`onKeyDown` early-returns on `!this.isFocused`, so primary+F never fired and the bar correctly stayed
+hidden. The user found it working within minutes of trying it by hand.
+
+**Add to the browser-testing gotchas: before concluding a keyboard-driven feature is broken, assert
+`document.activeElement` is what you think it is.** This is the mirror image of the standing lesson
+that a feature no demo switches on is unverified code — here a *working* feature was declared broken
+because the harness could not drive it. Prefer `element.focus()` explicitly in a probe script over
+assuming a synthetic click focused anything.
+
+Also learned while confirming: `RowID` cells are **not searchable** (nor Loading/Protected/
+Drilldown) — source's match-string switch omits them — so searching `row-4` against the demo's
+row-id column finds nothing. Faithful, but surprising enough to belong in the API reference (9n).
+
 ## Styling: the addon ships a real stylesheet now (2026-08-08) — and why
 
 **Decision (user, 2026-08-08): "inlined css means it can't be changed by the client. so using a css

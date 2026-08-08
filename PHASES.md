@@ -928,33 +928,33 @@ overlay-editor chrome, so the addon's DOM is now fully restylable from a consumi
    `theme` is identity-compared by `computeCanBlit`.
 4. **9p — Playwright.** User will prioritise after 2 and 3.
 
-**IN FLIGHT — 9e (search), two of three parts landed.** See the `feat(9e-a)` and `feat(9e-b)` commits.
-The engine (`src/rendering/search.ts`, 30 tests) and the controller wiring (args, mangled
-`getCellsForSelection`, primary+F, results into `prelightCells`, navigation) are both done and
-verified as far as they can be without a UI.
+**9e (search) — DONE 2026-08-08, browser-verified.** Three commits: `feat(9e-a)` the engine
+(`src/rendering/search.ts`, 30 tests), `feat(9e-b)` the controller wiring, `wip(9e-c)` the
+`<GlideSearchBar>` (whose message is wrong — see below). Confirmed working end to end: `Ctrl/Cmd+F`
+opens the bar, typing streams results in, matches highlight via `prelightCells`, and next/prev
+navigates *and* scrolls the grid to the match ("2 of 982 results").
 
-**9e-c is committed but NOT working — start here.** `<GlideSearchBar>` + `glide-search-bar.css` +
-`<GlideDataGrid>`'s new yielded block exist and type-check, the addon and test-app both build, and
-the demo is wired. **The bar does not appear.** What is established, so it is not re-derived:
+> **CORRECTION, and the lesson is the point.** The `wip(9e-c)` commit message and an earlier version
+> of this section both claimed the bar did not render. **That was a false negative from the test
+> harness, not a defect.** The Chrome-automation tool's synthetic clicks do not focus the grid root
+> — `document.activeElement` stayed `BODY` — and `onKeyDown` early-returns on `!this.isFocused`, so
+> the keybinding never fired. Real clicks focus it fine; the user found this immediately by just
+> using it. **Add to the browser-testing gotchas: before concluding a keyboard feature is broken,
+> assert `document.activeElement` is what you think it is.** Two hours of "debugging" a working
+> feature came from not checking that.
+>
+> Also learned while confirming: `RowID` cells are **not searchable**, so searching `row-4` in the
+> demo finds nothing. That is faithful — source's match-string switch omits `RowID` (and Loading,
+> Protected, Drilldown) — but it is surprising enough that it belongs in the API docs.
 
-- The engine and keybinding genuinely work. An *earlier* iteration of the bar (rendered as a plain
-  sibling, before the yielded block existed) **did** render on primary+F — `.gdg-search-bar` was in
-  the DOM. It was unstyled, because every stylesheet is scoped under `.gdg-root` and the `--gdg-*`
-  theme variables are stamped on that element, so a bar outside it gets neither. That is what the
-  yielded block was introduced to fix.
-- `@onReady` fires with the complete API object, `getRootElement` included (verified in-browser).
-- The block *is* rendering: `.gdg-root`'s `childNodes` contain a Glimmer comment placeholder ahead
-  of `.dvn-underlay`. Note `children` does **not** show it — comment nodes are not elements, which
-  cost time to spot.
-- So the remaining fault is narrow: **`{{#if this.isVisible}}` inside `<GlideSearchBar>` is false**,
-  i.e. the yielded `grid.searchState` is not reaching it. The suspect is the change from
-  `onSearchStateChange: this.args.onSearchStateChange` to the component's own
-  `handleSearchStateChange` wrapper (which sets the `@tracked searchState` the block yields) —
-  check that the wrapper is actually invoked, and that setting a tracked field from inside a
-  `keydown` the controller dispatches is not being swallowed as a backtracking re-render.
-- Dev-server staleness was ruled out: restarted twice, and `vite build` re-run after every change.
+**Consumers can put the search input anywhere**, not just in the grid: set `@showSearch={{true}}`
+(highlighting is gated on search being open) and drive `api.setSearchValue()` from your own input,
+skipping `<GlideSearchBar>`. `@searchResults` replaces the built-in scanner entirely for
+server-side search. This was an explicit user requirement raised on 2026-08-08 — an always-visible
+external search box — and it works today with no addon change.
 
-An in-browser pass is the gate for calling 9e done, and it has not passed.
+**Remaining on 9e:** nothing blocking. Worth doing when convenient: fold the correction above into
+PORTING-NOTES.md's browser-testing gotcha list, and document the non-searchable cell kinds.
 
 **Explicitly parked:** lint/format cleanup (user: "id prefer doing feature than fixing linting for
 now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
