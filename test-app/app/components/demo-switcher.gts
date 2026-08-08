@@ -16,112 +16,145 @@
 //   - "Async paging"   -> `<AsyncDemo>`: Phase 8's `AsyncRecordsSource` -- 100k rows that aren't in
 //                          memory, fetched a page at a time as `@onVisibleRegionChanged` reports
 //                          what's on screen, each arrival repainted by damage.
-import Component from "@glimmer/component";
-import { tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
-import { on } from "@ember/modifier";
-import DemoGrid from "test-app/components/demo-grid";
-import TrackingDemo from "test-app/components/tracking-demo";
-import GlideDemo from "test-app/components/glide-demo";
-import StreamingDemo from "test-app/components/streaming-demo";
-import AsyncDemo from "test-app/components/async-demo";
-import DaisyDemo from "test-app/components/daisy-demo";
+import Component from '@glimmer/component';
+import { tracked } from '@glimmer/tracking';
+import { action } from '@ember/object';
+import { on } from '@ember/modifier';
+import DemoGrid from 'test-app/components/demo-grid';
+import TrackingDemo from 'test-app/components/tracking-demo';
+import GlideDemo from 'test-app/components/glide-demo';
+import StreamingDemo from 'test-app/components/streaming-demo';
+import AsyncDemo from 'test-app/components/async-demo';
+import DaisyDemo from 'test-app/components/daisy-demo';
 
-type DemoTab = "full-grid" | "tracking" | "glide" | "streaming" | "async" | "daisy";
+type DemoTab =
+  'full-grid' | 'tracking' | 'glide' | 'streaming' | 'async' | 'daisy';
 
 export default class DemoSwitcher extends Component {
-    @tracked tab: DemoTab = "full-grid";
+  @tracked tab: DemoTab = 'full-grid';
 
-    @action showFullGrid(): void {
-        this.tab = "full-grid";
-    }
+  @action showFullGrid(): void {
+    this.tab = 'full-grid';
+  }
 
-    @action showTrackingDemo(): void {
-        this.tab = "tracking";
-    }
+  @action showTrackingDemo(): void {
+    this.tab = 'tracking';
+  }
 
-    @action showGlideDemo(): void {
-        this.tab = "glide";
-    }
+  @action showGlideDemo(): void {
+    this.tab = 'glide';
+  }
 
-    @action showStreamingDemo(): void {
-        this.tab = "streaming";
-    }
+  @action showStreamingDemo(): void {
+    this.tab = 'streaming';
+  }
 
-    @action showAsyncDemo(): void {
-        this.tab = "async";
-    }
+  @action showAsyncDemo(): void {
+    this.tab = 'async';
+  }
 
-    @action showDaisyDemo(): void {
-        this.tab = "daisy";
-    }
+  @action showDaisyDemo(): void {
+    this.tab = 'daisy';
+  }
 
-    get isDaisy(): boolean {
-        return this.tab === "daisy";
-    }
+  get isDaisy(): boolean {
+    return this.tab === 'daisy';
+  }
 
-    get isFullGrid(): boolean {
-        return this.tab === "full-grid";
-    }
+  get isFullGrid(): boolean {
+    return this.tab === 'full-grid';
+  }
 
-    get isTracking(): boolean {
-        return this.tab === "tracking";
-    }
+  get isTracking(): boolean {
+    return this.tab === 'tracking';
+  }
 
-    get isGlide(): boolean {
-        return this.tab === "glide";
-    }
+  get isGlide(): boolean {
+    return this.tab === 'glide';
+  }
 
-    get isStreaming(): boolean {
-        return this.tab === "streaming";
-    }
+  get isStreaming(): boolean {
+    return this.tab === 'streaming';
+  }
 
-    get isAsync(): boolean {
-        return this.tab === "async";
-    }
+  get isAsync(): boolean {
+    return this.tab === 'async';
+  }
 
-    <template>
-        <div style="display: flex; flex-direction: column; height: 100%; gap: 8px;">
-            {{! Natural (fractional) height, deliberately. A row of 13px system-ui buttons measures
+  <template>
+    <div style="display: flex; flex-direction: column; height: 100%; gap: 8px;">
+      {{! Natural (fractional) height, deliberately. A row of 13px system-ui buttons measures
                 21.5px here, which leaves every grid below it on a fractional height -- the exact
                 case that used to blank the canvas on damage-only repaints, fixed in Phase 8 (see
                 `data-grid-render.ts`'s backing-size comment). Keeping it fractional means the demos
                 keep exercising that path instead of tiptoeing around it. }}
-            <div style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; font: 13px system-ui;">
-                <button type="button" data-test-show-full-grid {{on "click" this.showFullGrid}}>
-                    Full grid demo
-                </button>
-                <button type="button" data-test-show-tracking {{on "click" this.showTrackingDemo}}>
-                    Tracking proof demo
-                </button>
-                <button type="button" data-test-show-glide {{on "click" this.showGlideDemo}}>
-                    Glide demo grid
-                </button>
-                <button type="button" data-test-show-streaming {{on "click" this.showStreamingDemo}}>
-                    Streaming updates
-                </button>
-                <button type="button" data-test-show-async {{on "click" this.showAsyncDemo}}>
-                    Async paging
-                </button>
-                <button type="button" data-test-show-daisy {{on "click" this.showDaisyDemo}}>
-                    DaisyUI theming
-                </button>
-            </div>
-            <div style="flex: 1 1 auto; min-height: 0;">
-                {{#if this.isTracking}}
-                    <TrackingDemo />
-                {{else if this.isGlide}}
-                    <GlideDemo />
-                {{else if this.isStreaming}}
-                    <StreamingDemo />
-                {{else if this.isAsync}}
-                    <AsyncDemo />
-                {{else if this.isDaisy}}
-                    <DaisyDemo />
-                {{else}}
-                    <DemoGrid />
-                {{/if}}
-            </div>
-        </div>
-    </template>
+      <div
+        style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; font: 13px system-ui;"
+      >
+        <button
+          class="btn btn-xs btn-ghost {{if this.isFullGrid 'btn-active'}}"
+          type="button"
+          data-test-show-full-grid
+          {{on "click" this.showFullGrid}}
+        >
+          Full grid demo
+        </button>
+        <button
+          class="btn btn-xs btn-ghost {{if this.isTracking 'btn-active'}}"
+          type="button"
+          data-test-show-tracking
+          {{on "click" this.showTrackingDemo}}
+        >
+          Tracking proof demo
+        </button>
+        <button
+          class="btn btn-xs btn-ghost {{if this.isGlide 'btn-active'}}"
+          type="button"
+          data-test-show-glide
+          {{on "click" this.showGlideDemo}}
+        >
+          Glide demo grid
+        </button>
+        <button
+          class="btn btn-xs btn-ghost {{if this.isStreaming 'btn-active'}}"
+          type="button"
+          data-test-show-streaming
+          {{on "click" this.showStreamingDemo}}
+        >
+          Streaming updates
+        </button>
+        <button
+          class="btn btn-xs btn-ghost {{if this.isAsync 'btn-active'}}"
+          type="button"
+          data-test-show-async
+          {{on "click" this.showAsyncDemo}}
+        >
+          Async paging
+        </button>
+        <button
+          class="btn btn-xs btn-ghost {{if this.isDaisy 'btn-active'}}"
+          type="button"
+          data-test-show-daisy
+          {{on "click" this.showDaisyDemo}}
+        >
+          DaisyUI theming
+        </button>
+      </div>
+      <div style="flex: 1 1 auto; min-height: 0;">
+        {{#if this.isTracking}}
+          <TrackingDemo />
+        {{else if this.isGlide}}
+          <GlideDemo />
+        {{else if this.isStreaming}}
+          <StreamingDemo />
+        {{else if this.isAsync}}
+          <AsyncDemo />
+        {{else if this.isDaisy}}
+          <DaisyDemo />
+        {{else}}
+          <DemoGrid />
+        {{/if}}
+      </div>
+    </div>
+  </template>
 }
