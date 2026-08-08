@@ -28,18 +28,16 @@ group: "Metrics", icon: "headerNumber", hasMenu: true },
             kind: "code",
             text: `@tracked columns = COLUMNS;
 
-@action
-handleColumnResize(column, newSize, colIndex) {
+handleColumnResize = (column, newSize, colIndex) => {
   this.columns = this.columns.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c));
-}
+};
 
-@action
-handleColumnMoved(from, to) {
+handleColumnMoved = (from, to) => {
   const next = [...this.columns];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   this.columns = next;
-}`,
+};`,
         },
     ],
 };

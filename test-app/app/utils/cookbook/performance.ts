@@ -44,6 +44,10 @@ getCellContent = ([col, row]) => this.project(col, row);
         },
         {
             kind: "p",
+            text: "That is also why every handler in this cookbook is a **class-field arrow** rather than an `@action` method. Ember 6+ no longer recommends the decorator — but the arrow is not merely the modern spelling, it is the identity-stable one: it is created **once per instance**, at construction, so `this.handleReady` is the same reference on every render. The Ember 6 idiom and the identity rule point the same way, which is the only reason a mechanical-looking style choice is safe here.",
+        },
+        {
+            kind: "p",
             text: "**The reactivity rule.** Autotracking only records reads made *during* the tracking frame. A `@getCellContent` closure that reads tracked state lazily — later, when the grid calls it — never registers a dependency, so mutating that state repaints nothing. The *Using the grid in Ember* chapter has the mechanism and the two patterns that work; `recordsSource` packages the safe one.",
         },
         {
@@ -52,7 +56,7 @@ getCellContent = ([col, row]) => this.project(col, row);
         },
         {
             kind: "code",
-            text: `@action handleReady(api) { this.api = api; }
+            text: `handleReady = api => { this.api = api; };
 
 // ...later, from a websocket tick:
 this.api.updateCells([{ cell: [3, 91] }, { cell: [4, 91] }]);`,

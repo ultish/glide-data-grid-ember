@@ -22,7 +22,6 @@
 // constructed inline in the template. See PORTING-NOTES.md standing lesson #1.
 import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import { htmlSafe } from "@ember/template";
 import { registerDestructor } from "@ember/destroyable";
@@ -153,7 +152,8 @@ export default class GlideDemo extends Component {
      *
      * `applyEdits` is passed *in* here rather than being wired to the grid directly; the grid gets
      * `this.sortResult.onCellsEdited`, which has already translated every row index out of displayed
-     * space. `@action` makes `this.applyEdits` a stable per-instance reference, which the memo needs.
+     * space. `applyEdits` is a class-field arrow (the Ember 6 idiom that replaces `@action`), which
+     * is created once per instance and so is a stable reference -- exactly what the memo needs.
      */
     @cached
     get sortResult(): ColumnSortResult {
@@ -205,15 +205,13 @@ export default class GlideDemo extends Component {
         return htmlSafe(`left: ${left}px; top: ${top}px; width: ${MENU_WIDTH_PX}px;`);
     }
 
-    @action
-    handleHeaderMenuClick(col: number, bounds: Rectangle): void {
+    handleHeaderMenuClick = (col: number, bounds: Rectangle): void => {
         this.menuState = { col, bounds };
-    }
+    };
 
-    @action
-    closeMenu(): void {
+    closeMenu = (): void => {
         this.menuState = undefined;
-    }
+    };
 
     private readonly handleDocumentKeydown = (ev: KeyboardEvent): void => {
         if (ev.key === "Escape" && this.menuState !== undefined) {
@@ -229,15 +227,13 @@ export default class GlideDemo extends Component {
         this.sortDirection = direction;
     }
 
-    @action
-    sortAscending(): void {
+    sortAscending = (): void => {
         this.applySort("asc");
-    }
+    };
 
-    @action
-    sortDescending(): void {
+    sortDescending = (): void => {
         this.applySort("desc");
-    }
+    };
 
     // --- Cell edits ------------------------------------------------------------------------------
 
@@ -256,8 +252,7 @@ export default class GlideDemo extends Component {
      * `location[0]` is already in *real* column space -- the grid strips the row-marker column at
      * the callback boundary -- so it indexes `this.columns` directly, with no `ROW_MARKER_OFFSET`.
      */
-    @action
-    applyEdits(edits: readonly { location: Item; value: GridCell }[]): void {
+    applyEdits = (edits: readonly { location: Item; value: GridCell }[]): void => {
         const next = new Map(this.edits);
         for (const { location, value } of edits) {
             const [col, originalRow] = location;
@@ -266,24 +261,22 @@ export default class GlideDemo extends Component {
             next.set(`${originalRow}:${fieldId}`, value);
         }
         this.edits = next;
-    }
+    };
 
     // --- Column resize / reorder -----------------------------------------------------------------
 
-    @action
-    handleColumnResize(_column: GridColumn, newSize: number, colIndex: number): void {
+    handleColumnResize = (_column: GridColumn, newSize: number, colIndex: number): void => {
         this.columns = this.columns.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c));
-    }
+    };
 
-    @action
-    handleColumnMoved(startIndex: number, endIndex: number): void {
+    handleColumnMoved = (startIndex: number, endIndex: number): void => {
         const cols = [...this.columns];
         const [moved] = cols.splice(startIndex, 1);
         if (moved === undefined) return;
         cols.splice(endIndex, 0, moved);
         this.columns = cols;
         this.menuState = undefined;
-    }
+    };
 
     <template>
         <div style="position: relative; width: 100%; height: 100%;">

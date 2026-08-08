@@ -54,7 +54,6 @@
 // re-projects one row" is actually true in a browser.
 import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 import { recordsSource } from "glide-data-grid-ember/data-source/index";
@@ -142,8 +141,7 @@ export default class TrackingDemo extends Component {
     }
 
     /** Clicking a row loads that record into the form. */
-    @action
-    handleSelectionChanged(selection: GridSelection): void {
+    handleSelectionChanged = (selection: GridSelection): void => {
         const row = selection.current?.cell[1];
         const person = row === undefined ? undefined : this.store.all[row];
         if (person === undefined) return;
@@ -153,15 +151,14 @@ export default class TrackingDemo extends Component {
         this.draftRole = person.role;
         this.draftAge = person.age;
         this.draftActive = person.active;
-    }
+    };
 
     /**
      * The whole point. Mutates `@tracked` fields on an existing `Person` **in place** -- no new
      * object, no new array, no store replacement, and no call into the grid's imperative API.
      * The canvas repaint that follows is autotracking doing its job.
      */
-    @action
-    submitForm(event: Event): void {
+    submitForm = (event: Event): void => {
         event.preventDefault();
         const person = this.selectedPerson;
         if (person === undefined) return;
@@ -171,33 +168,32 @@ export default class TrackingDemo extends Component {
         person.age = this.draftAge;
         person.active = this.draftActive;
         this.lastSubmit = `Wrote #${person.id} at ${new Date().toLocaleTimeString()} — no updateCells() called`;
-    }
+    };
 
     /** A second, form-free mutation path, to show the trigger isn't special to the form. */
-    @action
-    toggleActiveOnSelected(): void {
+    toggleActiveOnSelected = (): void => {
         const person = this.selectedPerson;
         if (person === undefined) return;
         person.active = !person.active;
         this.draftActive = person.active;
         this.lastSubmit = `Toggled #${person.id} active → ${person.active} — no updateCells() called`;
-    }
+    };
 
-    @action updateName(e: Event): void {
+    updateName = (e: Event): void => {
         this.draftName = (e.target as HTMLInputElement).value;
-    }
-    @action updateEmail(e: Event): void {
+    };
+    updateEmail = (e: Event): void => {
         this.draftEmail = (e.target as HTMLInputElement).value;
-    }
-    @action updateRole(e: Event): void {
+    };
+    updateRole = (e: Event): void => {
         this.draftRole = (e.target as HTMLSelectElement).value as Role;
-    }
-    @action updateAge(e: Event): void {
+    };
+    updateAge = (e: Event): void => {
         this.draftAge = Number((e.target as HTMLInputElement).value);
-    }
-    @action updateActive(e: Event): void {
+    };
+    updateActive = (e: Event): void => {
         this.draftActive = (e.target as HTMLInputElement).checked;
-    }
+    };
 
     <template>
         <div style="display: flex; flex-direction: column; gap: 12px; height: 100%; overflow: auto;">

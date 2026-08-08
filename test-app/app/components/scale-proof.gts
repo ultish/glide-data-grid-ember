@@ -26,7 +26,6 @@
 // counters back in a `next()` turn, i.e. after the render the mutation caused.
 import Component from "@glimmer/component";
 import { cached, tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { next } from "@ember/runloop";
 import { on } from "@ember/modifier";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
@@ -123,8 +122,7 @@ export default class ScaleProof extends Component {
     }
 
     /** THE MEASUREMENT. One tracked write on one record. Expect 1 row. */
-    @action
-    editOneField(): void {
+    editOneField = (): void => {
         const employee = this.targetEmployee;
         if (employee === undefined) return;
         this.editSerial++;
@@ -132,11 +130,10 @@ export default class ScaleProof extends Component {
         this.measure(`Edited one field on row ${this.targetRow}`, () => {
             employee.name = `${employee.name.replace(/ \(edit #\d+\)$/, "")} (edit #${serial})`;
         });
-    }
+    };
 
     /** Same, but through the nested GQL-shaped relation the `object-scan` columns read. */
-    @action
-    addPetToRow(): void {
+    addPetToRow = (): void => {
         const employee = this.targetEmployee;
         if (employee === undefined) return;
         this.editSerial++;
@@ -144,34 +141,31 @@ export default class ScaleProof extends Component {
         this.measure(`Added a pet to row ${this.targetRow} (nested relation)`, () => {
             addPet(employee, `Pet${serial}`);
         });
-    }
+    };
 
     /** Control #1: a real re-render that touches no record. Expect 0 rows. */
-    @action
-    rerenderOnly(): void {
+    rerenderOnly = (): void => {
         this.measure("Re-render, touching no record", () => {
             this.rerenderCount++;
         });
-    }
+    };
 
     /**
      * Control #2 / the contrast: a new `records` array identity rebuilds every per-row cache, which
      * is exactly the cookbook's "the one way to break it". Expect the full row count. The `Employee`
      * objects are the same instances -- only the array identity changed.
      */
-    @action
-    replaceRecordsArray(): void {
+    replaceRecordsArray = (): void => {
         this.measure("Replaced the records array (worst case)", () => {
             this.records = [...this.records];
         });
-    }
+    };
 
-    @action
-    updateTargetRow(event: Event): void {
+    updateTargetRow = (event: Event): void => {
         const value = Number((event.target as HTMLInputElement).value);
         if (!Number.isFinite(value)) return;
         this.targetRow = Math.max(0, Math.min(this.records.length - 1, Math.trunc(value)));
-    }
+    };
 
     <template>
         <section style="display: flex; flex-direction: column; gap: 10px;">

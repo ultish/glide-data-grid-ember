@@ -101,7 +101,17 @@ browser-verified — see PORTING-NOTES.md for each: the four consumer draw hooks
 `<GlideSearchBar>`), 9d (context menus), 9i (column auto-sizing), **9h (autoscroll + row reorder +
 fill handle)**, and **Phase 10** (see below). Vitest suite: **589**.
 **9b (accessibility) and 9c (touch) are deferred by explicit user decision** — don't propose them as
-next steps. **Next up: deploying the test-app to GitHub Pages**; see PHASES.md's "THE QUEUE".
+next steps.
+
+**Queue items 1–6 landed 2026-08-09** (see PHASES.md's "THE QUEUE" and PORTING-NOTES.md's "Queue
+items 1–6"): the two `.md` guides migrated into the cookbook and deleted, the new Ember chapter, the
+`@action` → class-field-arrow sweep, and the six `<DemoGrid>` interaction gaps — of which **only one
+was an addon defect**. Two real defects were fixed: pointer events inside an overlay editor were
+dispatched as grid clicks (tearing the editor down and rebuilding it, in *every* editor since Phase
+4a), and `recordsSource` painted blank rows for records appended to a live Ember Data array. Vitest:
+**614**. **Next up: items 7 (make CI green) and 8 (release prerequisites), both deferred by the user
+for now**, then 9p (Playwright). One decision is waiting: `@onSelectionChanged` reports mangled
+column indices while the edit and context-menu callbacks don't.
 
 **Phase 10 changed two things a cold session will otherwise get wrong.** (1) `<DemoGrid>` is now the
 single fully-featured reference grid — every shipped arg switched on, with toggles for the
@@ -120,11 +130,16 @@ two more latent defects of the usual kind: the fill handle had been *drawn* unco
 Phase 2 while doing nothing when dragged, and `@highlightRegions` ignored the row-marker column
 offset because no demo had ever switched on both at once.
 
-Consumer-facing docs are the spec for future work — keep them in sync rather than letting them go
-stale: `glide-data-grid-ember/THEMING.md` (Phase 6) and `glide-data-grid-ember/DATA.md` (how
-consumers wire data in — now documents `recordsSource` as the recommended path, with the hand-written
-pattern kept as the explanation of what it does internally; its "Status of this recommendation"
-section carries the measured 1,000-row result).
+**There is exactly ONE consumer-facing guide, and it is not a markdown file.** As of 2026-08-09
+`glide-data-grid-ember/THEMING.md` and `DATA.md` are **deleted** — their content lives in the
+cookbook, which is a live page in the test-app. The cookbook is **one chapter per file** in
+`test-app/app/utils/cookbook/`, ordered by that directory's `index.ts`; chapter titles carry **no
+leading number** (the page numbers them from position), so adding a chapter is a one-line edit to
+`index.ts` and several agents can write chapters concurrently. 14 chapters, including *Using the grid
+in Ember* (the old `DATA.md` plus Ember Data/GraphQL/`object-scan`), *Theming*, *Theme reference* and
+*Performance rules*. These docs are the spec for future work — keep them in sync rather than letting
+them go stale, and note the standing lesson in PORTING-NOTES.md: **consumer docs rot in one direction
+only**, so when a phase implements something, grep the docs for its name before closing it.
 
 Three things a cold session should know, all written up in full in `PORTING-NOTES.md`:
 `computeCanBlit` identity-compares ~18 `DrawGridArg` fields, so a freshly allocated value silently

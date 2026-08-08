@@ -21,13 +21,12 @@ export const selectionSection: Section = {
         },
         {
             kind: "code",
-            text: `@action
-handleSelectionChanged(selection) {
+            text: `handleSelectionChanged = selection => {
   // selection.current?.cell   -> [col, row] of the focused cell
   // selection.current?.range  -> { x, y, width, height }
   // selection.rows / .columns -> CompactSelection (sparse, iterable, .hasIndex(), .length)
   this.selectedRowCount = selection.rows.length;
-}`,
+};`,
         },
         {
             kind: "p",
@@ -38,13 +37,12 @@ handleSelectionChanged(selection) {
             kind: "code",
             text: `<GlideDataGrid @rowMarkers="both" @onRowMoved={{this.handleRowMoved}} ... />
 
-@action
-handleRowMoved(from, to) {
+handleRowMoved = (from, to) => {
   const next = [...this.people];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
   this.people = next;
-}`,
+};`,
         },
         { kind: "p", text: "**Fill handle.** Off by default. When on, dragging the small square at the selection's bottom-right corner tiles the selected pattern across the dragged region and reports the writes through `@onCellsEdited` — so the handler above is all you need." },
         {

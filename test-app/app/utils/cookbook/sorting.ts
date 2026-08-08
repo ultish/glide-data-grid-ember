@@ -30,12 +30,11 @@ get gridArgs() {
         },
         {
             kind: "code",
-            text: `@action
-openSortMenu(col, bounds) {
+            text: `openSortMenu = (col, bounds) => {
   // \`col\` includes the row-marker column if you have one;
   // \`bounds\` is the chevron's rect in grid-root-relative pixels.
   this.menu = { col, bounds };
-}
+};
 
 // Render the menu as a positioned child of the grid's own container,
 // so those bounds need no translation:

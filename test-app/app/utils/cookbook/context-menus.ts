@@ -13,11 +13,10 @@ export const contextMenusSection: Section = {
   ...
 />
 
-@action
-cellMenu(location, event) {
+cellMenu = (location, event) => {
   event.preventDefault();       // the browser menu is NOT suppressed unless you say so
   this.menu = { x: event.clientX, y: event.clientY, location };
-}`,
+};`,
         },
         {
             kind: "p",

@@ -22,7 +22,6 @@
 import Component from "@glimmer/component";
 import type Owner from "@ember/owner";
 import { tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
 import { registerDestructor } from "@ember/destroyable";
@@ -125,14 +124,13 @@ export default class DaisyDemo extends Component {
 
     getCellContent = (item: Item): GridCell => demoGetCellContent(item);
 
-    @action
-    selectTheme(theme: string): void {
+    selectTheme = (theme: string): void => {
         this.activeTheme = theme;
         // The *only* thing this does is set an attribute. Everything else -- re-resolving ~25
         // custom properties, deciding whether anything actually changed, publishing a new theme
         // object, repainting the canvas -- follows from the MutationObserver inside CssThemeWatcher.
         document.documentElement.setAttribute("data-theme", theme);
-    }
+    };
 
     isActive = (theme: string): boolean => this.activeTheme === theme;
 

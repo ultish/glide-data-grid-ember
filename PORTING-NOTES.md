@@ -32,6 +32,37 @@ helper that does this for you (each cell kind formats its display field differen
 be done by hand at each call site, every time. Grep the cell's own `draw()` for which field name it
 actually reads before assuming `data` is enough.
 
+**The listener is on `root`, and `root` contains more than the grid** *(added 2026-08-09, and it is
+the same "re-apply the rule at every call site" shape as the display-field bug above)*.
+`GridHostController`'s pointer listeners live on `this.root`, but the overlay editor container
+(`openOverlay` appends it there) and everything a consumer renders into `<GlideDataGrid>`'s yielded
+block are *also* children of `root`. **Any new `root`-level pointer listener must go through
+`isGridSurfaceTarget`** (`-private/grid-event-target.ts`) or it will fire for clicks inside editors
+and consumer chrome. Source guards this at `data-grid.tsx:1076-1080` with an identity check against
+exactly two nodes; **a `root.contains(target)` test is the wrong shape**, since the editor is inside
+root by construction. `mousedown` and `contextmenu` are guarded as of 2026-08-09; `mousemove` and
+`keydown` are not — `keydown` is incidentally protected by the `isFocused` gate (focusing an editor
+blurs `root`), and `mousemove` only updates hover state, so it was left alone deliberately.
+
+> **Why this went undetected from Phase 4a to Phase 9.** Every overlay editor was being destroyed and
+> rebuilt on every click inside it, and **every one of them still appeared to work** — because the
+> rebuilt overlay is reconstructed from the just-committed cell, so the visible result was right. It
+> only became visible in the markdown editor, whose preview/edit-mode state lives in the factory
+> closure rather than in the cell value. **Corollary, and the testing rule to take from it: an editor
+> whose visible result is derived entirely from the cell value cannot detect its own destruction.**
+> When verifying an editor, assert the overlay **node identity** survives the interaction, not just
+> that the committed value is correct.
+
+**Consumer docs rot in exactly one direction** *(added 2026-08-09, from migrating `DATA.md` and
+`THEMING.md` into the cookbook)*. Features get *added* and the "not implemented yet" lists never get
+revisited. `THEMING.md`'s §9 declared column grouping and search-result highlighting unimplemented —
+both true when Phase 6 wrote it, both false since Phase 7 and 9e respectively. The field-by-field and
+variable-by-variable reference content was otherwise byte-accurate against `theme.ts` many phases
+later. **The cheap rule: when a phase implements something, grep the consumer docs for its name
+before closing the phase.** The additive half of a doc stays right on its own; the negative claims
+never do. Corollary: reference tables are cheap to migrate and stay true, so **status claims belong
+in `PHASES.md` only, never in a consumer doc**.
+
 **Live upstream references (user-supplied, 2026-08-07, general reference — see PHASES.md's Phase 9
 for the context this was given in)**: useful for checking the *public API surface* and *actual
 visual/interaction behavior* of a given cell/feature without reading through source `.tsx`, e.g.
@@ -1921,9 +1952,12 @@ time; fighting to keep reusing a specific tab ID did not.
 
 ## Phase 6 — Theming (COMPLETE, browser-verified, 2026-08-07)
 
-Consumer-facing theming API + docs. **The main deliverable a consumer sees is
-`glide-data-grid-ember/THEMING.md`** — read that before answering any "how do I theme this"
-question; this section is the implementation/porting record, not the user guide.
+Consumer-facing theming API + docs. **The main deliverable a consumer sees is the cookbook's
+*Theming* and *Theme reference* chapters** (`test-app/app/utils/cookbook/theming.ts` and
+`theme-reference.ts`) — read those before answering any "how do I theme this" question; this section
+is the implementation/porting record, not the user guide. *(Until 2026-08-09 that deliverable was
+`glide-data-grid-ember/THEMING.md`, which has since been migrated into those two chapters and
+deleted — references to it below are historical.)*
 
 ### Final API surface (use this, don't re-read the code)
 
@@ -2067,9 +2101,9 @@ kill server → `rm -rf test-app/node_modules/.vite` → restart → navigate wi
 file is the **monorepo root** `README.md`, and `pnpm --filter glide-data-grid-ember build` copies it
 down into the addon package so it also ships to npm. Editing the addon-level copy looks like it
 works and is then silently clobbered by the next build (this cost a round-trip here). Edit the root
-`README.md`. `THEMING.md` is *not* part of that copy mechanism — it lives at
-`glide-data-grid-ember/THEMING.md` and is a normal tracked file, which is also why the root README
-links to it by that path.
+`README.md`. *(That README no longer links to `THEMING.md`/`DATA.md`: both were migrated into the
+cookbook and deleted on 2026-08-09, so it links to the deployed cookbook chapters instead. The
+build-artifact rule itself is unchanged and still load-bearing.)*
 
 ### Demo wiring
 
@@ -2192,10 +2226,12 @@ it as a positive signal, not a shortfall.
 
 ## Autotracking → canvas: how a consumer actually gets reactive cell updates (Phase 6 follow-up)
 
-> **Consumer-facing version of this lives in `glide-data-grid-ember/DATA.md`** — one recommended
-> pattern, copy-pasteable. This section is the *why* (mechanism, evidence, failure modes) for people
-> working on the addon. Keep the two in sync: if the mechanics below change, DATA.md is what
-> consumers actually read.
+> **Consumer-facing version of this lives in the cookbook's *Using the grid in Ember* chapter**
+> (`test-app/app/utils/cookbook/ember.ts`) — one recommended pattern, copy-pasteable. This section is
+> the *why* (mechanism, evidence, failure modes) for people working on the addon. Keep the two in
+> sync: if the mechanics below change, that chapter is what consumers actually read. *(It was
+> `glide-data-grid-ember/DATA.md` until 2026-08-09, when it was migrated into that chapter and
+> deleted — references to `DATA.md` further down are historical.)*
 
 **This is the single most important thing for a consumer of this addon to understand, and it is not
 obvious.** Added after the user asked, correctly, whether Phase 6's memoization could stop Ember's
@@ -4054,6 +4090,15 @@ appears broken under automation, suspect the harness before the code** -- and th
 human tries it by hand and it works immediately, which is exactly how the search false negative was
 caught.
 
+**4. An occluded Chrome window makes the grid completely inert** *(added 2026-08-09; cost more than
+an hour)*. When another window is frontmost, the tab reports `document.visibilityState === "hidden"`,
+which suspends the browser's "update the rendering" step: `requestAnimationFrame` stops firing **and
+`ResizeObserver` never delivers**. `GridHostController`'s `width`/`height` therefore stay `0`, and
+*every* hit test resolves to out-of-bounds — so clicks appear to do nothing at all, on a grid whose
+code is fine. **Check `document.visibilityState` in the probe before concluding anything**, and note
+this is a live hazard whenever two agents drive Chrome at once. It also generalises point 3's
+"suspect the harness" rule to a case where the harness looks completely healthy.
+
 ## Phase 9e — search (COMPLETE, browser-verified, 2026-08-08)
 
 Three commits: the engine (`src/rendering/search.ts` + 30 tests), the controller wiring, and the
@@ -4706,3 +4751,69 @@ paths must fall back to the SPA shell.
 **Both `ci.yml` and `release.yml` run `pnpm lint`, which currently fails** (117 eslint + 65
 prettier). The lint cleanup had been parked by explicit user preference; that parking is void now
 that a pipeline depends on it.
+
+## Queue items 1–6: the cookbook absorbs both guides, and one defect per track (2026-08-09)
+
+Run as four subagents on disjoint file sets — two on docs, one on the `<DemoGrid>` interaction gaps,
+one on the `@action` sweep — with the orchestrator re-verifying each. **Two real addon defects came
+out of it, and neither was in the track that was looking for bugs.** That is the reusable point: the
+docs migration found the `recordsSource` defect purely by reading the module closely enough to
+describe it, and the "six demo gaps" track found that five of its six items weren't addon bugs at
+all while the sixth was far bigger than reported.
+
+### What landed
+
+- **`DATA.md` and `THEMING.md` are gone.** Their content is now four cookbook chapters:
+  `ember.ts` (*Using the grid in Ember* — absorbs DATA.md in full, plus Ember Data, GraphQL, and
+  `object-scan` with and without), `theming.ts`, `theme-reference.ts`, and a rewritten `editing.ts`.
+  **There is exactly one copy of each.** The root `README.md` links to the deployed cookbook.
+- **The cookbook is now one chapter per file** in `test-app/app/utils/cookbook/`, ordered by that
+  directory's `index.ts`. Titles carry **no leading number** — the page numbers them from position,
+  so inserting a chapter is a one-line edit rather than a renumbering sweep. This was done
+  specifically so several agents could write chapters concurrently without collisions, and it is
+  worth keeping for that reason.
+- **The overlay-editor pointer defect** (see the recurring-bug-class section at the top of this
+  file) — `-private/grid-event-target.ts`.
+- **The `recordsSource` blank-rows defect** (below).
+- Every test-app demo and cookbook sample now uses **class-field arrows, not `@action`** (Ember 6+).
+  The two rules reinforce each other and the docs now say so: an arrow field is created once per
+  instance, so it is *also* identity-stable, which is what `computeCanBlit`'s compared args need.
+
+### `recordsSource` + Ember Data live arrays
+
+`recordsSource` reuses its per-row caches while the `records` **array identity** is unchanged, but
+reads `rows` fresh from `records.length`. The documented contract ("replace the array when rows are
+added or removed") is fine until it meets a data layer whose arrays are deliberately *never*
+replaced: `store.peekAll(...)` keeps one identity for the life of the store. Its tracked `length`
+still invalidates the caller's `@cached` getter, so the function re-runs with the same identity, the
+**old** caches and the **new** length — and every added row painted `FALLBACK_CELL`. Blank cells, no
+error. Fixed by adding `prev.caches.length === records.length` to `cachesReusable`.
+
+**The general shape is worth remembering: an addon contract phrased as "replace the array" is a
+contract the host framework's own data layer may be structurally unable to honour.** Documenting it
+is not enough; the code has to detect the violation, because the failure is silent.
+
+### The vitest suite can now use the real tracking primitives
+
+`data-source/records-source.ts` had **no tests at all** (9a item 1) because it imports
+`@glimmer/tracking/primitives/cache`, which an Ember app provides at build time and bare Node cannot
+resolve. Ember's `createCache`/`getValue` are re-exports of **`@glimmer/validator`**'s, so
+`vitest.config.ts` now aliases the two and `@glimmer/validator` is a devDependency.
+
+**This is not a stub** — it is the real implementation, including real invalidation via
+`createTag`/`consumeTag`/`dirtyTag`. That is what lets `records-source.test.ts` assert the actual
+memoization invariant (*editing one field re-projects one row, not the whole table*) rather than
+merely its shape, which closes the unit-testable half of an evidence gap that had been carried since
+Phase 8d as "browser-measured once, and nothing re-runs it". The same alias makes any other
+`createCache`-based module testable; the vitest config's "no `ember-source` imports here" rule is
+unchanged, since this is precisely the standalone-`@glimmer/validator` substitution it points at.
+
+### Still open, needs a decision
+
+**`@onSelectionChanged` reports the grid's internal (mangled) column space** — row-marker column
+included — while `@onCellsEdited` and all three context-menu callbacks subtract `rowMarkerOffset`.
+`applySelection` passes `this.selection` straight through and `dispatchCellMouseDown` writes mangled
+columns into it. Source keeps `gridSelection` in *unmangled* space and mangles it on the way down to
+`DataGrid`, so this is a real inconsistency in a **public callback contract**. Deliberately not
+fixed: changing it would break any consumer already compensating, and `<GlideDemo>` may be one.
+`<DemoGrid>` works around it locally, documented in place.

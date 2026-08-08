@@ -20,7 +20,6 @@
 //                          what's on screen, each arrival repainted by damage.
 import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
-import { action } from '@ember/object';
 import { on } from '@ember/modifier';
 import DemoGrid from 'test-app/components/demo-grid';
 import TrackingDemo from 'test-app/components/tracking-demo';
@@ -36,33 +35,33 @@ type DemoTab =
 export default class DemoSwitcher extends Component {
   @tracked tab: DemoTab = 'full-grid';
 
-  @action showFullGrid(): void {
+  showFullGrid = (): void => {
     this.tab = 'full-grid';
-  }
+  };
 
-  @action showTrackingDemo(): void {
+  showTrackingDemo = (): void => {
     this.tab = 'tracking';
-  }
+  };
 
-  @action showGlideDemo(): void {
+  showGlideDemo = (): void => {
     this.tab = 'glide';
-  }
+  };
 
-  @action showStreamingDemo(): void {
+  showStreamingDemo = (): void => {
     this.tab = 'streaming';
-  }
+  };
 
-  @action showAsyncDemo(): void {
+  showAsyncDemo = (): void => {
     this.tab = 'async';
-  }
+  };
 
-  @action showDaisyDemo(): void {
+  showDaisyDemo = (): void => {
     this.tab = 'daisy';
-  }
+  };
 
-  @action showCookbook(): void {
+  showCookbook = (): void => {
     this.tab = 'cookbook';
-  }
+  };
 
   get isDaisy(): boolean {
     return this.tab === 'daisy';

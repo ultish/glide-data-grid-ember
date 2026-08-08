@@ -26,9 +26,9 @@ export const searchSection: Section = {
   ...
 />
 
-@action handleReady(api) { this.gridApi = api; }
-@action handleSearchState(state) { this.searchState = state; }
-@action handleSearchInput(ev) { this.gridApi?.setSearchValue(ev.target.value); }
+handleReady = api => { this.gridApi = api; };
+handleSearchState = state => { this.searchState = state; };
+handleSearchInput = ev => { this.gridApi?.setSearchValue(ev.target.value); };
 // this.gridApi.searchNext() / .searchPrev() / .closeSearch()`,
         },
         {

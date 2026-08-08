@@ -1041,6 +1041,27 @@ user-facing README, plus the auto-sizing font defect). Vitest suite: **589**.
 
 Items 1–6 all came from the user reviewing the demo and the cookbook on 2026-08-09.
 
+> ## ✅ ITEMS 1–6 ARE DONE (2026-08-09, browser-verified). Items 7 and 8 remain.
+>
+> Run as four subagents on disjoint file sets, orchestrator-verified. Full record in
+> PORTING-NOTES.md's "Queue items 1–6" section. Headlines:
+>
+> - **`DATA.md` and `THEMING.md` are deleted**; their content is four cookbook chapters. The
+>   cookbook is now **one chapter per file** in `test-app/app/utils/cookbook/`, numbered by position
+>   from `index.ts` — so adding a chapter is a one-line edit, and several agents can write chapters
+>   at once. 14 chapters.
+> - **Two real addon defects**, neither found by the track that was looking for bugs:
+>   pointer events inside an overlay editor were dispatched as grid clicks (tearing the live editor
+>   down and rebuilding it — since Phase 4a, in *every* editor), and `recordsSource` painted blank
+>   rows for records appended to a live Ember Data array.
+> - Of item 6's six reported gaps, **exactly one was an addon defect**; two were working-as-designed
+>   (re-diffed against source) and three were demo shortcomings.
+> - Vitest **589 → 614**, including `records-source.test.ts`, which never existed.
+>
+> **One decision is waiting for the user** (see PORTING-NOTES.md): `@onSelectionChanged` reports
+> mangled column indices while `@onCellsEdited` and the context-menu callbacks subtract the
+> row-marker offset. Source keeps selection unmangled. Fixing it changes a public callback contract.
+
 > **Retracted 2026-08-09:** this queue briefly carried a "cell images don't paint" defect as item 1.
 > **There is no such defect** — the user's screenshot shows every Photo cell rendering a distinct
 > portrait, the second thumbnail appearing on exactly the rows that should have one, and the
@@ -1049,30 +1070,30 @@ Items 1–6 all came from the user reviewing the demo and the cookbook on 2026-0
 > PORTING-NOTES.md's browser-testing note — the failure survived opening a brand-new tab, which is
 > what made it convincing.
 
-1. **Ember 6+ idioms.** The user targets Ember 6+, where **`@action` is no longer recommended**. The
+1. ~~**Ember 6+ idioms.**~~ **DONE.** The user targets Ember 6+, where **`@action` is no longer recommended**. The
    cookbook and every test-app demo use it throughout. Move to class-field arrows
    (`onEdit = () => {}`) — and say in the cookbook that a class-field arrow is *also*
    identity-stable, which is exactly what the identity-compared args need. The two rules reinforce
    each other; that is worth stating rather than leaving as coincidence.
-2. **Editing recipes should write to a model, not a `Map`.** The cookbook's `@onCellsEdited` recipe
+2. ~~**Editing recipes should write to a model, not a `Map`.**~~ **DONE.** The cookbook's `@onCellsEdited` recipe
    keys edits into a `Map` by `"col,row"`. It works and teaches nothing. Show the real shape: an
    `onEdit` class-field arrow mutating a tracked field on an Ember Data model or tracked class, and
    why that repaints.
-3. **A new cookbook page: using the grid in Ember.** The one the user actually asked for. Fetching
+3. ~~**A new cookbook page: using the grid in Ember.**~~ **DONE** — chapter 4, the longest in the book. The one the user actually asked for. Fetching
    from an Ember Data store *and* from GraphQL; turning a result into cells with and without
    `object-scan` (`<ScaleProof>` already has a worked `object-scan` example to lift); how reactivity
    holds when a GQL query refetches or the store updates; and the performance/identity rules in
    context rather than as a closing chapter.
-4. **Migrate `DATA.md` + `THEMING.md` into the cookbook, then delete them.** ~900 lines that hold
+4. ~~**Migrate `DATA.md` + `THEMING.md` into the cookbook, then delete them.**~~ **DONE** — both deleted, exactly one copy of each. ~900 lines that hold
    detail the cookbook only summarises, so they are still needed — but they belong in the deployed
    test-app cookbook, not the addon directory. `DATA.md` is the spine of item 3; `THEMING.md`
    becomes its own page (precedence chain, full `Theme` field reference, `--gdg-*` properties, the
    CSS-variable bridge). Update every link (README, cookbook, PHASES, PORTING-NOTES) and delete
    both. **Keep exactly one copy** — a half-migration is worse than either end state.
-5. **The theming chapter must show the real DaisyUI code.** It currently mentions DaisyUI and shows
+5. ~~**The theming chapter must show the real DaisyUI code.**~~ **DONE.** It currently mentions DaisyUI and shows
    none. Lift the working integration from `<DaisyDemo>`: `CssThemeWatcher` setup, the `data-theme`
    wiring, and the non-obvious Tailwind 4 bit (written up in PORTING-NOTES.md).
-6. **Demo/addon interaction gaps, found by the user driving `<DemoGrid>`.** Mixed causes — do not
+6. ~~**Demo/addon interaction gaps, found by the user driving `<DemoGrid>`.**~~ **DONE — and the diagnosis mattered: only one of the six was an addon bug.** Mixed causes — do not
    assume all six are addon bugs:
    - *Files* (tree-view): expand/collapse does nothing. The demo cell is `readonly: true`; suspect
      the controller drops the renderer's committed cell. Likely a real gap.
@@ -1086,13 +1107,13 @@ Items 1–6 all came from the user reviewing the demo and the cookbook on 2026-0
      non-navigating handler instead.
    - *Skills* / *Projects*: display-only **by design** — source ships no bubble/drilldown editor
      (Phase 4c). Not a bug; say so in the demo rather than leaving it a mystery.
-7. **Make CI green.** `.github/workflows/ci.yml` and `release.yml` both run `pnpm lint`, which
+7. **Make CI green.** *(deferred by the user 2026-08-09 — do later)* `.github/workflows/ci.yml` and `release.yml` both run `pnpm lint`, which
    currently fails on **117 eslint + 65 prettier**. This was parked by explicit user preference
    ("id prefer doing feature than fixing linting for now") — **that parking is now void**: it is a
    prerequisite for the pipeline, not a tidiness task.
-8. **Release prerequisites**, before any first publish:
+8. **Release prerequisites**, before any first publish *(deferred by the user 2026-08-09; the git remote is now configured)*:
    - the addon version is still `0.0.0` — pick a real first version;
-   - no git remote is configured in this repo yet;
+   - ~~no git remote is configured in this repo yet~~ — **done, the remote is set (user, 2026-08-09)**;
    - one-time npm Trusted Publisher setup on npmjs.com (org `ultish`, repo
      `glide-data-grid-ember`, workflow filename `release.yml`) — the full checklist is in the header
      comment of `.github/workflows/release.yml`;

@@ -22,7 +22,6 @@
 // event happened to repaint.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import GlideDataGrid, { type GlideDataGridApi } from "glide-data-grid-ember/components/glide-data-grid";
 import { AsyncRecordsSource } from "glide-data-grid-ember/data-source/index";
@@ -144,35 +143,31 @@ export default class AsyncDemo extends Component {
      * Hands the source the imperative repaint API. This is the link that makes an arrived page
      * visible -- the source calls `updateCells` with just the rows it filled in.
      */
-    @action
-    handleReady(api: GlideDataGridApi): void {
+    handleReady = (api: GlideDataGridApi): void => {
         this.source.attach(api);
-    }
+    };
 
     /**
      * Forwarded straight to the source, plus a readout. Deduped and microtask-deferred by the grid,
      * so setting tracked state here is safe even though a draw can originate inside a render pass.
      */
-    @action
-    handleVisibleRegionChanged(region: { x: number; y: number; width: number; height: number }): void {
+    handleVisibleRegionChanged = (region: { x: number; y: number; width: number; height: number }): void => {
         this.visibleRegion = `cols ${region.x}–${region.x + region.width - 1}, rows ${region.y}–${
             region.y + region.height - 1
         }`;
         this.source.onVisibleRegionChanged(region);
-    }
+    };
 
     /** Drops every loaded page, as a real app would after changing a server-side filter. */
-    @action
-    invalidate(): void {
+    invalidate = (): void => {
         this.rowsLoaded = 0;
         this.pagesLoaded = 0;
         this.source.invalidate();
-    }
+    };
 
-    @action
-    updateLatency(event: Event): void {
+    updateLatency = (event: Event): void => {
         this.latencyMs = Number((event.target as HTMLInputElement).value);
-    }
+    };
 
     <template>
         <div style="display: flex; flex-direction: column; gap: 10px; height: 100%;">

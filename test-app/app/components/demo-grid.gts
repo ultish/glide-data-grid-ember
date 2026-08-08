@@ -24,7 +24,6 @@
 // pattern (used in `application.gts`) has no backing class, hence this separate component.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import { htmlSafe } from "@ember/template";
 import GlideDataGrid, {
@@ -286,12 +285,11 @@ export default class DemoGrid extends Component {
         return formatSearchStatus(state.status, state.selectedIndex);
     }
 
-    @action
-    toggleExternalSearch(): void {
+    toggleExternalSearch = (): void => {
         this.useExternalSearch = !this.useExternalSearch;
         // Leaving a stale query behind when switching modes just looks broken.
         this.gridApi?.setSearchValue("");
-    }
+    };
 
     // --- Phase 9d: context menus ------------------------------------------------------------------
     // The addon fires the event and hands over the geometry; the menu itself is consumer chrome,
@@ -307,25 +305,21 @@ export default class DemoGrid extends Component {
         this.contextMenu = { x: event.clientX, y: event.clientY, label };
     }
 
-    @action
-    handleCellContextMenu(location: Item, event: ContextMenuEventArgs): void {
+    handleCellContextMenu = (location: Item, event: ContextMenuEventArgs): void => {
         this.openContextMenu(`Cell ${location[0]}, ${location[1]}`, event);
-    }
+    };
 
-    @action
-    handleHeaderContextMenu(col: number, event: ContextMenuEventArgs): void {
+    handleHeaderContextMenu = (col: number, event: ContextMenuEventArgs): void => {
         this.openContextMenu(`Column ${col} header`, event);
-    }
+    };
 
-    @action
-    handleGroupHeaderContextMenu(col: number, event: ContextMenuEventArgs): void {
+    handleGroupHeaderContextMenu = (col: number, event: ContextMenuEventArgs): void => {
         this.openContextMenu(`Group header over column ${col}`, event);
-    }
+    };
 
-    @action
-    closeContextMenu(): void {
+    closeContextMenu = (): void => {
         this.contextMenu = undefined;
-    }
+    };
 
     /** `position: fixed` off the event's viewport coordinates. `htmlSafe` over two numbers this
      *  component produced itself -- no external input reaches it. */
@@ -335,35 +329,29 @@ export default class DemoGrid extends Component {
         return htmlSafe(`position: fixed; left: ${menu.x}px; top: ${menu.y}px;`);
     }
 
-    @action
-    handleExternalSearchInput(ev: Event): void {
+    handleExternalSearchInput = (ev: Event): void => {
         this.gridApi?.setSearchValue((ev.target as HTMLInputElement).value);
-    }
+    };
 
-    @action
-    searchNext(): void {
+    searchNext = (): void => {
         this.gridApi?.searchNext();
-    }
+    };
 
-    @action
-    searchPrev(): void {
+    searchPrev = (): void => {
         this.gridApi?.searchPrev();
-    }
+    };
 
-    @action
-    handleReady(api: GlideDataGridApi): void {
+    handleReady = (api: GlideDataGridApi): void => {
         this.gridApi = api;
-    }
+    };
 
-    @action
-    handleSearchStateChange(state: SearchState): void {
+    handleSearchStateChange = (state: SearchState): void => {
         this.searchState = state;
-    }
+    };
 
-    @action
-    toggleDrawHooks(): void {
+    toggleDrawHooks = (): void => {
         this.showDrawHooks = !this.showDrawHooks;
-    }
+    };
 
     get theme(): Partial<Theme> | undefined {
         return this.isDark ? DARK_THEME : undefined;
@@ -381,39 +369,35 @@ export default class DemoGrid extends Component {
      *  addon's own keybinding does. */
     readonly isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
-    @action
-    toggleTheme(): void {
+    toggleTheme = (): void => {
         this.isDark = !this.isDark;
-    }
+    };
 
     getCellContent = (item: Item): GridCell => {
         const row = this.sourceRow(item[1]);
         return this.edits.get(`${item[0]},${row}`) ?? demoGetCellContent([item[0], row]);
     };
 
-    @action
-    handleColumnResize(_column: GridColumn, newSize: number, colIndex: number): void {
+    handleColumnResize = (_column: GridColumn, newSize: number, colIndex: number): void => {
         this.columns = this.columns.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c));
-    }
+    };
 
-    @action
-    handleColumnMoved(startIndex: number, endIndex: number): void {
+    handleColumnMoved = (startIndex: number, endIndex: number): void => {
         const cols = [...this.columns];
         const [moved] = cols.splice(startIndex, 1);
         if (moved === undefined) return;
         cols.splice(endIndex, 0, moved);
         this.columns = cols;
-    }
+    };
 
-    @action
-    handleCellsEdited(edits: readonly { location: Item; value: GridCell }[]): void {
+    handleCellsEdited = (edits: readonly { location: Item; value: GridCell }[]): void => {
         const next = new Map(this.edits);
         // Keyed by the *underlying* row, not the displayed one -- otherwise an edit made after a row
         // reorder would follow the position rather than the record. Same read/write coordinate-space
         // rule `withColumnSort` settled in Phase 8, here in its simplest possible form.
         for (const edit of edits) next.set(`${edit.location[0]},${this.sourceRow(edit.location[1])}`, edit.value);
         this.edits = next;
-    }
+    };
 
     // --- Phase 9h: row reorder + fill handle ------------------------------------------------------
     // `@onRowMoved` enables dragging a row by its marker cell and draws the handle dots there; the
@@ -427,23 +411,21 @@ export default class DemoGrid extends Component {
         return this.rowOrder?.[row] ?? row;
     }
 
-    @action
-    handleRowMoved(startIndex: number, endIndex: number): void {
+    handleRowMoved = (startIndex: number, endIndex: number): void => {
         const order = [...(this.rowOrder ?? Array.from({ length: this.rows }, (_, i) => i))];
         const [moved] = order.splice(startIndex, 1);
         if (moved === undefined) return;
         order.splice(endIndex, 0, moved);
         this.rowOrder = order;
-    }
+    };
 
     // Fill handle is opt-in (`@fillHandle`), matching source. Toggled here so the "handle drawn but
     // inert" state this port shipped before 9h can't quietly come back unnoticed.
     @tracked useFillHandle = true;
 
-    @action
-    toggleFillHandle(): void {
+    toggleFillHandle = (): void => {
         this.useFillHandle = !this.useFillHandle;
-    }
+    };
 
     // --- Phase 10a: the mutually-exclusive settings, as cycling controls -------------------------
     // Each of these is an arg where only one value can be live at a time, so a toggle is the only
@@ -473,25 +455,21 @@ export default class DemoGrid extends Component {
         return this.rowMarkers === "none" ? undefined : this.handleRowMoved;
     }
 
-    @action
-    cycleRowMarkers(): void {
+    cycleRowMarkers = (): void => {
         this.rowMarkerIndex = (this.rowMarkerIndex + 1) % ROW_MARKER_KINDS.length;
-    }
+    };
 
-    @action
-    cycleRangeSelect(): void {
+    cycleRangeSelect = (): void => {
         this.rangeSelectIndex = (this.rangeSelectIndex + 1) % RANGE_SELECT_MODES.length;
-    }
+    };
 
-    @action
-    cycleFillDirection(): void {
+    cycleFillDirection = (): void => {
         this.fillDirectionIndex = (this.fillDirectionIndex + 1) % FILL_DIRECTIONS.length;
-    }
+    };
 
-    @action
-    toggleFreezeColumns(): void {
+    toggleFreezeColumns = (): void => {
         this.freezeColumns = this.freezeColumns === 0 ? 2 : 0;
-    }
+    };
 
     // --- Phase 10a: the notification-only args, surfaced as a live status line ------------------
     // `@onSelectionChanged` and `@onVisibleRegionChanged` are pure notifications. Rendering them
@@ -519,8 +497,7 @@ export default class DemoGrid extends Component {
         return this.rowMarkers === "none" ? 0 : 1;
     }
 
-    @action
-    handleSelectionChanged(selection: GridSelection): void {
+    handleSelectionChanged = (selection: GridSelection): void => {
         const current = selection.current;
         const parts: string[] = [];
         this.selectedColumn = current === undefined ? undefined : current.cell[0] - this.rowMarkerOffset;
@@ -531,27 +508,24 @@ export default class DemoGrid extends Component {
         if (selection.rows.length > 0) parts.push(`${selection.rows.length} row(s)`);
         if (selection.columns.length > 0) parts.push(`${selection.columns.length} col(s)`);
         this.selectionSummary = parts.length > 0 ? parts.join(", ") : "none";
-    }
+    };
 
-    @action
-    handleVisibleRegionChanged(region: Rectangle): void {
+    handleVisibleRegionChanged = (region: Rectangle): void => {
         this.visibleRegionSummary = `cols ${region.x}-${region.x + region.width - 1}, rows ${region.y}-${region.y + region.height - 1}`;
-    }
+    };
 
     /** Fires just before a fill's edits are computed. Calling `preventDefault()` would hand the
      *  whole fill over to this component; here it only reports, so the default still runs. */
-    @action
-    handleFillPattern(event: FillPatternEventArgs): void {
+    handleFillPattern = (event: FillPatternEventArgs): void => {
         const d = event.fillDestination;
         this.lastFill = `${d.width}x${d.height} from ${event.patternSource.x},${event.patternSource.y}`;
-    }
+    };
 
     /** Live veto during a column-reorder drag. Refusing position 0 is arbitrary but visible: the
      *  drop indicator simply refuses to appear there. */
-    @action
-    handleColumnProposeMove(_startIndex: number, endIndex: number): boolean {
+    handleColumnProposeMove = (_startIndex: number, endIndex: number): boolean => {
         return endIndex !== 0;
-    }
+    };
 
     /** `@onHeaderMenuClick` fires only on the chevron glyph, never on the header body -- that is a
      *  separate, precise hit test. `bounds` is the glyph's rect in **grid-root-relative** pixels,
@@ -560,15 +534,13 @@ export default class DemoGrid extends Component {
      *  event). The menu itself is consumer chrome; the addon ships none, by design. */
     @tracked headerMenu: { col: number; bounds: Rectangle } | undefined;
 
-    @action
-    handleHeaderMenuClick(col: number, bounds: Rectangle): void {
+    handleHeaderMenuClick = (col: number, bounds: Rectangle): void => {
         this.headerMenu = { col, bounds };
-    }
+    };
 
-    @action
-    closeHeaderMenu(): void {
+    closeHeaderMenu = (): void => {
         this.headerMenu = undefined;
-    }
+    };
 
     get headerMenuStyle(): ReturnType<typeof htmlSafe> {
         const menu = this.headerMenu;
@@ -579,10 +551,9 @@ export default class DemoGrid extends Component {
     // Phase 4d: `demoGetCellContent` is a pure function of `[col, row]` (no upper bound baked in),
     // so simply widening `rows` is enough for the newly-appended row to render real (generated)
     // content immediately -- no separate "seed the new row's data" step needed for this demo.
-    @action
-    handleRowAppended(): void {
+    handleRowAppended = (): void => {
         this.rows = this.rows + 1;
-    }
+    };
 
     <template>
         <div class="gdg-full">

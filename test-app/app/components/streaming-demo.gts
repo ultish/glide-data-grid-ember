@@ -29,7 +29,6 @@
 // animating — a visible, checkable symptom rather than an invisible one.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { action } from "@ember/object";
 import { on } from "@ember/modifier";
 import { fn } from "@ember/helper";
 import GlideDataGrid, { type GlideDataGridApi } from "glide-data-grid-ember/components/glide-data-grid";
@@ -173,13 +172,11 @@ export default class StreamingDemo extends Component {
     }
 
     // --- actions ----------------------------------------------------------------------------------
-    @action
-    onReady(api: GlideDataGridApi): void {
+    onReady = (api: GlideDataGridApi): void => {
         this.api = api;
-    }
+    };
 
-    @action
-    toggleRunning(): void {
+    toggleRunning = (): void => {
         this.running = !this.running;
         if (this.running) {
             this.lastFrameTs = 0;
@@ -189,26 +186,23 @@ export default class StreamingDemo extends Component {
         } else {
             this.cancelTick();
         }
-    }
+    };
 
-    @action
-    setRate(rate: number): void {
+    setRate = (rate: number): void => {
         this.targetRate = rate;
         this.cellCredit = 0;
         this.adaptiveBatch = INITIAL_ADAPTIVE_BATCH;
-    }
+    };
 
-    @action
-    onHighlightChange(event: Event): void {
+    onHighlightChange = (event: Event): void => {
         this.highlight = (event.target as HTMLInputElement).checked;
         // The real switch lives in the (non-tracked) data module -- `getCellContent` is invoked at
         // paint time, outside any tracking frame, so a `@tracked` read there would register no
         // dependency at all. The tracked field above exists only to keep the checkbox rendered.
         setHighlightUpdates(this.highlight);
-    }
+    };
 
-    @action
-    resetStats(): void {
+    resetStats = (): void => {
         this.totalCells = 0;
         this.achievedRate = 0;
         this.fps = 0;
@@ -217,7 +211,7 @@ export default class StreamingDemo extends Component {
         this.avgFrameCostMs = 0;
         this.cellsPerFrame = 0;
         this.resetWindow(performance.now());
-    }
+    };
 
     // --- the ticker -------------------------------------------------------------------------------
     private resetWindow(now: number): void {
