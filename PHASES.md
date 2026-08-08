@@ -542,8 +542,20 @@ requested grid feature not currently present.
 overlay input, incremental scanning across the dataset in chunks so it doesn't block, result
 highlighting fed back into the render layer, and next/prev navigation with scroll-into-view.
 
-**Depends on `getCellsForSelection`** (9g) — search cannot read cells outside the rendered window
-without it. Do that first if this is ever picked up.
+~~**Depends on `getCellsForSelection`**~~ — **that dependency is satisfied**: `getCellsForSelection`
+landed 2026-08-08 (see 9g). Search is unblocked.
+
+**OPEN DECISION — settle this before writing code.** Does the addon ship the search *UI*, or only the
+engine? Source ships the whole overlay (input, three SVG buttons, result count, progress bar). This
+project's menu precedent points the other way — but that precedent is **not** a house rule, it is
+simply what source does for menus: source ships no menu UI at all, only the `onHeaderMenuClick`
+event. So the two cases genuinely differ and there is no established convention to follow.
+Considerations: source's UI is `@linaria/react`, which this port doesn't use, so **the UI cannot be
+ported faithfully either way** — only the engine can. Against that, the 2026-08-08 stylesheet work
+means an addon-shipped bar *is* now restylable by the consumer (DaisyUI/Tailwind), which removes the
+main objection to shipping one. **Claude's recommendation at the time: ship a separate opt-in
+`<GlideSearchBar>` component** so consumers get something working out of the box but can drive the
+engine directly instead. Not agreed with the user yet.
 
 ### 9f — The imperative API surface **(NEW — 2026-08-08 audit) — `M`**
 
@@ -860,16 +872,33 @@ rather than rounded up to "verified".
 
 ---
 
-**Suggested order, as of 2026-08-08.** The two cheapest items — the four hardcoded-`undefined`
-`DrawGridArg` passthroughs and `@extraCells` — are **done**; **9a** (tests) is well underway at 416
-tests. The user has since **prioritised 9e (search)**, which reorders the rest:
+## THE QUEUE — start here (accurate as of 2026-08-08, end of session)
 
-1. **9g's `getCellsForSelection`** — now the critical path, because 9e is blocked on it (and it also
-   unblocks copying a selection larger than the rendered window).
-2. **9e — search** itself. Reuses the `@highlightRegions` arg that landed 2026-08-08 for
-   result highlighting.
-3. **9a** — continue; it protects everything already built.
-4. **9d** (context menus — the hit tests already exist).
+**Done this session** (branch `phase-9-partial`, 6 commits): the four draw-hook passthroughs and
+`@extraCells` (9g/9l), the vitest harness + 425 tests (9a, ongoing), Glint v2, prettier/eslint config
+repair, `getCellsForSelection` (9g), and the structural-CSS migration (9q, first half).
+
+**Next, in agreed order:**
+
+1. **9q second half — overlay-editor CSS.** Sequencing constraint, not a preference: it must land
+   **before** any new DOM component (i.e. before a `<GlideSearchBar>`), or we ship another
+   un-restylable component and migrate it twice.
+2. **9e — search.** Unblocked. **Settle the OPEN DECISION in 9e first** (does the addon ship the UI?).
+   Result highlighting can reuse the `@highlightRegions` arg landed this session.
+3. **DaisyUI/Tailwind theming.** Blocker is known and verified: Chrome returns `oklch()` unconverted
+   from `getComputedStyle`, and `parseToRgba` mangles it to garbage — DaisyUI 5 is OKLCH. Must also
+   handle **runtime theme switching** (user switches DaisyUI themes live), which means a
+   `MutationObserver` on `data-theme` producing a *new* theme object only on real change —
+   `theme` is identity-compared by `computeCanBlit`.
+4. **9p — Playwright.** User will prioritise after 2 and 3.
+
+**Explicitly parked:** lint/format cleanup (user: "id prefer doing feature than fixing linting for
+now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
+deferred by user decision.
+
+**Loose end:** `getCellsForSelection` has never been exercised in a browser. Low risk — `rowEnd` is
+clamped to `args.rows` at every call site, so the default path is provably identical to the previous
+behaviour — but the click hasn't happened.
 
 **9b** (accessibility) and **9c** (touch) remain deferred by explicit user decision; 9b is still the
 item nothing else substitutes for if a consumer ever needs it.
