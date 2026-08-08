@@ -21,7 +21,8 @@ import "./glide-data-grid-editors.css";
 // `src/rendering/extra-cells/index.ts` and giving that framework-agnostic directory a
 // bundler-dependent import.
 import "./glide-data-grid-extra-cell-editors.css";
-import { cached } from "@glimmer/tracking";
+import { cached, tracked } from "@glimmer/tracking";
+import { hash } from "@ember/helper";
 import { registerDestructor } from "@ember/destroyable";
 import { modifier } from "ember-modifier";
 import {
@@ -31,6 +32,11 @@ import {
     type RowMarkerKind,
     type CellsForSelectionCallback,
 } from "../-private/grid-host-controller.ts";
+
+// Part of this component's public contract (`@onSearchStateChange`), so re-exported here rather
+// than making consumers import from `-private/`.
+export type { SearchState } from "../-private/grid-host-controller.ts";
+
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
 import { createCombinedCellRenderer } from "../rendering/extra-cells/index.ts";
 import type {
@@ -65,10 +71,44 @@ export interface GlideDataGridApi {
     /** Reads the current state directly, for a UI that mounts after a search is already open
      *  rather than waiting for the next `@onSearchStateChange`. */
     readonly getSearchState: () => SearchState;
+    /**
+     * The grid's root element -- the one carrying `.gdg-root` and this grid's `--gdg-*` theme
+     * variables.
+     *
+     * Exposed for `<GlideSearchBar>`, which portals itself into it with `{{in-element}}`. That is
+     * not a convenience: the bar's stylesheet is scoped under `.gdg-root` like every other sheet in
+     * this addon, and the theme variables it reads are stamped on this element, so a bar rendered
+     * in the consumer's own DOM would get neither. Source has the same structure for the same
+     * reason -- its search overlay is a sibling of the canvas inside the grid's own wrapper.
+     */
+    readonly getRootElement: () => HTMLElement;
 }
 
 export interface GlideDataGridSignature {
     Element: HTMLDivElement;
+    /**
+     * Content rendered **inside the grid's own root element**, as a sibling of its canvases.
+     *
+     * This exists for `<GlideSearchBar>` and anything like it, and the placement is the whole
+     * point: every stylesheet in this addon is scoped under `.gdg-root`, and the `--gdg-*` theme
+     * variables are stamped on that same element -- so an overlay rendered in the consumer's own
+     * DOM gets neither. Source has the identical structure (its search overlay is a sibling of the
+     * canvas inside the grid wrapper).
+     *
+     * It also removes an ordering hazard that a portal does not: `api` only exists once the grid's
+     * modifier has run, so a sibling component reading it during the same render pass reads
+     * `undefined` and never re-renders. Yielded content renders after, and gets it directly.
+     */
+    Blocks: {
+        default: [
+            {
+                /** The same object `@onReady` receives, once the controller exists. */
+                api: GlideDataGridApi | undefined;
+                /** Live search state, updated on every change. Feed straight to `<GlideSearchBar>`. */
+                searchState: SearchState | undefined;
+            },
+        ];
+    };
     Args: {
         columns: readonly GridColumn[];
         getCellContent: (item: Item) => GridCell;
@@ -181,6 +221,19 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
     // rerun would also register as a change to `this.controller` and could cause redundant reruns.
     private controller: GridHostController | undefined;
 
+    // Yielded to the default block. Both are written from callbacks that only fire *after* the
+    // initial render (the modifier's setup, and user interaction respectively), so neither can
+    // trigger a backtracking re-render of content that already consumed them.
+    @tracked private searchApi: GlideDataGridApi | undefined;
+    @tracked private searchState: SearchState | undefined;
+
+    // Wraps the consumer's `@onSearchStateChange` so the yielded `searchState` stays current
+    // whether or not they passed one. A stable reference, since it is a `GridHostArgs` field.
+    private readonly handleSearchStateChange = (state: SearchState): void => {
+        this.searchState = state;
+        this.args.onSearchStateChange?.(state);
+    };
+
     // The effective cell-renderer registry. `@cached` is load-bearing, not tidiness:
     // `getCellRenderer` is one of `computeCanBlit`'s ~18 identity-compared `DrawGridArg` fields, so
     // calling `createCombinedCellRenderer` inline in `buildGridHostArgs()` -- which runs on every
@@ -246,7 +299,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onSearchClose: this.args.onSearchClose,
         searchResults: this.args.searchResults,
         onSearchResultsChanged: this.args.onSearchResultsChanged,
-        onSearchStateChange: this.args.onSearchStateChange,
+        onSearchStateChange: this.handleSearchStateChange,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s
@@ -273,7 +326,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
             });
             this.controller = controller;
             registerDestructor(this, () => controller.destroy());
-            this.args.onReady?.({
+            const api: GlideDataGridApi = {
                 updateCells: (cells: readonly { cell: Item }[]) => controller.updateCells(cells),
                 openSearch: () => controller.openSearch(),
                 closeSearch: () => controller.closeSearch(),
@@ -281,7 +334,10 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
                 searchNext: () => controller.searchNext(),
                 searchPrev: () => controller.searchPrev(),
                 getSearchState: () => controller.getSearchState(),
-            });
+                getRootElement: () => element,
+            };
+            this.searchApi = api;
+            this.args.onReady?.(api);
         } else {
             void args; // already consumed for tracking; nothing else to do with it here
             this.controller.scheduleFullRedraw();
@@ -289,6 +345,8 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
     });
 
     <template>
-        <div style="width: 100%; height: 100%;" {{this.setupGrid}} ...attributes></div>
+        <div style="width: 100%; height: 100%;" {{this.setupGrid}} ...attributes>
+            {{yield (hash api=this.searchApi searchState=this.searchState)}}
+        </div>
     </template>
 }

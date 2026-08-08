@@ -95,7 +95,8 @@
     "type": "addon",
     "main": "addon-main.cjs",
     "app-js": {
-      "./components/glide-data-grid.js": "./dist/_app_/components/glide-data-grid.js"
+      "./components/glide-data-grid.js": "./dist/_app_/components/glide-data-grid.js",
+      "./components/glide-search-bar.js": "./dist/_app_/components/glide-search-bar.js"
     }
   }
 }

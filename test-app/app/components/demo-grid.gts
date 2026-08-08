@@ -9,7 +9,9 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { on } from "@ember/modifier";
-import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
+import GlideDataGrid, { type GlideDataGridApi } from "glide-data-grid-ember/components/glide-data-grid";
+import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";
+import type { SearchState } from "glide-data-grid-ember/components/glide-search-bar";
 import { demoColumns, demoGetCellContent, demoGetRowThemeOverride, DEMO_ROW_COUNT } from "test-app/utils/demo-data";
 import { cached } from "@glimmer/tracking";
 import {
@@ -116,6 +118,22 @@ export default class DemoGrid extends Component {
         return this.showDrawHooks ? DEMO_PRELIGHT_CELLS : undefined;
     }
 
+    // Phase 9e: search. The grid owns the engine; this demo only holds the API object and the
+    // latest state snapshot, and hands both to the opt-in `<GlideSearchBar>`. Press Cmd/Ctrl+F in
+    // the grid to open it.
+    @tracked gridApi: GlideDataGridApi | undefined;
+    @tracked searchState: SearchState | undefined;
+
+    @action
+    handleReady(api: GlideDataGridApi): void {
+        this.gridApi = api;
+    }
+
+    @action
+    handleSearchStateChange(state: SearchState): void {
+        this.searchState = state;
+    }
+
     @action
     toggleDrawHooks(): void {
         this.showDrawHooks = !this.showDrawHooks;
@@ -194,7 +212,15 @@ export default class DemoGrid extends Component {
                     @drawHeader={{this.drawHeader}}
                     @prelightCells={{this.prelightCells}}
                     @highlightRegions={{this.highlightRegions}}
-                />
+                    @onReady={{this.handleReady}}
+                    @onSearchStateChange={{this.handleSearchStateChange}}
+                    {{! Phase 9e: the block renders inside the grid's own root, which is where the
+                        bar's `.gdg-root`-scoped CSS and `--gdg-*` theme variables live. Both values
+                        come from the block, so no `@onReady` plumbing is needed for the bar itself. }}
+                    as |grid|
+                >
+                    <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
+                </GlideDataGrid>
             </div>
         </div>
     </template>

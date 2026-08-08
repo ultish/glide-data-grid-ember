@@ -545,7 +545,15 @@ highlighting fed back into the render layer, and next/prev navigation with scrol
 ~~**Depends on `getCellsForSelection`**~~ — **that dependency is satisfied**: `getCellsForSelection`
 landed 2026-08-08 (see 9g). Search is unblocked.
 
-**OPEN DECISION — settle this before writing code.** Does the addon ship the search *UI*, or only the
+**DECISION SETTLED (user, 2026-08-08): ship a separate, opt-in `<GlideSearchBar>` component** — the
+recommendation below, now agreed. Consumers get something working out of the box but can ignore it and
+drive the engine directly. Note what changed the calculus: 9q's second half landed, so a shipped bar is
+restylable CSS rather than another inline-styled component that would need migrating later. Style it in
+its own stylesheet following the established conventions (`.gdg-root`-scoped selectors, `var(--gdg-*)`
+for every theme value, reuse `.gdg-editor-input`/`.gdg-editor-button` where they fit). The original
+framing of the decision is kept below for context.
+
+**~~OPEN DECISION~~ — settle this before writing code.** Does the addon ship the search *UI*, or only the
 engine? Source ships the whole overlay (input, three SVG buttons, result count, progress bar). This
 project's menu precedent points the other way — but that precedent is **not** a house rule, it is
 simply what source does for menus: source ships no menu UI at all, only the `onHeaderMenuClick`
@@ -919,6 +927,34 @@ overlay-editor chrome, so the addon's DOM is now fully restylable from a consumi
    `MutationObserver` on `data-theme` producing a *new* theme object only on real change —
    `theme` is identity-compared by `computeCanBlit`.
 4. **9p — Playwright.** User will prioritise after 2 and 3.
+
+**IN FLIGHT — 9e (search), two of three parts landed.** See the `feat(9e-a)` and `feat(9e-b)` commits.
+The engine (`src/rendering/search.ts`, 30 tests) and the controller wiring (args, mangled
+`getCellsForSelection`, primary+F, results into `prelightCells`, navigation) are both done and
+verified as far as they can be without a UI.
+
+**9e-c is committed but NOT working — start here.** `<GlideSearchBar>` + `glide-search-bar.css` +
+`<GlideDataGrid>`'s new yielded block exist and type-check, the addon and test-app both build, and
+the demo is wired. **The bar does not appear.** What is established, so it is not re-derived:
+
+- The engine and keybinding genuinely work. An *earlier* iteration of the bar (rendered as a plain
+  sibling, before the yielded block existed) **did** render on primary+F — `.gdg-search-bar` was in
+  the DOM. It was unstyled, because every stylesheet is scoped under `.gdg-root` and the `--gdg-*`
+  theme variables are stamped on that element, so a bar outside it gets neither. That is what the
+  yielded block was introduced to fix.
+- `@onReady` fires with the complete API object, `getRootElement` included (verified in-browser).
+- The block *is* rendering: `.gdg-root`'s `childNodes` contain a Glimmer comment placeholder ahead
+  of `.dvn-underlay`. Note `children` does **not** show it — comment nodes are not elements, which
+  cost time to spot.
+- So the remaining fault is narrow: **`{{#if this.isVisible}}` inside `<GlideSearchBar>` is false**,
+  i.e. the yielded `grid.searchState` is not reaching it. The suspect is the change from
+  `onSearchStateChange: this.args.onSearchStateChange` to the component's own
+  `handleSearchStateChange` wrapper (which sets the `@tracked searchState` the block yields) —
+  check that the wrapper is actually invoked, and that setting a tracked field from inside a
+  `keydown` the controller dispatches is not being swallowed as a backtracking re-render.
+- Dev-server staleness was ruled out: restarted twice, and `vite build` re-run after every change.
+
+An in-browser pass is the gate for calling 9e done, and it has not passed.
 
 **Explicitly parked:** lint/format cleanup (user: "id prefer doing feature than fixing linting for
 now") — `pnpm lint` currently fails on 117 eslint + 65 prettier. 9b (accessibility) and 9c (touch),
