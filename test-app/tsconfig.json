@@ -3,12 +3,9 @@
   "include": [
     "app", "tests", "types"
   ],
-  "glint": {
-    "environment": [
-      "ember-loose",
-      "ember-template-imports"
-    ]
-  },
+  /* Glint v2 needs no `"glint": { "environment": [...] }` block -- environments were a v1 concept
+     and the key is removed as part of the v2 upgrade. This app has no `.hbs` files, only `.gts`,
+     so v2 dropping the Ember Loose environment costs it nothing. */
   "compilerOptions": {
     "allowJs": true,
     /**

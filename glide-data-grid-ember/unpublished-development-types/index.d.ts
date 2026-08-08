@@ -1,14 +1,8 @@
 // Add any types here that you need for local development only.
 // These will *not* be published as part of your addon, so be careful that your published code does not rely on them!
 
-import '@glint/environment-ember-loose';
-import '@glint/environment-ember-template-imports';
-
-// Uncomment if you need to support consuming projects in loose mode
-//
-// declare module '@glint/environment-ember-loose/registry' {
-//   export default interface Registry {
-//     // Add any registry entries from other addons here that your addon itself uses (in non-strict mode templates)
-//     // See https://typed-ember.gitbook.io/glint/using-glint/ember/using-addons
-//   }
-// }
+// Glint v2 (2026-08-08). Replaces v1's two ambient environment imports
+// (`@glint/environment-ember-loose` + `@glint/environment-ember-template-imports`), both of which
+// no longer exist -- v2 dropped the Ember Loose environment entirely and ships a single types entry
+// point instead. Harmless here: this addon has no `.hbs` files at all, only `.gts`.
+import '@glint/ember-tsc/types';
