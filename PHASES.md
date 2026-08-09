@@ -818,6 +818,26 @@ it earned.
   (e.g. a combined cell renderer built from an `@extraCells` arg) — computing such a value inline in
   `buildGridHostArgs()` would reintroduce identity churn from the consumer side. `M`.
 
+### 9r — Found by actually wiring the hooks up (2026-08-09)
+
+Both surfaced by building the "Composed hooks" demo, and **neither was findable by reading the code
+in isolation** — they are properties of how the decorators compose with `recordsSource`. That is the
+argument for the demo, restated: the three hooks had passing tests and no demo, and both of these sat
+underneath.
+
+- **`withMovableColumns` memoizes on the wrong key.** `movable-columns.ts:237` keys its cache
+  `WeakMap<GetCellContentFn, CacheEntry>` — on the incoming `getCellContent`. But `recordsSource`
+  deliberately returns a **fresh `getCellContent` whenever the data changes** (that identity change is
+  precisely its "this row changed" signal). So the cache misses on every data change, defeating the
+  "hand back the caller's own array" optimisation **in exactly the composition it exists for**.
+  `withCollapsingGroups` keys on `columns` and does not have this problem. Fix: key on `columns` +
+  the order key, and treat `getCellContent` as an input to wrap rather than as cache identity. `S`.
+- **`UndoRedo` gives consumers no "am I replaying?" signal.** An `onCellEdited` that persists,
+  logs, or marks a record dirty cannot distinguish an undo from a user edit, so an undo re-persists
+  and a redo double-counts. The demo brackets its own calls, but the *keyboard* path cannot be
+  bracketed from outside. Needs either a public `isReplaying` flag or a second argument on the edit
+  callback. `S`, and it matters the moment anyone wires undo to a real backend.
+
 ### 9l — Extensibility / public custom-cell API
 
 - ~~**No `@extraCells` arg.**~~ — **DONE 2026-08-08, browser-verified.** Consumers wanting the 13

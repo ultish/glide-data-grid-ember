@@ -4910,3 +4910,28 @@ just selected it (source requires selected **before and after** the press).
 
 Corollary for reviewers: read the **guard conditions** around a call, not the prop's type or name.
 `onCellClicked` fires where `isValidClick` says so; nothing about the declaration reveals that.
+
+## `computeCanBlit` does NOT compare columns by identity alone (correction, 2026-08-09)
+
+Several `src/data-source/` module headers assert that returning a fresh `columns` array kills the
+scroll blit fast path. **That is overstated**, and it is worth correcting because it has been used to
+justify memoization design.
+
+What `computeCanBlit` actually does (`render/data-grid-render.blit.ts:258-284`):
+
+1. **> 100 columns, or a length change → return false.** No comparison attempted.
+2. **Otherwise → element-wise `deepEqual` per column.** A freshly-allocated array whose columns are
+   structurally identical still passes.
+
+So a fresh `columns` array is *cheap-but-not-free* below 100 columns (N `deepEqual`s per frame) and
+*fatal* above it. The identity rule is real for the ~18 other `DrawGridArg` fields — those are `===`
+comparisons — but `mappedColumns` is the one field with a structural fallback.
+
+This is the same code 9k memoized: `computeMangledLayout` was rebuilding the array every draw, so the
+`deepEqual` branch ran every frame and the >100-column bail-out triggered permanently on wide grids.
+The memoization makes the identity check hit and skip the comparison entirely — which is why the fix
+mattered — but "fresh array = no blit" was never the precise statement.
+
+**Rule for future doc comments:** say *which* comparison a field gets. `===` for the identity-compared
+fields; structural-with-a-bail-out for `mappedColumns`. Overstating it produces confident but wrong
+design arguments, which is exactly what happened in the `data-source/` headers.
