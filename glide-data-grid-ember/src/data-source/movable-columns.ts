@@ -220,12 +220,12 @@ function resolveOrder(columns: readonly GridColumn[], keys: readonly string[]): 
 //   - `getOriginalColumnIndex`  captures `displayToOriginal`
 // ...and `displayToOriginal`/`displayedColumns` are a function of {`columns`, `orderKey`}.
 interface CacheEntry {
-    readonly columns: readonly GridColumn[];
     readonly orderKey: string;
     readonly displayedColumns: readonly GridColumn[];
     /** `undefined` when the resolved order is the identity permutation (pure passthrough). */
     readonly displayToOriginal: readonly number[] | undefined;
     readonly getCellContent: GetCellContentFn;
+    readonly getCellContentIn: GetCellContentFn;
     readonly getOriginalColumnIndex: (index: number) => number;
     /** The *incoming* handlers, not the returned ones. */
     readonly onCellsEditedIn: OnCellsEditedFn | undefined;
@@ -234,7 +234,10 @@ interface CacheEntry {
     readonly result: MovableColumnsResult;
 }
 
-const cache = new WeakMap<GetCellContentFn, CacheEntry>();
+// The resolved order depends only on the caller's columns array and the structural order key.
+// `recordsSource` intentionally replaces getCellContent when data changes, so it must not be the
+// outer cache key or the display columns would be reallocated on every data update.
+const cache = new WeakMap<readonly GridColumn[], Map<string, CacheEntry>>();
 
 // A structural digest of the requested order, deliberately not the `order` array's identity: a
 // consumer writing `get order() { return [...this.savedOrder]; }` allocates a fresh array on every
@@ -288,10 +291,12 @@ export function withMovableColumns(p: MovableColumnsProps): MovableColumnsResult
     } = p;
 
     const orderKey = orderCacheKey(order);
-    const cached = cache.get(getCellContentIn);
-    const readReusable = cached !== undefined && cached.columns === columns && cached.orderKey === orderKey;
+    const entries = cache.get(columns);
+    const cached = entries?.get(orderKey);
+    const readReusable = cached !== undefined;
     if (
         readReusable &&
+        cached.getCellContentIn === getCellContentIn &&
         cached.onCellsEditedIn === onCellsEditedIn &&
         cached.onColumnMovedIn === onColumnMovedIn &&
         cached.onOrderChange === onOrderChange
@@ -305,9 +310,16 @@ export function withMovableColumns(p: MovableColumnsProps): MovableColumnsResult
     let getOriginalColumnIndex: (index: number) => number;
 
     if (readReusable) {
-        // Only a callback identity changed. Reuse the resolved order and -- critically -- the same
-        // `columns` and `getCellContent` identities, so the blit fast path is unaffected.
-        ({ displayedColumns, displayToOriginal, getCellContent, getOriginalColumnIndex } = cached);
+        // Only callback identities changed. Reuse the resolved order and columns; refresh only the
+        // wrappers that captured an incoming callback identity.
+        ({ displayedColumns, displayToOriginal, getOriginalColumnIndex } = cached);
+        const map = displayToOriginal;
+        getCellContent =
+            cached.getCellContentIn === getCellContentIn
+                ? cached.getCellContent
+                : map === undefined
+                  ? getCellContentIn
+                  : ([col, row]: Item): GridCell => getCellContentIn([map[col] ?? col, row]);
     } else {
         const resolved = resolveOrder(columns, order ?? []);
         const map = resolved.map(c => columns.indexOf(c));
@@ -364,17 +376,22 @@ export function withMovableColumns(p: MovableColumnsProps): MovableColumnsResult
         getOriginalColumnIndex,
     };
 
-    cache.set(getCellContentIn, {
-        columns,
+    const cacheEntry: CacheEntry = {
         orderKey,
         displayedColumns,
         displayToOriginal,
         getCellContent,
+        getCellContentIn,
         getOriginalColumnIndex,
         onCellsEditedIn,
         onColumnMovedIn,
         onOrderChange,
         result,
-    });
+    };
+    if (entries === undefined) {
+        cache.set(columns, new Map([[orderKey, cacheEntry]]));
+    } else {
+        entries.set(orderKey, cacheEntry);
+    }
     return result;
 }

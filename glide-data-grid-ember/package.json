@@ -1,6 +1,6 @@
 {
     "name": "glide-data-grid-ember",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "description": "A fast, canvas-rendered data grid for Ember — an Ember v2 addon port of glide-data-grid.",
     "keywords": [
         "ember-addon",

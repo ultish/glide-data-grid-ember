@@ -54,12 +54,8 @@ function iconButton(icon: SVGSVGElement): HTMLDivElement {
 // cell never shows rendered HTML, only the overlay's preview mode does). Ported faithfully here:
 // the checkmark button calls `p.onFinishedEditing(currentValue)`, not a mode toggle.
 //
-// Simplification vs source: source's initial `editMode` is `markdown === "" || forceEditMode`.
-// This port's `CellEditorProps` has no `forceEditMode` field (see PORTING-NOTES.md's Phase 4a
-// section), so `editMode` here is seeded from `markdown === ""` alone -- an empty cell opens
-// straight into edit mode (nothing to preview), any non-empty cell opens showing the rendered
-// preview first (matches source's overwhelmingly common case, since Phase 4a's activation path
-// never sets an equivalent of `forceEditMode` today).
+// Keyboard activation supplies `forceEditMode`, so edit-on-type and Enter open directly in the
+// textarea; pointer activation keeps the rendered preview first, matching source.
 function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
     let currentValue: MarkdownCell = p.value;
@@ -140,7 +136,7 @@ function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle
         container.appendChild(checkButton);
     }
 
-    if (currentValue.data === "") {
+    if (currentValue.data === "" || p.forceEditMode === true) {
         renderEdit();
     } else {
         renderPreview();

@@ -65,6 +65,25 @@ function makeTable(rows: readonly (readonly string[])[]) {
 }
 
 describe("UndoRedo — basic history", () => {
+    it("exposes replay state while forwarding undo and redo edits", () => {
+        const table = makeTable([["a"]]);
+        const replayStates: boolean[] = [];
+        const ur = new UndoRedo();
+        const source = ur.wrap({
+            ...table.snapshot(),
+            onCellsEdited: edits => {
+                replayStates.push(ur.isReplaying);
+                table.onCellsEdited(edits);
+            },
+        });
+
+        source.onCellsEdited([{ location: [0, 0], value: cell("b") }]);
+        ur.undo();
+        ur.redo();
+
+        expect(replayStates).toEqual([false, true, true]);
+    });
+
     it("undoes an edit back to the value it replaced", () => {
         const table = makeTable([["alice", "Oslo"]]);
         const ur = new UndoRedo();
