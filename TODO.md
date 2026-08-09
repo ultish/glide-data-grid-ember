@@ -291,9 +291,9 @@ violations.)
 - Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
   character.
 
-### 5.3 First npm publish
+### 5.3 First npm publish — DONE (2026-08-09)
 
-- Addon version is still `0.0.0` — pick a real first version.
+- Addon version `0.1.7` is committed and tagged as `v0.1.7`.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.
