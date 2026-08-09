@@ -325,6 +325,23 @@ already fixed. **Verify an item against the code before scheduling work on it.**
 
 ---
 
+## 6b. Verified 2026-08-09 — the faked-Apollo demo
+
+Browser-checked on a clean build, so this needs no re-verification:
+
+- **`200 of 200` vs `1 of 200`.** The grid fed the raw Apollo result array re-projects every row on a
+  one-field cache write; the grid fed reconciled tracked view models re-projects one. The guide's
+  claim about `recordsSource` keying on array identity is now an observed number, not an assertion.
+- **A concern about `setInterval` was raised and is unfounded.** The subscription's tracked writes
+  originate outside Ember's event dispatcher, unlike every other demo here (whose writes come from
+  click handlers), so there was reason to think they might land before render and need
+  `schedule("afterRender", …)`. They do not. **The decisive test, worth reusing:** load the page
+  fresh, confirm the counters are *absent*, then run **only** the subscription and confirm they
+  appear. Reading the same numbers before and after a subscription proves nothing, because a
+  per-tick counter left over from a click reads identically to one that never updated.
+
+---
+
 ## 7. Where the deep history lives, if you need it
 
 - **`PHASES.md`** — phase-by-phase plan and status, the full 9a–9r backlog with original reasoning,
