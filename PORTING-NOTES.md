@@ -4752,6 +4752,64 @@ paths must fall back to the SPA shell.
 prettier). The lint cleanup had been parked by explicit user preference; that parking is void now
 that a pipeline depends on it.
 
+### The ember-try matrix, and why 5 of 7 scenarios failed (2026-08-09)
+
+Lint went green in `23b4cd8`, which let the `Tests` job pass — and that immediately exposed the
+`try-scenarios` matrix underneath it. **Five of seven scenarios failed**, from three independent
+causes. All five are green now, on ember-source **6.4 through 7.3-canary**, verified locally with
+`ember try:each` before pushing.
+
+**Cause 1 — ember-source 7 deleted the legacy AMD template compiler.** `test-app/babel.config.cjs`
+pinned `compilerPath: "ember-source/dist/ember-template-compiler.js"`. ember-source 7's `exports` is
+just `{"./*": "./dist/{dev,prod}/packages/*"}`, so that specifier resolves to a path that does not
+exist (`dist/prod/packages/dist/ember-template-compiler.js` — the error message is confusing because
+the wildcard rewrites the whole subpath). This was the `ember-release`/`beta`/`canary` failure.
+
+The fix is *deleting* the option, not repointing it. `babel-plugin-ember-template-compilation` v3+
+prefers `ember-source/ember-template-compiler/index.js` and only falls back to the legacy AMD path,
+so with no `compilerPath` it works on 6 **and** 7. That required bumping the plugin `^2.4.1 → ^3.1.0`
+in both packages — v2 has no fallback at all, and `^3.1.0` is exactly what `@embroider/compat@4`
+already depends on, so there is one copy on disk.
+
+Two knock-on effects worth knowing:
+
+- **v3 is ESM-only and resolves the compiler asynchronously.** `@babel/eslint-parser` drives Babel
+  *synchronously*, so the moment `eslint` loaded `babel.config.cjs` to parse a plain `.js` file it
+  died with *"You appear to be using an async plugin/preset, but Babel has been called
+  synchronously"*. Fixed in `test-app/eslint.config.mjs` by giving the `**/*.js` block
+  `requireConfigFile: false` + `babelOptions: {configFile: false, babelrc: false}` — those files are
+  plain CJS/ESM node scripts and never needed the app's transforms to be *parsed*.
+- The addon's own `babel.config.json` uses `targetFormat: "hbs"`. v2 loaded the AMD compiler anyway
+  (hence the deprecation banner on every `rollup` run); v3 skips it entirely, so the banner is gone.
+
+**Cause 2 — ember-source 7 removed the `ember` barrel module.** `dist/prod/packages/ember/` now
+contains only `version.js`. `@ember/test-helpers@4` still does `import … from "ember"`, so Rollup
+failed to resolve it. Bumped `@ember/test-helpers` `^4.0.5 → ^5.4.3` (v5 has no `from "ember"`
+anywhere) and `ember-qunit` `^9.0.4 → ^9.1.0` alongside it.
+
+**Cause 3 — `embroiderSafe()`/`embroiderOptimized()` are inapplicable here, and were always dead
+weight.** They come from `@embroider/test-setup`, whose entire job is to flip a *classic* ember-cli
+app onto the Embroider+webpack pipeline: they set `EMBROIDER_TEST_SETUP_OPTIONS`, which only
+`maybeEmbroider()` in `ember-cli-build.js` reads. This test-app is a v2 app built by
+`@embroider/vite` and calls `compatBuild(app, buildOnce)` directly, so the env var is read by
+nothing — while the scenarios still force-install `@embroider/webpack` and *downgrade*
+`@embroider/core`/`compat` from v4 to v3, which is what actually broke the build
+(`Named export 'ModuleRequest' not found`). Both scenarios, the two CI matrix entries, and the
+`@embroider/test-setup` devDependency are removed. There is one build pipeline here and every
+scenario exercises it; the config they came from is the blueprint's classic test-app, which this
+is not.
+
+**The reusable lesson**: this matrix was copied wholesale from `choices-ember`, a **classic v1
+addon** with an `EmberApp`/webpack test-app. Two of the three failures are that inheritance — a
+scenario list that is correct there and meaningless here. When a config arrives by copy, check which
+of its assumptions your build actually shares before treating its failures as bugs in your code.
+
+**Local repro caveat**: `ember try:one … --skip-cleanup` (what `ci.yml` runs) leaves
+`test-app/package.json` rewritten in place, with the original at `package.json.ember-try` — 2-space
+reindented and carrying the scenario's pinned `ember-source` tarball URL. Harmless on a fresh CI
+checkout, destructive locally. Run `try:one`/`try:each` **without** `--skip-cleanup`, and check
+`git status` afterwards regardless.
+
 ## Queue items 1–6: the cookbook absorbs both guides, and one defect per track (2026-08-09)
 
 Run as four subagents on disjoint file sets — two on docs, one on the `<DemoGrid>` interaction gaps,

@@ -255,43 +255,31 @@ reusing the existing `resolveMouseHit` for the cell target.
 
 ## 5. Release path
 
-### 5.1 Make CI green — blocks npm publishing
+### 5.1 Make CI green — DONE (2026-08-09)
 
-`.github/workflows/ci.yml` and `release.yml` both run `pnpm lint`, which fails. **This does not block
-the GitHub Pages deploy** (`pages.yml` is independent and never lints) — Pages is already live.
+**All of `ci.yml` is green.** Two rounds:
 
-Current state, measured 2026-08-09:
+1. **Lint** (`23b4cd8`) — the `Tests` and `Floating Dependencies` jobs run `pnpm lint`, which used to
+   fail with 133 addon + 5 test-app eslint errors and 30 unformatted files. Fixed.
+2. **The `try-scenarios` matrix** — with lint green, the matrix underneath it finally ran, and **5 of
+   7 scenarios failed** for three unrelated reasons: ember-source 7 deleted the legacy AMD template
+   compiler, ember-source 7 removed the `ember` barrel module (which `@ember/test-helpers@4` still
+   imports), and `embroiderSafe()`/`embroiderOptimized()` are structurally inapplicable to a v2 app
+   built by `@embroider/vite`. Full write-up, including the eslint/async-Babel knock-on and the
+   `--skip-cleanup` footgun, is in **PORTING-NOTES.md → "The ember-try matrix, and why 5 of 7
+   scenarios failed"**.
 
-```
-addon eslint:    133 errors     test-app eslint: 5 errors (1 auto-fixable)
-addon prettier:  30 files
-```
+The matrix is now `ember-lts-6.4`, `ember-lts-6.8`, `ember-release`, `ember-beta`, `ember-canary` —
+verified locally with `ember try:each` across ember-source **6.4 → 7.3-canary**, all 5 passing.
 
-Top addon rules by count — the shape suggests a lot is mechanical:
-
-```
-36  @typescript-eslint/no-unsafe-member-access
-23  @typescript-eslint/no-unnecessary-type-assertion
-15  @typescript-eslint/no-explicit-any
- 8  @typescript-eslint/no-unsafe-assignment
- 5  sonarjs/no-duplicate-string
- 5  @typescript-eslint/no-unused-vars
- 4  @typescript-eslint/no-unsafe-call
-```
-
-Start with `pnpm lint:fix` and prettier `--write`, then hand-fix the rest.
-
-**General caution for `src/rendering/`**: that code is ported near-verbatim from source and sits on
-the paint path, so prefer a targeted disable with a comment explaining the port-fidelity reason over
-a rewrite that changes allocation behaviour in a draw loop.
+Standing caution if you touch `src/rendering/` for lint reasons: that code is ported near-verbatim
+from source and sits on the paint path, so prefer a targeted disable with a comment explaining the
+port-fidelity reason over a rewrite that changes allocation behaviour in a draw loop.
 
 (An earlier revision of this file warned specifically about `unicorn/no-for-loop`. **That rule is not
 configured in this repo** — `eslint-plugin-unicorn` is not a dependency and the Ember plugin does not
 bring it in. The count came from misreading eslint's "Definition for rule was not found" messages as
 violations.)
-
-Was parked earlier by user preference ("id prefer doing feature than fixing linting for now"); that
-parking is void now that CI runs on `main`.
 
 ### 5.2 First npm publish
 

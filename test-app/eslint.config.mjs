@@ -71,6 +71,17 @@ export default ts.config(
         files: ["**/*.js"],
         languageOptions: {
             parser: babelParser,
+            parserOptions: {
+                // Do NOT load `babel.config.cjs` to lint plain `.js` files.
+                // babel-plugin-ember-template-compilation v3+ resolves the template
+                // compiler asynchronously, and @babel/eslint-parser drives Babel
+                // synchronously -- loading the app config here fails with
+                // "You appear to be using an async plugin/preset, but Babel has been
+                // called synchronously". None of the `.js` files in this app need the
+                // app's transforms to be *parsed*; the build still applies them.
+                requireConfigFile: false,
+                babelOptions: { configFile: false, babelrc: false },
+            },
         },
     },
     {

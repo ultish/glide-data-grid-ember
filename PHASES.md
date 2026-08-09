@@ -1180,8 +1180,10 @@ Queue items 1–6, Phase 11, and backlog items 9f, 9g, 9j, 9k, plus N1/N2 from `
 - **9h leftovers** — controlled-selection mode, span/merged-cell selection, the `onSelect` renderer
   hook, keybinding remapping, nav variants. (Two other 9h items were found **already fixed**; see the
   audit note there.)
-- **Queue item 7, lint** — 117 eslint + 65 prettier. Blocks `ci.yml`/`release.yml`, i.e. **npm
-  publishing**. Confirmed **not** to block the Pages deploy.
+- ~~**Queue item 7, lint**~~ — **done 2026-08-09.** Lint is green, and so is the `ember-try` matrix
+  it was hiding: 5 of its 7 scenarios were failing, and the two `embroider-*` ones are now deleted as
+  inapplicable to a Vite v2 app. CI covers ember-source **6.4 → 7.3-canary**. See TODO.md §5.1 and
+  PORTING-NOTES.md's "The ember-try matrix" section. **npm publishing is no longer CI-blocked.**
 
 **Deferred by explicit user decision — do not propose these:** 9b (accessibility), 9c (touch), 9p
 (Playwright).

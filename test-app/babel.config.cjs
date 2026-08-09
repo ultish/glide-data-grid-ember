@@ -13,7 +13,10 @@ module.exports = {
         [
             "babel-plugin-ember-template-compilation",
             {
-                compilerPath: "ember-source/dist/ember-template-compiler.js",
+                // No `compilerPath`: let the plugin pick the compiler itself. It
+                // prefers `ember-source/ember-template-compiler/index.js` and only
+                // falls back to the legacy AMD `dist/ember-template-compiler.js`,
+                // which ember-source 7 removed.
                 enableLegacyModules: [
                     "ember-cli-htmlbars",
                     "ember-cli-htmlbars-inline-precompile",

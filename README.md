@@ -25,8 +25,10 @@ only what's on screen, to a canvas, and asks you for those cells one at a time.
 
 ## Compatibility
 
-- Ember.js v4.12 or above
-- Embroider or ember-auto-import v2
+| | |
+|---|---|
+| `ember-source` | **v6.4 or above.** CI runs the full `ember-try` matrix on 6.4 LTS, 6.8 LTS, release, beta and canary — i.e. through Ember **7.x**. |
+| Build | Embroider, or ember-auto-import v2. |
 
 ## Installation
 
