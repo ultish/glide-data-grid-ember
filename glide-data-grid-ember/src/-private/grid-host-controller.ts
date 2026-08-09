@@ -47,7 +47,6 @@ import {
     decodeHTML,
     unquote,
     BooleanEmpty,
-    BooleanIndeterminate,
     isObjectEditorCallbackResult,
     booleanCellIsEditable,
     toggleBoolean,
@@ -60,6 +59,9 @@ import {
     computeFillEdits,
 } from "../rendering/index.ts";
 import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
+import { coercePasteCell, type CoercePasteValueCallback } from "../rendering/paste-coercion.ts";
+import { applyCellValidation, type ValidateCellCallback } from "../rendering/validate-cell.ts";
+import { copyHeaderRow } from "../rendering/copy-paste.ts";
 import { sizeColumns, applyColumnGrow } from "../rendering/column-sizer.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import type {
@@ -90,8 +92,6 @@ import type {
     SelectionBehaviorOptions,
     CellBuffer,
     CopyBuffer,
-    CustomCell,
-    CustomRenderer,
     BooleanCell,
     ProvideEditorCallbackResult,
     CellEditorHandle,
@@ -128,6 +128,7 @@ import { MangledLayoutCache, type MangledLayout, type RowMarkerColumnSpec } from
 import {
     asConsumerSelection,
     EMPTY_SELECTION,
+    mangleSelection,
     MangledSelectionCache,
     unmangleSelection,
     type ConsumerSelection,
@@ -551,6 +552,56 @@ export interface GridHostArgs {
      */
     readonly onItemHovered?: (args: GridMouseEventArgs) => void;
 
+    // --- Phase 9g: data / editing ----------------------------------------------------------------
+
+    /**
+     * Reject or normalise an edit before it commits. Mirrors source's `validateCell`, and applies
+     * in exactly the same place source applies it: the **overlay editor** only, on its initial value
+     * and on every change. Paste, fill, cut and delete deliberately do not consult it.
+     *
+     * Return `false` to mark the value invalid -- the editor stays open, but closing it commits
+     * nothing. Return a `ValidatedGridCell` to coerce instead, which is how "strip non-digits as you
+     * type" is expressed. `cell` is in your own coordinate space (no row-marker column).
+     *
+     * **Known divergence on the coercion path.** Source re-renders its editor from the coerced
+     * value, so the user sees the correction as they type. This port's editors are DOM factories
+     * (`CellEditorHandle`) with no channel to push a value back in, so a coerced value is what gets
+     * *committed* while the editor keeps showing what was typed until it closes. Rejection
+     * (`false`) behaves identically to source. Closing that gap means adding a `setValue` to
+     * `CellEditorHandle` and updating all 26 renderers, which is a bigger change than 9g.
+     */
+    readonly validateCell?: ValidateCellCallback;
+
+    /**
+     * Take over paste coercion for a cell. Mirrors source's `coercePasteValue`; consulted **before**
+     * the built-in per-kind rules and before any `CustomRenderer.onPaste`, and winning outright when
+     * it returns an editable cell of the same kind. Return `undefined` to fall through to the
+     * default behaviour for that cell.
+     */
+    readonly coercePasteValue?: CoercePasteValueCallback;
+
+    /**
+     * Prepend a row of column titles to the copy buffer. Mirrors source's `copyHeaders`, including
+     * its default -- and, like source, this affects copy/cut only, never what a paste expects to
+     * read back.
+     * @defaultValue false
+     */
+    readonly copyHeaders?: boolean;
+
+    /**
+     * Intercept the Delete/Backspace (and cut) clearing of the current selection. Mirrors source's
+     * `onDelete`, including its three return shapes:
+     *
+     * - `false` cancels the delete entirely.
+     * - `true` (or no callback) clears the current selection, as before.
+     * - a `GridSelection` clears **that** selection instead, which is how "delete whole columns
+     *   rather than cells" is expressed.
+     *
+     * The selection passed in, and any selection returned, are in your own coordinate space (no
+     * row-marker column) -- source shifts both ways at this boundary and so does this port.
+     */
+    readonly onDelete?: (selection: GridSelection) => boolean | GridSelection;
+
     // --- Phase 9g: editing behaviour flags -------------------------------------------------------
 
     /**
@@ -693,6 +744,11 @@ interface ResolvedGridHostArgs {
     readonly onHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
     readonly onGroupHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
     readonly onItemHovered: ((args: GridMouseEventArgs) => void) | undefined;
+
+    readonly validateCell: ValidateCellCallback | undefined;
+    readonly coercePasteValue: CoercePasteValueCallback | undefined;
+    readonly copyHeaders: boolean;
+    readonly onDelete: ((selection: GridSelection) => boolean | GridSelection) | undefined;
 
     readonly editOnType: boolean;
     readonly trapFocus: boolean;
@@ -844,6 +900,13 @@ interface OverlayState {
     handle: CellEditorHandle;
     /** Live in-progress value, updated by the editor's `onChange` -- read back on commit. */
     currentCell: GridCell;
+    /** 9g: `false` once `validateCell` has rejected the live value. The editor stays open and
+     *  usable; the commit is what is suppressed, mirroring source's `isValid` gate
+     *  (`data-grid-overlay-editor.tsx:83-91`). */
+    isValid: boolean;
+    /** 9g: what `validateCell` is given as `prevValue` -- the value *before* the change being
+     *  validated, which source tracks in `lastValueRef`. */
+    lastValue: GridCell;
     /** Set once `finish()` has run, to make it idempotent against being called twice (e.g. both
      * the editor's own Enter keydown AND a subsequent click-outside on the same tick). */
     finished: boolean;
@@ -1357,6 +1420,11 @@ export class GridHostController {
             onHeaderContextMenu: args.onHeaderContextMenu,
             onGroupHeaderContextMenu: args.onGroupHeaderContextMenu,
             onItemHovered: args.onItemHovered,
+
+            validateCell: args.validateCell,
+            coercePasteValue: args.coercePasteValue,
+            copyHeaders: args.copyHeaders === true,
+            onDelete: args.onDelete,
 
             editOnType: args.editOnType ?? true,
             trapFocus: args.trapFocus === true,
@@ -3588,8 +3656,9 @@ export class GridHostController {
         // it) can style itself from the same values the canvas drew that cell with.
         this.applyThemeCssVariables(container, theme);
 
+        const realLocation: Item = [mCol - args.rowMarkerOffset, mRow];
         const state: OverlayState = {
-            realLocation: [mCol - args.rowMarkerOffset, mRow],
+            realLocation,
             mangledLocation,
             container,
             // `handle` is assigned immediately below -- `editorFn` is called synchronously and
@@ -3597,6 +3666,10 @@ export class GridHostController {
             // can't fire before `editorFn` returns. Cast avoids a chicken-and-egg `undefined` slot.
             handle: undefined as unknown as CellEditorHandle,
             currentCell: cell,
+            // 9g: source validates the *initial* value too, so an editor opened over an
+            // already-invalid cell starts out unable to commit (`data-grid-overlay-editor.tsx:82`).
+            isValid: applyCellValidation(realLocation, cell, cell, args.validateCell).isValid,
+            lastValue: cell,
             finished: false,
         };
 
@@ -3606,7 +3679,19 @@ export class GridHostController {
             theme,
             validatedSelection: undefined,
             onChange: newValue => {
-                state.currentCell = newValue as GridCell;
+                // 9g: `validateCell` runs on every change, exactly where source runs it (its
+                // `setTempValue`). A `false` result leaves the value in the editor but blocks the
+                // commit; a returned cell replaces the value outright, which is how a consumer
+                // normalises as the user types.
+                const validation = applyCellValidation(
+                    state.realLocation,
+                    newValue as GridCell,
+                    state.lastValue,
+                    args.validateCell
+                );
+                state.isValid = validation.isValid;
+                state.currentCell = validation.value;
+                state.lastValue = validation.value;
             },
             onFinishedEditing: (newValue, movement) => {
                 this.finishOverlay(args, newValue as GridCell | undefined, movement ?? [0, 0]);
@@ -3748,8 +3833,12 @@ export class GridHostController {
         state.handle.destroy();
         state.container.remove();
 
-        if (newValue !== undefined) {
-            this.commitCellEdit(args, state.mangledLocation, newValue);
+        // 9g: `validateCell` returning `false` for the live value blocks the commit but not the
+        // close or the subsequent cursor movement -- source's `onFinishEditing(isValid ? newCell :
+        // undefined, movement)` (`data-grid-overlay-editor.tsx:87-91`) exactly.
+        const committed = state.isValid ? newValue : undefined;
+        if (committed !== undefined) {
+            this.commitCellEdit(args, state.mangledLocation, committed);
         } else {
             this.scheduleFullRedraw();
         }
@@ -3768,7 +3857,9 @@ export class GridHostController {
     // (`data-editor-fns.ts`), which `onCut`'s simpler port (Phase 3c, predates real cell renderers
     // existing) couldn't do yet.
     private deleteSelection(args: ResolvedGridHostArgs): void {
-        const region = this.selectedRegion(args);
+        const target = this.resolveDeleteTarget(args);
+        if (target === undefined) return;
+        const region = this.selectedRegion(args, target);
         if (region === undefined) return;
         const colStart = Math.max(region.colStart, args.rowMarkerOffset);
         if (colStart >= region.colEnd || region.rowStart >= region.rowEnd) return;
@@ -3792,6 +3883,25 @@ export class GridHostController {
             args.onCellsEdited?.(edits);
             this.drawWithDamage(new CellSet(damaged));
         }
+    }
+
+    /**
+     * 9g: runs the consumer's `onDelete` and resolves what (if anything) should actually be cleared.
+     *
+     * Returns `undefined` when the consumer cancelled. Otherwise returns the selection to clear, in
+     * mangled space -- either the live one, or the consumer's replacement shifted back in. Mirrors
+     * source's `onDelete` wrapper (`data-editor.tsx:1068-1080`), which does the same shift both ways
+     * so the callback only ever sees the consumer's own column indices.
+     *
+     * Shared by Delete/Backspace and cut, exactly as source shares it.
+     */
+    private resolveDeleteTarget(args: ResolvedGridHostArgs): MangledSelection | undefined {
+        const onDelete = args.onDelete;
+        if (onDelete === undefined) return this.mangledSelection(args);
+        const result = onDelete(this.selection);
+        if (result === false) return undefined;
+        if (result === true) return this.mangledSelection(args);
+        return mangleSelection(asConsumerSelection(result), args.rowMarkerOffset);
     }
 
     // --- keyboard nav (Phase 3b) -----------------------------------------------------------------
@@ -4408,9 +4518,12 @@ export class GridHostController {
      *  caller has no cell for it). The `rows`/`columns` CompactSelection branches below already used
      *  `args.rows` and needed no change. */
     private selectedRegion(
-        args: ResolvedGridHostArgs
+        args: ResolvedGridHostArgs,
+        // 9g: `onDelete` may answer with a *different* selection to clear, so the region has to be
+        // computable from something other than the live one. Defaults to the live selection.
+        selection?: MangledSelection
     ): { colStart: number; colEnd: number; rowStart: number; rowEnd: number } | undefined {
-        const sel = this.mangledSelection(args);
+        const sel = selection ?? this.mangledSelection(args);
         const { mappedColumns } = this.computeMangledLayout(args);
         if (sel.current !== undefined) {
             const r = sel.current.range;
@@ -4496,70 +4609,29 @@ export class GridHostController {
                 }
                 fallback.push(rowCells);
             }
-            return getCopyBufferContents(fallback, columnIndexes);
+            return getCopyBufferContents(this.withCopyHeaders(args, fallback, columnIndexes), columnIndexes);
         }
 
-        return getCopyBufferContents(cells, columnIndexes);
+        return getCopyBufferContents(this.withCopyHeaders(args, cells, columnIndexes), columnIndexes);
+    }
+
+    /** 9g: `copyHeaders` prepends one `Text` cell per copied column carrying its title, exactly as
+     *  source does (`data-editor.tsx:3787-3796`). Off by default, and a no-op then. */
+    private withCopyHeaders(
+        args: ResolvedGridHostArgs,
+        cells: CellArray,
+        columnIndexes: readonly number[]
+    ): CellArray {
+        if (!args.copyHeaders) return cells;
+        return [copyHeaderRow(args.columns, columnIndexes), ...cells];
     }
 
     // Coerces a parsed paste buffer entry into a replacement `GridCell` matching `existing`'s kind.
-    // Source dispatches this to each cell renderer's own `onPaste` (or a `coercePasteValue` prop).
-    // This port now does the same for `GridCellKind.Custom` (added Phase 5c -- see below); the
-    // built-in kinds below remain a direct, minimal equivalent covering the data kinds Phase 1's
-    // data model supports, inverse of `copy-paste.ts`'s `convertCellToBuffer` for the same kinds.
+    // The rules themselves moved to `rendering/paste-coercion.ts` in Phase 9g so they could be unit
+    // tested (this class can't be imported from vitest); this wrapper is just the two args the
+    // coercion needs plucked off `ResolvedGridHostArgs`.
     private pasteValueIntoCell(args: ResolvedGridHostArgs, existing: GridCell, buf: CellBuffer): GridCell | undefined {
-        const raw = Array.isArray(buf.rawValue)
-            ? buf.rawValue.join(", ")
-            : (buf.rawValue?.toString() ?? buf.formatted.toString());
-        switch (existing.kind) {
-            case GridCellKind.Text:
-                return { ...existing, data: raw, displayData: raw };
-            case GridCellKind.Number: {
-                const trimmed = raw.trim();
-                if (trimmed === "") return { ...existing, data: undefined, displayData: "" };
-                const n = Number(trimmed);
-                if (Number.isNaN(n)) return undefined;
-                return { ...existing, data: n, displayData: raw };
-            }
-            case GridCellKind.Boolean: {
-                const upper = raw.trim().toUpperCase();
-                const data =
-                    upper === "TRUE"
-                        ? true
-                        : upper === "FALSE"
-                          ? false
-                          : upper === "INDETERMINATE"
-                            ? BooleanIndeterminate
-                            : BooleanEmpty;
-                return { ...existing, data };
-            }
-            case GridCellKind.Uri:
-                return { ...existing, data: raw };
-            case GridCellKind.Markdown:
-                return { ...existing, data: raw };
-            case GridCellKind.Custom: {
-                // Phase 5c fix: `isReadWriteCell` (checked by this method's only caller, `onPaste`
-                // below) DOES include `GridCellKind.Custom` (`readonly !== true`) -- the old comment
-                // here claiming Custom was "not writable via isReadWriteCell anyway" was stale/wrong
-                // for this kind specifically, and this `default` branch's unconditional `undefined`
-                // silently made paste into every `CustomRenderer` cell (Phase 5a/5b/5c's extra
-                // cells) a no-op. Dispatches to the matching `CustomRenderer.onPaste` (source's own
-                // mechanism, `CustomRenderer<T>["onPaste"]`, `cell-types.ts`), same as every other
-                // kind above dispatches to its own paste-coercion rule.
-                const renderer = args.getCellRenderer(existing) as CustomRenderer<CustomCell> | undefined;
-                if (renderer?.onPaste === undefined) return undefined;
-                const newData = renderer.onPaste(raw, existing.data);
-                if (newData === undefined) return undefined;
-                return { ...existing, data: newData };
-            }
-            default:
-                // Image/Bubble/Drilldown/RowID/Loading/Protected: not writable via `isReadWriteCell`
-                // anyway (this method is only called for cells that already passed that check), so
-                // `default` is unreachable for those kinds in practice -- returned as a safe no-op
-                // rather than asserted, since new GridCell kinds could be added upstream without
-                // this switch being updated in lockstep.
-                return undefined;
-        }
+        return coercePasteCell(existing, buf, args.getCellRenderer, args.coercePasteValue);
     }
 
     // Inverse of `pasteValueIntoCell` for the "cut" gesture -- resets a cell to its kind-appropriate
@@ -4596,7 +4668,12 @@ export class GridHostController {
         if (this.destroyed || !this.isFocused) return;
         this.onCopy(ev);
         const args = this.resolveArgs();
-        const region = this.selectedRegion(args);
+        // 9g: cut is copy + delete, so it runs through the same `onDelete` gate source puts on it
+        // (`data-editor.tsx:3898`) -- a consumer that vetoes deletion vetoes the clearing half of a
+        // cut too, and the copy half still happened.
+        const target = this.resolveDeleteTarget(args);
+        if (target === undefined) return;
+        const region = this.selectedRegion(args, target);
         if (region === undefined) return;
         const colStart = Math.max(region.colStart, args.rowMarkerOffset);
         const edits: { location: Item; value: GridCell }[] = [];

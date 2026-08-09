@@ -119,8 +119,16 @@ export type {
 
 // Copy/paste (Phase 3c) -- pure clipboard-buffer construction/parsing, ported from source's
 // `data-editor/copy-paste.ts` (+ `unquote()` from `data-editor/data-editor-fns.ts`).
-export { getCopyBufferContents, decodeHTML, unquote } from "./copy-paste.ts";
+export { getCopyBufferContents, copyHeaderRow, decodeHTML, unquote } from "./copy-paste.ts";
 export type { CellBuffer, StringArrayCellBuffer, BasicCellBuffer, CopyBuffer } from "./copy-paste.ts";
+
+// Paste coercion + edit validation (Phase 9g). The rules `<GlideDataGrid>` runs internally, split
+// out of `GridHostController` so they can be unit-tested; the callback *types* are the reason these
+// are re-exported here, since `@coercePasteValue` / `@validateCell` are public args.
+export { coercePasteCell, pasteBufferToString } from "./paste-coercion.ts";
+export type { CoercePasteValueCallback } from "./paste-coercion.ts";
+export { applyCellValidation } from "./validate-cell.ts";
+export type { ValidateCellCallback, CellValidationResult } from "./validate-cell.ts";
 
 // CSS-variable theming (Phase 9). Builds a `Theme` overlay from CSS custom properties resolved off
 // a real element, and keeps it in sync as the page's theme changes -- the bridge that lets a

@@ -51,7 +51,9 @@ import {
 import { cached } from "@glimmer/tracking";
 import {
     allExtraCells,
+    CompactSelection,
     getDataEditorDarkTheme,
+    GridCellKind,
     isSizedGridColumn,
     type AutoGridColumn,
     type SizedGridColumn,
@@ -70,6 +72,8 @@ import {
     type SpriteMap,
     type GridMouseEventArgs,
     type SelectionBlending,
+    type ValidateCellCallback,
+    type CoercePasteValueCallback,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -208,6 +212,10 @@ const SELECTION_BLENDINGS: readonly SelectionBlending[] = ["exclusive", "mixed",
 // `"no-editor"` is the value worth having a demo for: the ring is drawn normally, and vanishes for
 // as long as an overlay editor is open over the cell.
 const FOCUS_RING_MODES: readonly (boolean | "no-editor")[] = [true, "no-editor", false];
+
+// 9g: `onDelete`'s three return shapes, one per cycle position -- `undefined` (no callback at all),
+// `false` (veto) and a replacement `GridSelection` (delete something else instead).
+const DELETE_MODES = ["normal", "veto", "whole-column"] as const;
 
 export default class DemoGrid extends Component {
     constructor(...args: ConstructorParameters<typeof Component>) {
@@ -548,6 +556,94 @@ export default class DemoGrid extends Component {
         this.focusRingIndex = (this.focusRingIndex + 1) % FOCUS_RING_MODES.length;
     };
 
+    // --- Phase 9g: validation, paste coercion, copy headers, delete interception ------------------
+    // Four args that change what an *edit* does rather than what the grid looks like, so each one
+    // gets both a toggle and a line in the status row -- otherwise "my edit didn't stick" and "the
+    // grid is broken" are the same observation.
+    @tracked useValidation = false;
+    @tracked useCoercion = false;
+    @tracked copyHeaders = false;
+    @tracked deleteModeIndex = 0;
+    /** What the last guarded edit/delete decided. Rendered in the status row. */
+    @tracked lastGuard: string | undefined;
+
+    get deleteMode(): (typeof DELETE_MODES)[number] {
+        return DELETE_MODES[this.deleteModeIndex] ?? "normal";
+    }
+
+    toggleValidation = (): void => {
+        this.useValidation = !this.useValidation;
+    };
+
+    toggleCoercion = (): void => {
+        this.useCoercion = !this.useCoercion;
+    };
+
+    toggleCopyHeaders = (): void => {
+        this.copyHeaders = !this.copyHeaders;
+    };
+
+    cycleDeleteMode = (): void => {
+        this.deleteModeIndex = (this.deleteModeIndex + 1) % DELETE_MODES.length;
+    };
+
+    /** Rejects a blank text value and a negative number. Deliberately a *rejection* rather than a
+     *  coercion: rejection is the half of `validateCell` this port implements exactly like source
+     *  (see the arg's doc comment for the coercion caveat). The editor stays open and usable; what
+     *  is suppressed is the commit. */
+    get validateCell(): ValidateCellCallback | undefined {
+        if (!this.useValidation) return undefined;
+        return (cell, newValue) => {
+            if (newValue.kind === GridCellKind.Text && newValue.data.trim() === "") {
+                this.lastGuard = `validateCell rejected an empty value at col ${cell[0]}`;
+                return false;
+            }
+            if (newValue.kind === GridCellKind.Number && (newValue.data ?? 0) < 0) {
+                this.lastGuard = `validateCell rejected a negative number at col ${cell[0]}`;
+                return false;
+            }
+            return true;
+        };
+    }
+
+    /** Upper-cases pasted text before the built-in rules see it. Returning `undefined` for any other
+     *  kind is what "fall through to the default" looks like. */
+    get coercePasteValue(): CoercePasteValueCallback | undefined {
+        if (!this.useCoercion) return undefined;
+        return (val, cell) => {
+            if (cell.kind !== GridCellKind.Text) return undefined;
+            const data = val.toUpperCase();
+            this.lastGuard = `coercePasteValue upper-cased "${val}"`;
+            return { ...cell, data, displayData: data };
+        };
+    }
+
+    /** All three of source's return shapes, one per cycle position: `true` (normal), `false` (veto),
+     *  and a replacement `GridSelection` -- here the whole column under the active cell, which is
+     *  the "delete columns, not cells" case this arg exists for. */
+    get onDelete(): ((selection: GridSelection) => boolean | GridSelection) | undefined {
+        if (this.deleteMode === "normal") return undefined;
+        return (selection: GridSelection): boolean | GridSelection => {
+            if (this.deleteMode === "veto") {
+                this.lastGuard = "onDelete vetoed the delete";
+                return false;
+            }
+            const current = selection.current;
+            if (current === undefined) return true;
+            const col = current.cell[0];
+            this.lastGuard = `onDelete widened the delete to all of column ${col}`;
+            return {
+                current: {
+                    cell: [col, 0],
+                    range: { x: col, y: 0, width: 1, height: this.rows },
+                    rangeStack: [],
+                },
+                rows: CompactSelection.empty(),
+                columns: CompactSelection.empty(),
+            };
+        };
+    }
+
     // --- Phase 10a: the notification-only args, surfaced as a live status line ------------------
     // `@onSelectionChanged` and `@onVisibleRegionChanged` are pure notifications. Rendering them
     // costs nothing and turns two otherwise-invisible callbacks into something a regression can
@@ -691,6 +787,18 @@ export default class DemoGrid extends Component {
                 <button type="button" class="gdg-full__toggle" data-test-focus-ring-toggle {{on "click" this.cycleFocusRing}}>
                     Focus ring: <b>{{this.focusRingLabel}}</b>
                 </button>
+                <button type="button" class="gdg-full__toggle" data-test-validate-toggle {{on "click" this.toggleValidation}}>
+                    Validate edits: <b>{{if this.useValidation "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-coerce-paste-toggle {{on "click" this.toggleCoercion}}>
+                    Coerce paste: <b>{{if this.useCoercion "UPPER" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-copy-headers-toggle {{on "click" this.toggleCopyHeaders}}>
+                    Copy headers: <b>{{if this.copyHeaders "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-delete-mode-toggle {{on "click" this.cycleDeleteMode}}>
+                    Delete: <b>{{this.deleteMode}}</b>
+                </button>
             </div>
 
             {{! Notification-only args, rendered so they are observable rather than merely wired. }}
@@ -699,6 +807,9 @@ export default class DemoGrid extends Component {
                 <span>Hover: <b data-test-hover-summary>{{this.hoverSummary}}</b></span>
                 <span>Visible: <b data-test-visible-region>{{this.visibleRegionSummary}}</b></span>
                 {{#if this.lastFill}}<span>Last fill: <b data-test-last-fill>{{this.lastFill}}</b></span>{{/if}}
+                {{! Phase 9g: an edit that is silently refused is indistinguishable from a broken
+                    grid, so every guard decision is reported. }}
+                {{#if this.lastGuard}}<span>Guard: <b data-test-last-guard>{{this.lastGuard}}</b></span>{{/if}}
                 {{! Cell-carried callbacks (button / uri / links) have no other way to be seen. }}
                 <span class="gdg-full__hint">
                     Drag a row by its marker to reorder &middot; drag the selection's corner handle to fill
@@ -796,6 +907,10 @@ export default class DemoGrid extends Component {
                     @editOnType={{this.editOnType}}
                     @trapFocus={{this.trapFocus}}
                     @drawFocusRing={{this.drawFocusRing}}
+                    @validateCell={{this.validateCell}}
+                    @coercePasteValue={{this.coercePasteValue}}
+                    @copyHeaders={{this.copyHeaders}}
+                    @onDelete={{this.onDelete}}
                     @onRowMoved={{this.onRowMovedIfAvailable}}
                     @fillHandle={{this.useFillHandle}}
                     @allowedFillDirections={{this.allowedFillDirections}}

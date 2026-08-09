@@ -15,7 +15,7 @@
 //     environment, which this harness does not yet have.
 //  4. Prefer a table (`it.each`) when the same assertion shape repeats over many inputs.
 import { describe, expect, it } from "vitest";
-import { getCopyBufferContents, unquote } from "./copy-paste.ts";
+import { getCopyBufferContents, copyHeaderRow, unquote } from "./copy-paste.ts";
 import { GridCellKind, type GridCell } from "./data-grid-types.ts";
 
 function textCell(data: string): GridCell {
@@ -119,5 +119,28 @@ describe("getCopyBufferContents", () => {
     it("renders a number cell's value, and an undefined number as empty", () => {
         const { textPlain } = getCopyBufferContents([[numberCell(42), numberCell(undefined)]], [0]);
         expect(textPlain).toBe("42\t");
+    });
+});
+
+// Phase 9g: `copyHeaders`.
+describe("copyHeaderRow", () => {
+    const columns = [{ title: "One" }, { title: "Two" }, { title: "Three" }];
+
+    it("returns one non-overlay Text cell per copied column, in copy order", () => {
+        expect(copyHeaderRow(columns, [2, 0])).toEqual([
+            { kind: GridCellKind.Text, data: "Three", displayData: "Three", allowOverlay: false },
+            { kind: GridCellKind.Text, data: "One", displayData: "One", allowOverlay: false },
+        ]);
+    });
+
+    it("prepends cleanly onto a copy buffer", () => {
+        const { textPlain } = getCopyBufferContents([copyHeaderRow(columns, [0, 1]), [textCell("a"), textCell("b")]], [0, 1]);
+        expect(textPlain).toBe("One\tTwo\na\tb");
+    });
+
+    it("yields an empty title rather than throwing for an out-of-range column", () => {
+        expect(copyHeaderRow(columns, [9])).toEqual([
+            { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false },
+        ]);
     });
 });

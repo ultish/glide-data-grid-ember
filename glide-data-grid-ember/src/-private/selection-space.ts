@@ -113,6 +113,19 @@ export class MangledSelectionCache {
     }
 }
 
+/**
+ * Consumer -> mangled, **uncached**, for a selection that did not come from `this.selection`.
+ *
+ * The only caller today is `onDelete` answering with a selection of its own (9g). Deliberately does
+ * not go through `MangledSelectionCache`: that cache's single slot exists to keep
+ * `DrawGridArg.selection` identity-stable across draws, and pushing a one-off value through it would
+ * evict the entry the blit fast path depends on -- for a value that never reaches `DrawGridArg` at
+ * all.
+ */
+export function mangleSelection(selection: ConsumerSelection, rowMarkerOffset: number): MangledSelection {
+    return shiftSelection(selection, rowMarkerOffset) as MangledSelection;
+}
+
 /** Mangled -> consumer. The inverse of `MangledSelectionCache.get`, and the only way back. */
 export function unmangleSelection(selection: MangledSelection, rowMarkerOffset: number): ConsumerSelection {
     return asConsumerSelection(shiftSelection(selection, -rowMarkerOffset));

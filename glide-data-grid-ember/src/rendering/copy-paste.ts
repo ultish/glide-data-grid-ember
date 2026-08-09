@@ -247,6 +247,28 @@ export function getCopyBufferContents(
     };
 }
 
+/**
+ * The header row source prepends to the copy buffer when `copyHeaders` is on
+ * (`data-editor.tsx:3787-3796`) -- one non-overlay `Text` cell per copied column, carrying the
+ * column's `title`.
+ *
+ * `columnIndexes` is in the **consumer's** column space (no row-marker column), the same space
+ * `getCopyBufferContents` takes and the same space `columns` is indexed in. A column index with no
+ * matching column yields an empty title rather than throwing: the copied region is clamped
+ * elsewhere, and a missing header is a strictly better failure than a lost copy.
+ *
+ * @category Copy/Paste
+ */
+export function copyHeaderRow(
+    columns: readonly { readonly title: string }[],
+    columnIndexes: readonly number[]
+): GridCell[] {
+    return columnIndexes.map(index => {
+        const title = columns[index]?.title ?? "";
+        return { kind: GridCellKind.Text, data: title, displayData: title, allowOverlay: false };
+    });
+}
+
 /** @category Copy/Paste */
 export function decodeHTML(html: string): CopyBuffer | undefined {
     const fragment = document.createElement("html");

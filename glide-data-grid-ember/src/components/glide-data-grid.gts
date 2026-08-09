@@ -65,6 +65,8 @@ import type {
     FillPatternEventArgs,
     GridMouseEventArgs,
     SelectionBlending,
+    ValidateCellCallback,
+    CoercePasteValueCallback,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -264,6 +266,17 @@ export interface GlideDataGridSignature {
         // / `outOfBoundsKind` discriminants.
         onItemHovered?: (args: GridMouseEventArgs) => void;
 
+        // Data / editing (Phase 9g) -- forwarded straight through to `GridHostArgs`; see that
+        // interface's doc comments, especially `validateCell`'s note about the coercion path.
+        // `@validateCell` applies to the overlay editor only (as in source), `@coercePasteValue`
+        // runs ahead of the built-in paste rules, `@copyHeaders` prepends column titles to a
+        // copy/cut, and `@onDelete` can veto or redirect a Delete/Backspace (and the clearing half
+        // of a cut).
+        validateCell?: ValidateCellCallback;
+        coercePasteValue?: CoercePasteValueCallback;
+        copyHeaders?: boolean;
+        onDelete?: (selection: GridSelection) => boolean | GridSelection;
+
         // Editing behaviour (Phase 9g). `@editOnType` (default `true`) is what makes typing a
         // printable character over the selected cell open its editor seeded with that character;
         // `@trapFocus` (default `false`) stops an at-the-edge arrow key escaping to the next tab
@@ -374,6 +387,10 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onHeaderContextMenu: this.args.onHeaderContextMenu,
         onGroupHeaderContextMenu: this.args.onGroupHeaderContextMenu,
         onItemHovered: this.args.onItemHovered,
+        validateCell: this.args.validateCell,
+        coercePasteValue: this.args.coercePasteValue,
+        copyHeaders: this.args.copyHeaders,
+        onDelete: this.args.onDelete,
         editOnType: this.args.editOnType,
         trapFocus: this.args.trapFocus,
         drawFocusRing: this.args.drawFocusRing,
