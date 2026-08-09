@@ -59,7 +59,7 @@
 // version. (This module's outer key is the records *array*, and the per-row caches are positional,
 // but the same reasoning is what makes it sound.)
 //
-// **Apollo Client 3 is the opposite case, and was named wrongly here until 2026-08-09.** Its
+// **Apollo Client is the opposite case, and was named wrongly here until 2026-08-09.** Its
 // `InMemoryCache` is *immutable*: a change produces a new object, and unchanged entities keep
 // referential equality (result caching, field-level dependency tracking). So identity there is a
 // reliable change signal rather than a misleading one, and the anti-pattern above does not apply.
@@ -67,7 +67,9 @@
 // on every cache update, `cachesReusable` is false and **every** row re-projects, even when one
 // field changed. That is a cost, not a correctness problem, and it is off the paint path. An opt-in
 // record-keyed row cache would fix it; nobody has measured that it hurts yet. See the guide's
-// "Ember Data, GraphQL, and Apollo" chapter, which documents the trade-off consumer-side.
+// "Ember Data, GraphQL, and Apollo" chapter, which documents the trade-off consumer-side (and
+// targets Apollo Client 4 -- immutability is unchanged from v3, but v4 removed the
+// `@apollo/client/core` entry point and `canonizeResults`).
 //
 // -------------------------------------------------------------------------------------------
 // IDENTITY STABILITY -- read `column-sort.ts`'s header and PORTING-NOTES.md standing lesson #1.

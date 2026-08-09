@@ -244,7 +244,7 @@ personUpdates = useSubscription(this, () => [
         },
         {
             kind: "p",
-            text: "**Now the part that is genuinely non-obvious, and the reason this section exists.** Apollo's `InMemoryCache` does *result caching* with field-level dependency tracking: it returns **referentially identical** result objects while the underlying data is unchanged, and produces **new** objects when it changes. So one subscription updating one field on one entity gives you a new object for *that* entity, the identical object for every unchanged sibling — and a **new containing array**, because the array holds a changed child. Ember Data behaves the exact opposite way. Read this table in both columns before you carry a habit from one to the other:",
+            text: "**Now the part that is genuinely non-obvious, and the reason this section exists.** Apollo's `InMemoryCache` is *immutable*: it never edits an entity in place, so a change produces a **new** object, and a **new containing array** for any array holding a changed child. Its result caching, which tracks dependencies at field level, also hands back the *same* result object for repeated reads while nothing underneath has changed. Ember Data behaves the exact opposite way. Read this table in both columns before you carry a habit from one to the other:",
         },
         {
             kind: "table",
@@ -260,6 +260,10 @@ personUpdates = useSubscription(this, () => [
                     "**safe** — a changed entity is a new key",
                 ],
             ],
+        },
+        {
+            kind: "note",
+            text: "**Version note — this chapter targets Apollo Client 4.** The immutability above is a property of the cache's design and holds in both v3 and v4, which is what the grid-facing advice rests on. Two v4 specifics worth knowing: the v3 `@apollo/client/core` entry point was **removed** (import from `@apollo/client`), and `canonizeResults` was **removed** because it leaked memory — so objects that were previously made referentially equal *across different queries* may no longer be. That does not affect anything above (a changed entity still yields a new object, and its containing array is still new); it only means the `raw === vm.raw` early-out suggested below can miss more often and fall back to comparing fields, which is a smaller win, not a wrong result. v4 also swapped `zen-observable` for `rxjs` and `ObservableQuery` no longer inherits from `Observable` — irrelevant to the grid, but exactly the sort of change a wrapper library sits on top of, so check your `glimmer-apollo` version supports v4.",
         },
         {
             kind: "note",
