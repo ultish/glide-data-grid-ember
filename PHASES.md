@@ -689,7 +689,10 @@ only by nobody having needed them. Each is small on its own — the value is in 
 - **Assorted nav variants** — Tab/Shift+Tab aliasing, alt+Arrow "free move", primary+shift
   jump-to-edge selection, row/column space-bar select shortcuts. Each `S`, all in one place
   (`onKeyDown`).
-- **`links-cell`'s editor re-reads the original link list** *(NEW — found 2026-08-08 during the 9q
+- ~~**`links-cell`'s editor re-reads the original link list**~~ — **ALREADY DONE** (verified
+  2026-08-09; fixed at some point after this entry was written, and the entry was never updated).
+  `links-cell.ts` now holds a `currentValue` working copy and never reads back through `p.value`,
+  with a comment describing precisely the failure below. Kept for the record: *(NEW — found 2026-08-08 during the 9q
   CSS migration, deliberately not fixed there since it is orthogonal to styling)*. `currentLinks()`
   reads `p.value.data.links`, but `p.value` is the *original* cell object: `openOverlay` builds the
   editor-props literal once and `onChange` only ever writes `state.currentCell`. So the
@@ -698,13 +701,27 @@ only by nobody having needed them. Each is small on its own — the value is in 
   Per-keystroke title/URL edits are unaffected (they never call `render()`). The fix is for the editor
   to hold its own working copy, as the other stateful editors do. Worth checking whether any *other*
   `provideEditor` re-reads `p.value` after an `onChange` — this may not be the only one. `S`.
-- **Overlay editors can be clipped at the viewport edge** *(NEW — 2026-08-08 audit; this one is a
+- ~~**Overlay editors can be clipped at the viewport edge**~~ — **ALREADY DONE** (verified
+  2026-08-09). `grid-host-controller.ts` has a real `IntersectionObserver`-based stay-on-screen
+  path (`:4324-4360`, plus `OverlayState.stopStayOnScreen`), so the claim "there is **no
+  `IntersectionObserver` anywhere in this addon**" below is now false. Kept for the record: *(NEW — 2026-08-08 audit; this one is a
   latent user-visible defect, not just a missing feature)*. Source has
   `internal/data-grid-overlay-editor/use-stay-on-screen.ts` (61 lines): an `IntersectionObserver` that
   detects when an open editor overflows the window and nudges it back horizontally. There is **no
   `IntersectionObserver` anywhere in this addon**, so an editor opened on a cell near the right edge
   of the window is simply cut off. Nobody has hit it because every demo opens editors mid-grid — the
   same "dormant until a demo switches it on" pattern that produced the Phase 7e batch. `S`.
+
+> **Audit note, 2026-08-09.** Two entries in this group were found already fixed when someone went
+> to work on them, and one entry's supporting claim ("there is no `IntersectionObserver` anywhere in
+> this addon") had become false. **Still genuinely open here:** controlled-selection mode, span/merged
+> cell selection, the `onSelect` renderer hook (the type exists in `cell-types.ts:92` but nothing
+> calls it — checked), keybinding remapping, and the assorted nav variants.
+>
+> This is the same rot direction PORTING-NOTES.md records for consumer docs: **the negative claims go
+> stale, the descriptive ones don't.** A backlog is a doc too. Verify an item against the code before
+> scheduling work on it — grepping for the symbol takes a minute and two of these would have been
+> caught.
 
 ### 9i — Rendering / layout gaps
 
