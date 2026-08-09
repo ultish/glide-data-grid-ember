@@ -33,21 +33,9 @@ export const themingSection: Section = {
             rows: [
                 ["base", "built in (`getDataEditorTheme()`)", "everything"],
                 ["global", "`<GlideDataGrid @theme={{...}}>`", "everything"],
-                [
-                    "column",
-                    "`themeOverride` on a `GridColumn`",
-                    "that column's header **and** all of its cells",
-                ],
-                [
-                    "row",
-                    "`<GlideDataGrid @getRowThemeOverride={{fn}}>`",
-                    "every cell in that row — *not* the header",
-                ],
-                [
-                    "cell",
-                    "`themeOverride` on the `GridCell` you return",
-                    "that one cell; beats column and row",
-                ],
+                ["column", "`themeOverride` on a `GridColumn`", "that column's header **and** all of its cells"],
+                ["row", "`<GlideDataGrid @getRowThemeOverride={{fn}}>`", "every cell in that row — *not* the header"],
+                ["cell", "`themeOverride` on the `GridCell` you return", "that one cell; beats column and row"],
             ],
         },
         {
@@ -91,7 +79,7 @@ export default class MyGrid extends Component {
   toggleTheme = () => { this.isDark = !this.isDark; };
 
   <template>
-    <button type="button" {{on "click" this.toggleTheme}}>Toggle theme</button>
+    <button class="btn btn-xs" type="button" {{on "click" this.toggleTheme}}>Toggle theme</button>
     <GlideDataGrid @columns={{this.columns}} @rows={{this.rows}}
                    @getCellContent={{this.getCellContent}} @theme={{this.theme}} />
   </template>
@@ -126,7 +114,7 @@ const columns = [
 
         {
             kind: "p",
-            text: "**Per-row overrides** — zebra striping, status highlighting. Return `undefined`, not `{}`, for an unstyled row: the render loop has a cheap \"no override for this row\" fast path keyed on exactly that.",
+            text: '**Per-row overrides** — zebra striping, status highlighting. Return `undefined`, not `{}`, for an unstyled row: the render loop has a cheap "no override for this row" fast path keyed on exactly that.',
         },
         {
             kind: "code",
@@ -176,7 +164,7 @@ getCellContent = ([col, row]) => {
 
         {
             kind: "p",
-            text: "**\"My app already has a design system.\"** If your palette is already CSS custom properties, drive the grid from those instead of hand-writing a `Theme` — including switching themes at runtime. `CssThemeWatcher` is the bridge: you name the CSS expressions and which `Theme` fields they feed. **The addon has no dependency on, and no knowledge of, any design system** — DaisyUI below is a `test-app` devDependency only.",
+            text: '**"My app already has a design system."** If your palette is already CSS custom properties, drive the grid from those instead of hand-writing a `Theme` — including switching themes at runtime. `CssThemeWatcher` is the bridge: you name the CSS expressions and which `Theme` fields they feed. **The addon has no dependency on, and no knowledge of, any design system** — DaisyUI below is a `test-app` devDependency only.',
         },
         {
             kind: "p",
@@ -272,7 +260,7 @@ export default class DaisyGrid extends Component {
 
   <template>
     {{#each this.themes as |t|}}
-      <button type="button" {{on "click" (fn this.selectTheme t)}}>{{t}}</button>
+      <button class="btn btn-xs" type="button" {{on "click" (fn this.selectTheme t)}}>{{t}}</button>
     {{/each}}
     <GlideDataGrid @columns={{this.columns}} @rows={{this.rows}}
                    @getCellContent={{this.getCellContent}} @theme={{this.theme}} />
@@ -281,7 +269,7 @@ export default class DaisyGrid extends Component {
         },
         {
             kind: "p",
-            text: "Any expression valid in a `color:` declaration works: `var(--x)`, `var(--x, fallback)`, a literal `oklch(...)`, `color-mix(...)`. An expression that does not resolve is **skipped**, leaving that field's built-in value — so a typo degrades to \"unthemed field\", never to black. The probe element is appended *inside* your element, so a `[data-theme]` set on a subtree resolves correctly. `CssThemeWatcher` watches `data-theme` by default; pass `attributes` to watch others, or `[]` and call `refresh()` yourself.",
+            text: 'Any expression valid in a `color:` declaration works: `var(--x)`, `var(--x, fallback)`, a literal `oklch(...)`, `color-mix(...)`. An expression that does not resolve is **skipped**, leaving that field\'s built-in value — so a typo degrades to "unthemed field", never to black. The probe element is appended *inside* your element, so a `[data-theme]` set on a subtree resolves correctly. `CssThemeWatcher` watches `data-theme` by default; pass `attributes` to watch others, or `[]` and call `refresh()` yourself.',
         },
         {
             kind: "note",
@@ -289,7 +277,7 @@ export default class DaisyGrid extends Component {
         },
         {
             kind: "p",
-            text: "**Tailwind 4 in an Ember app — the non-obvious part.** `@import \"tailwindcss\"` inside `app/styles/app.css` **does not work**. Embroider serves that file as a *virtual* module (`@embroider/virtual/app.css`) which never reaches `@tailwindcss/vite`, so the directives ship to the browser as literal text: no utilities generated, no design-system variables defined, and the only symptom is unstyled markup — nothing errors. Put them in a real file and import it from `app/app.ts`, which routes it through Vite's ordinary CSS pipeline where the plugin does run.",
+            text: '**Tailwind 4 in an Ember app — the non-obvious part.** `@import "tailwindcss"` inside `app/styles/app.css` **does not work**. Embroider serves that file as a *virtual* module (`@embroider/virtual/app.css`) which never reaches `@tailwindcss/vite`, so the directives ship to the browser as literal text: no utilities generated, no design-system variables defined, and the only symptom is unstyled markup — nothing errors. Put them in a real file and import it from `app/app.ts`, which routes it through Vite\'s ordinary CSS pipeline where the plugin does run.',
         },
         {
             kind: "code",

@@ -964,9 +964,7 @@ interface ResolvedGridHostArgs {
     readonly onGroupHeaderClicked: ((colIndex: number, event: GroupHeaderClickedEventArgs) => void) | undefined;
     readonly onCellActivated: ((cell: Item, event: CellActivatedEventArgs) => void) | undefined;
     readonly onFinishedEditing: ((newValue: GridCell | undefined, movement: Item) => void) | undefined;
-    readonly onColumnAppended:
-        | (() => ColumnAppendedResult | Promise<ColumnAppendedResult> | void)
-        | undefined;
+    readonly onColumnAppended: (() => ColumnAppendedResult | Promise<ColumnAppendedResult> | void) | undefined;
     readonly cellActivationBehavior: CellActivationBehavior;
 
     readonly editOnType: boolean;
@@ -1733,7 +1731,6 @@ export class GridHostController {
         };
     }
 
-
     // --- Phase 6: theming ------------------------------------------------------------------------
     // The global theme: base theme + the consumer's `@theme` overlay. This is what the render
     // engine gets as `DrawGridArg.theme` (it applies column/row/cell overrides itself, per cell,
@@ -1921,7 +1918,7 @@ export class GridHostController {
 
     private mangledGetCellContent(args: ResolvedGridHostArgs): (item: Item) => InnerGridCell {
         if (!args.hasRowMarkers && !args.showTrailingBlankRow) {
-            return args.getCellContent as (item: Item) => InnerGridCell;
+            return args.getCellContent;
         }
         const canReorderRows = args.onRowMoved !== undefined;
         const cached = this.mangledCellContentCache;
@@ -2360,10 +2357,7 @@ export class GridHostController {
           }
         | undefined;
 
-    private effectiveHighlightRegions(
-        args: ResolvedGridHostArgs,
-        theme: FullTheme
-    ): readonly Highlight[] | undefined {
+    private effectiveHighlightRegions(args: ResolvedGridHostArgs, theme: FullTheme): readonly Highlight[] | undefined {
         const fill = this.fillState?.highlight;
         const base = args.highlightRegions;
         // Nothing to translate and nothing to add: hand back the caller's own reference.
@@ -3919,7 +3913,7 @@ export class GridHostController {
             // (`cellHorizontalPadding`, `checkboxMaxSize`, ...) which an override can change.
             const theme = this.themeForCell(args, cellContent as GridCell, col, row);
             const newVal = renderer.onClick({
-                cell: cellContent as never,
+                cell: cellContent,
                 posX: hit.localX - cellRect.x,
                 posY: hit.localY - cellRect.y,
                 bounds: cellRect,
@@ -4028,7 +4022,13 @@ export class GridHostController {
             if (isMultiKey || args.columnSelectionMode === "multi") {
                 this.applyMangledSelection(
                     args,
-                    writerSetSelectedColumns(mangledSelection, undefined, newSlice, isMultiKey, this.selectionOptions(args))
+                    writerSetSelectedColumns(
+                        mangledSelection,
+                        undefined,
+                        newSlice,
+                        isMultiKey,
+                        this.selectionOptions(args)
+                    )
                 );
             } else {
                 this.applyMangledSelection(
@@ -4283,7 +4283,7 @@ export class GridHostController {
                     break;
                 case GridCellKind.Markdown:
                 case GridCellKind.Uri:
-                    content = { ...content, data: opts.initialValue } as GridCell;
+                    content = { ...content, data: opts.initialValue };
                     break;
                 default:
                     break;
@@ -4299,7 +4299,7 @@ export class GridHostController {
         }
 
         const renderer = args.getCellRenderer(cell);
-        const editorResult = renderer?.provideEditor?.({ ...cell, location: mangledLocation } as never);
+        const editorResult = renderer?.provideEditor?.({ ...cell, location: mangledLocation });
         if (editorResult === undefined) return;
         const isObj = isObjectEditorCallbackResult(editorResult);
         const editorFn = isObj ? editorResult.editor : editorResult;
@@ -4360,7 +4360,7 @@ export class GridHostController {
         };
 
         const handle = editorFn({
-            value: cell as never,
+            value: cell,
             isHighlighted: highlight,
             theme,
             validatedSelection: undefined,
@@ -4371,7 +4371,7 @@ export class GridHostController {
                 // normalises as the user types.
                 const validation = applyCellValidation(
                     state.realLocation,
-                    newValue as GridCell,
+                    newValue,
                     state.lastValue,
                     args.validateCell
                 );
@@ -4380,7 +4380,7 @@ export class GridHostController {
                 state.lastValue = validation.value;
             },
             onFinishedEditing: (newValue, movement) => {
-                this.finishOverlay(args, newValue as GridCell | undefined, movement ?? [0, 0]);
+                this.finishOverlay(args, newValue, movement ?? [0, 0]);
             },
         });
         state.handle = handle;
@@ -4575,9 +4575,9 @@ export class GridHostController {
                 const cell = args.getCellContent([realCol, row]);
                 if (!isReadWriteCell(cell)) continue;
                 const renderer = args.getCellRenderer(cell);
-                const cleared = renderer?.onDelete?.(cell as never) ?? this.clearedCellValue(cell);
+                const cleared = renderer?.onDelete?.(cell) ?? this.clearedCellValue(cell);
                 if (cleared !== undefined) {
-                    edits.push({ location: [realCol, row], value: cleared as GridCell });
+                    edits.push({ location: [realCol, row], value: cleared });
                     damaged.push([col, row]);
                 }
             }
@@ -5233,12 +5233,7 @@ export class GridHostController {
         this.scrollCellIntoView(args, col + args.rowMarkerOffset, row, params);
     }
 
-    private scrollToSmooth(
-        args: ResolvedGridHostArgs,
-        mangledCol: number,
-        row: number,
-        params: ScrollToParams
-    ): void {
+    private scrollToSmooth(args: ResolvedGridHostArgs, mangledCol: number, row: number, params: ScrollToParams): void {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
         if (mangledCol < 0 || mangledCol >= mappedColumns.length || row < 0 || row >= this.effectiveRows(args)) return;
         const target = this.computeCellRect(args, mangledCol, row);
@@ -5628,11 +5623,7 @@ export class GridHostController {
 
     /** 9g: `copyHeaders` prepends one `Text` cell per copied column carrying its title, exactly as
      *  source does (`data-editor.tsx:3787-3796`). Off by default, and a no-op then. */
-    private withCopyHeaders(
-        args: ResolvedGridHostArgs,
-        cells: CellArray,
-        columnIndexes: readonly number[]
-    ): CellArray {
+    private withCopyHeaders(args: ResolvedGridHostArgs, cells: CellArray, columnIndexes: readonly number[]): CellArray {
         if (!args.copyHeaders) return cells;
         return [copyHeaderRow(args.columns, columnIndexes), ...cells];
     }

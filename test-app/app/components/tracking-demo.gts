@@ -204,8 +204,7 @@ export default class TrackingDemo extends Component {
                 <code>updateCells()</code>, no
                 <code>@onCellsEdited</code>, and cells are
                 <code>allowOverlay: false</code>
-                so the grid can't edit itself. Any repaint you see is autotracking, routed through the
-                addon's
+                so the grid can't edit itself. Any repaint you see is autotracking, routed through the addon's
                 <code>recordsSource</code>.
             </p>
 
@@ -273,8 +272,13 @@ export default class TrackingDemo extends Component {
                         Active
                     </label>
 
-                    <button type="submit" data-test-submit>Submit</button>
-                    <button type="button" data-test-toggle-active {{on "click" this.toggleActiveOnSelected}}>
+                    <button class="btn btn-xs" type="submit" data-test-submit>Submit</button>
+                    <button
+                        class="btn btn-xs"
+                        type="button"
+                        data-test-toggle-active
+                        {{on "click" this.toggleActiveOnSelected}}
+                    >
                         Toggle active (no form)
                     </button>
                 </form>

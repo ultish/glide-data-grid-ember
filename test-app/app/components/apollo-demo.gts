@@ -333,10 +333,15 @@ export default class ApolloDemo extends Component {
                     <div
                         style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 1px solid #ddd; border-radius: 6px; padding: 10px;"
                     >
-                        <button type="button" data-test-apollo-toggle {{on "click" this.toggleSubscription}}>
+                        <button
+                            class="btn btn-xs"
+                            type="button"
+                            data-test-apollo-toggle
+                            {{on "click" this.toggleSubscription}}
+                        >
                             {{if this.running "Stop subscription" "Start subscription"}}
                         </button>
-                        <button type="button" data-test-apollo-tick {{on "click" this.tickOnce}}>
+                        <button class="btn btn-xs" type="button" data-test-apollo-tick {{on "click" this.tickOnce}}>
                             Tick once
                         </button>
                         <label for="apollo-rate">every</label>
@@ -347,7 +352,12 @@ export default class ApolloDemo extends Component {
                                 </option>
                             {{/each}}
                         </select>
-                        <button type="button" data-test-apollo-local {{on "click" this.localTrackedEdit}}>
+                        <button
+                            class="btn btn-xs"
+                            type="button"
+                            data-test-apollo-local
+                            {{on "click" this.localTrackedEdit}}
+                        >
                             Local tracked edit (no cache write)
                         </button>
                         <span style="color: #888;">

@@ -341,7 +341,8 @@ export default class StreamingDemo extends Component {
         if (target < 0) {
             const cost = frameEnd - frameStart;
             if (cost < 6) this.adaptiveBatch = Math.min(MAX_ADAPTIVE_BATCH, Math.ceil(this.adaptiveBatch * 1.3));
-            else if (cost > 12) this.adaptiveBatch = Math.max(MIN_ADAPTIVE_BATCH, Math.floor(this.adaptiveBatch * 0.75));
+            else if (cost > 12)
+                this.adaptiveBatch = Math.max(MIN_ADAPTIVE_BATCH, Math.floor(this.adaptiveBatch * 0.75));
         }
 
         this.maybePublishStats(now);
@@ -421,7 +422,8 @@ export default class StreamingDemo extends Component {
                     Highlight updates
                 </label>
 
-                <button type="button" data-test-streaming-reset {{on "click" this.resetStats}}>Reset stats</button>
+                <button class="btn btn-xs" type="button" data-test-streaming-reset {{on "click" this.resetStats}}>Reset
+                    stats</button>
 
                 <span class="gdg-streaming__note">
                     {{this.rows}}
