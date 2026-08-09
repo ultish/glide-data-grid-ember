@@ -169,7 +169,9 @@ reconcile = rows => {
         {
             kind: "code",
             text: `// app/instance-initializers/apollo.ts — one client for the app, registered as the default.
-import { ApolloClient, InMemoryCache, HttpLink } from "@apollo/client/core";
+// Apollo Client 4: import from "@apollo/client". The v3 "@apollo/client/core" entry point was
+// REMOVED in v4 (the whole top level is React-free now, so the split stopped earning its keep).
+import { ApolloClient, InMemoryCache, HttpLink } from "@apollo/client";
 import { setClient } from "glimmer-apollo";
 
 export function initialize(appInstance) {

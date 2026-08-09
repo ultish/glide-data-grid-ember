@@ -23,6 +23,7 @@ import "./glide-data-grid-editors.css";
 import "./glide-data-grid-extra-cell-editors.css";
 import { cached, tracked } from "@glimmer/tracking";
 import { hash } from "@ember/helper";
+import { htmlSafe } from "@ember/template";
 import { registerDestructor } from "@ember/destroyable";
 import { modifier } from "ember-modifier";
 import {
@@ -32,16 +33,18 @@ import {
     type ContextMenuEventArgs,
     type RowMarkerKind,
     type CellsForSelectionCallback,
+    type TrailingRowOptions,
 } from "../-private/grid-host-controller.ts";
 
 // Part of this component's public contract (`@onSearchStateChange`, `@rowMarkers`,
-// `@getCellsForSelection`), so re-exported here rather than making consumers import from
-// `-private/`.
+// `@getCellsForSelection`, `@trailingRowOptions`), so re-exported here rather than making consumers
+// import from `-private/`.
 export type {
     SearchState,
     ContextMenuEventArgs,
     RowMarkerKind,
     CellsForSelectionCallback,
+    TrailingRowOptions,
 } from "../-private/grid-host-controller.ts";
 
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
@@ -170,6 +173,12 @@ export interface GlideDataGridSignature {
         // contract that `onCellsEdited`/`onColumnResize*`/`onColumnMoved` all share.
         rowMarkers?: RowMarkerKind;
         rowMarkerWidth?: number;
+        /** The number against the first row (Phase 9g). `1` by default; `0` makes the markers agree
+         *  with `@getCellContent`'s row indices. */
+        rowMarkerStartIndex?: number;
+        /** Theme overlay for the row-marker column alone (Phase 9g). Pass a **stable** object -- it
+         *  lands on a column, and columns are identity-compared for the scroll blit fast path. */
+        rowMarkerTheme?: Partial<Theme>;
         rowSelect?: "none" | "single" | "multi";
         columnSelect?: "none" | "single" | "multi";
         rangeSelect?: "none" | "cell" | "rect" | "multi-cell" | "multi-rect";
@@ -206,6 +215,9 @@ export interface GlideDataGridSignature {
         // Trailing blank row / "add row" affordance (Phase 4d) -- forwarded straight through to
         // `GridHostArgs`; see that interface's doc comments for exact semantics.
         showTrailingBlankRow?: boolean;
+        /** Tint / hint text / "+" icon for that row (Phase 9g). Cosmetic only; see
+         *  `TrailingRowOptions` for the two of source's fields this port deliberately omits. */
+        trailingRowOptions?: TrailingRowOptions;
         onRowAppended?: () => void;
 
         // Theming (Phase 6). `@theme` above is the global overlay on the base theme; this is the
@@ -304,6 +316,25 @@ export interface GlideDataGridSignature {
         editOnType?: boolean;
         trapFocus?: boolean;
         drawFocusRing?: boolean | "no-editor";
+
+        // Scroll position + rem scaling (Phase 9g). Setting `@scrollOffsetX`/`@scrollOffsetY`
+        // scrolls the grid; *changing* it scrolls again, and between changes the user scrolls
+        // freely. `@scaleToRem` grows the grid with the root font size.
+        scrollOffsetX?: number;
+        scrollOffsetY?: number;
+        scaleToRem?: boolean;
+
+        /**
+         * Size of the grid's container element (Phase 9g). Numbers are px, strings are used as-is
+         * (`"50vh"`, `"calc(100% - 2rem)"`). Both default to `100%`, i.e. "fill whatever you are
+         * put in", which is what every consumer of this addon has relied on so far.
+         *
+         * There is deliberately **no `@className`**: source needs one because React has no other
+         * channel, whereas this component splats `...attributes`, so `<GlideDataGrid class="...">`
+         * (and any other attribute) already works and is the Ember-idiomatic spelling.
+         */
+        width?: number | string;
+        height?: number | string;
     };
 }
 
@@ -364,6 +395,8 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,
         rowMarkerWidth: this.args.rowMarkerWidth,
+        rowMarkerStartIndex: this.args.rowMarkerStartIndex,
+        rowMarkerTheme: this.args.rowMarkerTheme,
         rowSelect: this.args.rowSelect,
         columnSelect: this.args.columnSelect,
         rangeSelect: this.args.rangeSelect,
@@ -386,6 +419,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         allowedFillDirections: this.args.allowedFillDirections,
         onFillPattern: this.args.onFillPattern,
         showTrailingBlankRow: this.args.showTrailingBlankRow,
+        trailingRowOptions: this.args.trailingRowOptions,
         onRowAppended: this.args.onRowAppended,
         getRowThemeOverride: this.args.getRowThemeOverride,
         onVisibleRegionChanged: this.args.onVisibleRegionChanged,
@@ -421,7 +455,25 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         editOnType: this.args.editOnType,
         trapFocus: this.args.trapFocus,
         drawFocusRing: this.args.drawFocusRing,
+        scrollOffsetX: this.args.scrollOffsetX,
+        scrollOffsetY: this.args.scrollOffsetY,
+        scaleToRem: this.args.scaleToRem,
     });
+
+    /** Inline size for the container div (Phase 9g's `@width`/`@height`). A bare number means px;
+     *  anything else is passed through verbatim. `@cached` because it is read in the template on
+     *  every render and `htmlSafe` allocates. */
+    @cached
+    private get containerStyle(): ReturnType<typeof htmlSafe> {
+        const size = (value: number | string | undefined): string => {
+            if (value === undefined) return "100%";
+            return typeof value === "number" ? `${value}px` : value;
+        };
+        // Both halves are either a number this component stringified itself or a CSS length the
+        // consumer supplied for their own page -- the same trust level as any `style` attribute
+        // they could set through `...attributes`.
+        return htmlSafe(`width: ${size(this.args.width)}; height: ${size(this.args.height)};`);
+    }
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s
     // functional `modifier()` autotracks its whole function body: this function re-runs whenever
@@ -466,7 +518,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
     });
 
     <template>
-        <div style="width: 100%; height: 100%;" {{this.setupGrid}} ...attributes>
+        <div style={{this.containerStyle}} {{this.setupGrid}} ...attributes>
             {{yield (hash api=this.searchApi searchState=this.searchState)}}
         </div>
     </template>

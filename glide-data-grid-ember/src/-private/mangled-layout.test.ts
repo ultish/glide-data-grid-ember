@@ -20,7 +20,7 @@ function cols(n: number): readonly InnerGridColumn[] {
     return Array.from({ length: n }, (_, i) => ({ title: `C${i}`, width: 100 }));
 }
 
-const MARKER: RowMarkerColumnSpec = { width: 32, checked: false, headerDisabled: false };
+const MARKER: RowMarkerColumnSpec = { width: 32, checked: false, headerDisabled: false, themeOverride: undefined };
 
 describe("MangledLayoutCache: identity across draws", () => {
     it("returns the very same object when nothing changed", () => {
@@ -39,8 +39,8 @@ describe("MangledLayoutCache: identity across draws", () => {
         // precisely the bug being fixed.
         const cache = new MangledLayoutCache();
         const columns = cols(3);
-        const a = cache.get(columns, { width: 32, checked: false, headerDisabled: false }, 0);
-        const b = cache.get(columns, { width: 32, checked: false, headerDisabled: false }, 0);
+        const a = cache.get(columns, { width: 32, checked: false, headerDisabled: false, themeOverride: undefined }, 0);
+        const b = cache.get(columns, { width: 32, checked: false, headerDisabled: false, themeOverride: undefined }, 0);
         expect(b.mappedColumns).toBe(a.mappedColumns);
     });
 });
@@ -65,6 +65,9 @@ describe("MangledLayoutCache: invalidation", () => {
         ["checked true", { ...MARKER, checked: true }],
         ["checked indeterminate", { ...MARKER, checked: undefined }],
         ["headerDisabled", { ...MARKER, headerDisabled: true }],
+        // 9g's `rowMarkerTheme`. Compared by identity, which is why its arg asks for a stable
+        // object -- a fresh literal per render would land here and rebuild the layout every draw.
+        ["themeOverride", { ...MARKER, themeOverride: { accentColor: "#f00" } }],
     ])("invalidates when the marker spec's %s changes", (_label, changed) => {
         const cache = new MangledLayoutCache();
         const first = cache.get(columns, MARKER, 0);

@@ -30,6 +30,7 @@ import GlideDataGrid, {
     type GlideDataGridApi,
     type ContextMenuEventArgs,
     type RowMarkerKind,
+    type TrailingRowOptions,
 } from "glide-data-grid-ember/components/glide-data-grid";
 import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";
 import type { SearchState } from "glide-data-grid-ember/components/glide-search-bar";
@@ -222,6 +223,13 @@ const DELETE_MODES = ["normal", "veto", "whole-column"] as const;
 // 9g. Only `"second-click"` existed before -- `"single-click"` opens the editor on the very first
 // click, `"double-click"` needs a real double-click on the already-selected cell.
 const ACTIVATION_BEHAVIORS: readonly CellActivationBehavior[] = ["second-click", "single-click", "double-click"];
+
+// 9g. Frozen module-scope constants because both land somewhere the grid identity-compares:
+// `rowMarkerTheme` becomes the marker column's `themeOverride` (columns feed `computeCanBlit`), and
+// `trailingRowOptions` is part of the mangled-cell-content cache key.
+const ROW_MARKER_THEME: Partial<Theme> = { bgCell: "#eef4ff", textDark: "#0d5bd1" };
+const PLAIN_TRAILING_ROW: TrailingRowOptions = { hint: "Add row" };
+const TINTED_TRAILING_ROW: TrailingRowOptions = { hint: "Add row", tint: true, addIcon: "headerRowID" };
 
 export default class DemoGrid extends Component {
     constructor(...args: ConstructorParameters<typeof Component>) {
@@ -642,6 +650,52 @@ export default class DemoGrid extends Component {
         this.activationBehaviorIndex = (this.activationBehaviorIndex + 1) % ACTIVATION_BEHAVIORS.length;
     };
 
+    // --- Phase 9g: presentation -------------------------------------------------------------------
+    // `rowMarkerStartIndex` / `rowMarkerTheme` / `trailingRowOptions` / `scaleToRem`, plus a
+    // `scrollOffsetY` button. All frozen module-scope constants where the grid identity-compares
+    // them -- `rowMarkerTheme` lands on a column, and columns feed `computeCanBlit`.
+    @tracked zeroBasedRowMarkers = false;
+    @tracked useRowMarkerTheme = false;
+    @tracked tintTrailingRow = false;
+    @tracked scaleToRem = false;
+    /** Bumped by the "Scroll to row 50" button. Changing the value is what makes the grid scroll --
+     *  see the arg's doc comment; between changes the user scrolls freely. */
+    @tracked scrollOffsetY: number | undefined;
+
+    get rowMarkerStartIndex(): number {
+        return this.zeroBasedRowMarkers ? 0 : 1;
+    }
+
+    get rowMarkerTheme(): Partial<Theme> | undefined {
+        return this.useRowMarkerTheme ? ROW_MARKER_THEME : undefined;
+    }
+
+    get trailingRowOptions(): TrailingRowOptions {
+        return this.tintTrailingRow ? TINTED_TRAILING_ROW : PLAIN_TRAILING_ROW;
+    }
+
+    toggleRowMarkerStart = (): void => {
+        this.zeroBasedRowMarkers = !this.zeroBasedRowMarkers;
+    };
+
+    toggleRowMarkerTheme = (): void => {
+        this.useRowMarkerTheme = !this.useRowMarkerTheme;
+    };
+
+    toggleTrailingRowTint = (): void => {
+        this.tintTrailingRow = !this.tintTrailingRow;
+    };
+
+    toggleScaleToRem = (): void => {
+        this.scaleToRem = !this.scaleToRem;
+    };
+
+    scrollToRow50 = (): void => {
+        // Nudged by a pixel when already there, because the grid applies the offset once per
+        // *change* -- re-passing the same number is deliberately a no-op.
+        this.scrollOffsetY = this.scrollOffsetY === 50 * 34 ? 50 * 34 + 1 : 50 * 34;
+    };
+
     handleCellClicked = (cell: Item): void => {
         // Calling `event.preventDefault()` here would suppress the selection change, the renderer's
         // own `onClick` and any activation -- the whole click. This demo only reports.
@@ -860,6 +914,21 @@ export default class DemoGrid extends Component {
                 <button type="button" class="gdg-full__toggle" data-test-activation-behavior-toggle {{on "click" this.cycleActivationBehavior}}>
                     Activate on: <b>{{this.cellActivationBehavior}}</b>
                 </button>
+                <button type="button" class="gdg-full__toggle" data-test-row-marker-start-toggle {{on "click" this.toggleRowMarkerStart}}>
+                    Row numbers from: <b>{{this.rowMarkerStartIndex}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-row-marker-theme-toggle {{on "click" this.toggleRowMarkerTheme}}>
+                    Marker theme: <b>{{if this.useRowMarkerTheme "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-trailing-tint-toggle {{on "click" this.toggleTrailingRowTint}}>
+                    Trailing row: <b>{{if this.tintTrailingRow "tinted + icon" "plain"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-scale-to-rem-toggle {{on "click" this.toggleScaleToRem}}>
+                    Scale to rem: <b>{{if this.scaleToRem "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-scroll-offset {{on "click" this.scrollToRow50}}>
+                    Scroll to row 50
+                </button>
             </div>
 
             {{! Notification-only args, rendered so they are observable rather than merely wired. }}
@@ -961,6 +1030,12 @@ export default class DemoGrid extends Component {
                         be on for `@onRowMoved` to do anything -- and turning them on here is also
                         what first exercised the row-marker offset in `@highlightRegions`. }}
                     @rowMarkers={{this.rowMarkers}}
+                    {{! Phase 9g: presentation. }}
+                    @rowMarkerStartIndex={{this.rowMarkerStartIndex}}
+                    @rowMarkerTheme={{this.rowMarkerTheme}}
+                    @trailingRowOptions={{this.trailingRowOptions}}
+                    @scaleToRem={{this.scaleToRem}}
+                    @scrollOffsetY={{this.scrollOffsetY}}
                     @rangeSelect={{this.rangeSelect}}
                     {{! Phase 9g: selection tuning + editing behaviour. }}
                     @rangeSelectionBlending={{this.selectionBlending}}

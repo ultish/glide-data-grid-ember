@@ -20,6 +20,7 @@
 import { mapColumns } from "../rendering/render/data-grid-lib.ts";
 import type { MappedGridColumn } from "../rendering/render/data-grid-lib.ts";
 import type { InnerGridColumn } from "../rendering/data-grid-types.ts";
+import type { Theme } from "../rendering/theme.ts";
 
 /** The synthetic row-marker column's inputs, or `undefined` when `rowMarkers === "none"`.
  *
@@ -32,6 +33,10 @@ export interface RowMarkerColumnSpec {
     readonly checked: boolean | undefined;
     /** Mirrors source's `headerRowMarkerDisabled` -- set when `rowSelect !== "multi"`. */
     readonly headerDisabled: boolean;
+    /** 9g: source's `rowMarkerTheme`, applied as this column's `themeOverride`. Compared **by
+     *  identity** in the cache below, which is why the arg's doc comment asks for a stable object:
+     *  a fresh literal per render rebuilds `mappedColumns` and costs the scroll blit fast path. */
+    readonly themeOverride: Partial<Theme> | undefined;
 }
 
 export interface MangledLayout {
@@ -58,6 +63,7 @@ interface CacheEntry {
     readonly markerWidth: number | undefined;
     readonly markerChecked: boolean | undefined;
     readonly markerHeaderDisabled: boolean | undefined;
+    readonly markerThemeOverride: Partial<Theme> | undefined;
     readonly freezeColumns: number;
     readonly value: MangledLayout;
 }
@@ -88,7 +94,8 @@ export class MangledLayoutCache {
             cached.hasMarker === (marker !== undefined) &&
             cached.markerWidth === marker?.width &&
             cached.markerChecked === marker?.checked &&
-            cached.markerHeaderDisabled === marker?.headerDisabled
+            cached.markerHeaderDisabled === marker?.headerDisabled &&
+            cached.markerThemeOverride === marker?.themeOverride
         ) {
             return cached.value;
         }
@@ -105,6 +112,7 @@ export class MangledLayoutCache {
                           rowMarker: ROW_MARKER_CHECKBOX_STYLE,
                           rowMarkerChecked: marker.checked,
                           headerRowMarkerDisabled: marker.headerDisabled,
+                          themeOverride: marker.themeOverride,
                       },
                       ...columns,
                   ];
@@ -121,6 +129,7 @@ export class MangledLayoutCache {
             markerWidth: marker?.width,
             markerChecked: marker?.checked,
             markerHeaderDisabled: marker?.headerDisabled,
+            markerThemeOverride: marker?.themeOverride,
             freezeColumns,
             value,
         };

@@ -62,6 +62,7 @@ import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts
 import { coercePasteCell, type CoercePasteValueCallback } from "../rendering/paste-coercion.ts";
 import { applyCellValidation, type ValidateCellCallback } from "../rendering/validate-cell.ts";
 import { copyHeaderRow } from "../rendering/copy-paste.ts";
+import { remAdjustDimensions, measureRemSize, type RemAdjustableDimensions } from "../rendering/rem-adjuster.ts";
 import { sizeColumns, applyColumnGrow } from "../rendering/column-sizer.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import type {
@@ -152,6 +153,34 @@ import {
  */
 export type RowMarkerKind = "none" | "checkbox" | "checkbox-visible" | "number" | "clickable-number" | "both";
 
+/**
+ * Presentation of the trailing blank "add row" row. Mirrors the subset of source's
+ * `trailingRowOptions` this port can honour (Phase 9g).
+ *
+ * **`sticky` and `targetColumn` are deliberately absent.** `sticky` is implemented in source by
+ * adding 1 to `freezeTrailingRows`, which this port hardcodes to `0` at seven hit-test/layout call
+ * sites -- see PHASES.md's 9g entry, it is explicitly not the one-line passthrough it looks like.
+ * `targetColumn` only means anything alongside source's `appendRow(col)` focus flow, which needs the
+ * imperative ref (9f). Both would be silently inert if accepted here.
+ *
+ * A column's own `trailingRowOptions` (already on `GridColumn`) overrides `hint`/`addIcon` for that
+ * column, and `disabled: true` blanks its trailing cell -- exactly as source layers them.
+ */
+export interface TrailingRowOptions {
+    /** Tint the trailing row, marking it as not-real-data. Drawn via `DrawGridArg.disabledRows`. */
+    readonly tint?: boolean;
+    /**
+     * Text shown in the row's first real column, e.g. `"New row"`.
+     * @defaultValue "Add row" -- this port's own default, not source's (`""`). It is the string
+     * shipped since Phase 4d, kept so that adding this option does not silently blank an affordance
+     * every existing consumer already has. Pass `""` for source's behaviour.
+     */
+    readonly hint?: string;
+    /** Header-icon name drawn in place of the built-in "+" glyph. Must exist in the sprite set
+     *  (the built-ins, plus anything added via `headerIcons`). */
+    readonly addIcon?: string;
+}
+
 export interface GridHostArgs {
     readonly columns: readonly GridColumn[];
     readonly getCellContent: (item: Item) => GridCell;
@@ -183,6 +212,22 @@ export interface GridHostArgs {
     readonly rowMarkers?: RowMarkerKind;
     /** @defaultValue auto-sized from `rows`, mirrors `data-editor.tsx:952` */
     readonly rowMarkerWidth?: number;
+    /**
+     * The number shown against the first row, for `rowMarkers: "number"`/`"both"`/
+     * `"clickable-number"`. `1` gives the usual 1-based numbering; `0` makes the markers agree with
+     * `getCellContent`'s row indices. Mirrors source's `rowMarkerStartIndex`.
+     * @defaultValue 1
+     */
+    readonly rowMarkerStartIndex?: number;
+    /**
+     * Theme overlay applied to the row-marker column only, layered like any other column's
+     * `themeOverride`. Mirrors source's `rowMarkerTheme`.
+     *
+     * **Pass a stable object.** It ends up on the marker column, which feeds `mappedColumns` --
+     * one of `computeCanBlit`'s compared fields -- so a fresh literal every render costs the scroll
+     * blit fast path. The layout cache keys on this object's identity for exactly that reason.
+     */
+    readonly rowMarkerTheme?: Partial<Theme>;
     /** @defaultValue "multi" */
     readonly rowSelect?: "none" | "single" | "multi";
     /** @defaultValue "multi" */
@@ -350,6 +395,13 @@ export interface GridHostArgs {
      * @defaultValue false
      */
     readonly showTrailingBlankRow?: boolean;
+    /**
+     * Presentation of that trailing row -- tint, hint text, and the "+" icon. Mirrors the portable
+     * subset of source's `trailingRowOptions`; see {@link TrailingRowOptions} for what is left out
+     * and why. Purely cosmetic: it does not enable the row (that is `showTrailingBlankRow`) and
+     * does not change what activating it does.
+     */
+    readonly trailingRowOptions?: TrailingRowOptions;
     /**
      * Fired when the trailing blank row is activated (clicking any real-column cell in it, or
      * selecting it via keyboard nav and pressing Enter) -- mirrors source's `onRowAppended`. Like
@@ -699,6 +751,33 @@ export interface GridHostArgs {
      * @defaultValue true
      */
     readonly drawFocusRing?: boolean | "no-editor";
+
+    // --- Phase 9g: scroll position + rem scaling -------------------------------------------------
+
+    /**
+     * Scroll the grid to this horizontal pixel offset. Mirrors source's `scrollOffsetX`, including
+     * its semantics, which are worth stating because "initial scroll offset" undersells them:
+     * source re-applies the value in a layout effect keyed on it, so **changing it scrolls the
+     * grid**, and leaving it alone lets the user scroll freely. This port does the same -- it
+     * applies the value once per change, never fighting the user in between.
+     */
+    readonly scrollOffsetX?: number;
+    /** The vertical twin of {@link scrollOffsetX}. */
+    readonly scrollOffsetY?: number;
+
+    /**
+     * Scale row/header heights and the theme's padding/icon sizes by the root element's font size
+     * relative to 16px, so the grid grows with a user's browser zoom or an app-level `rem` change.
+     * Mirrors source's `scaleToRem` and its `use-rem-adjuster.ts` scaling rules exactly.
+     *
+     * **Divergence:** source re-measures the root font size continuously (`useRemSize`); this port
+     * measures it whenever the grid's args change (`scheduleFullRedraw`). A root font size that
+     * changes with no accompanying arg change is therefore picked up on the next redraw rather than
+     * immediately -- fine for the settings-driven case this exists for, and it keeps a
+     * `getComputedStyle` call off the per-draw path.
+     * @defaultValue false
+     */
+    readonly scaleToRem?: boolean;
 }
 
 /** What a context-menu callback receives alongside the target. */
@@ -760,6 +839,8 @@ interface ResolvedGridHostArgs {
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
+    readonly rowMarkerStartIndex: number;
+    readonly rowMarkerTheme: Partial<Theme> | undefined;
     readonly hasRowMarkers: boolean;
     readonly rowMarkerOffset: number;
     readonly rowSelect: "none" | "single" | "multi";
@@ -789,6 +870,7 @@ interface ResolvedGridHostArgs {
     readonly onFillPattern: ((event: FillPatternEventArgs) => void) | undefined;
 
     readonly showTrailingBlankRow: boolean;
+    readonly trailingRowOptions: TrailingRowOptions | undefined;
     readonly onRowAppended: (() => void) | undefined;
 
     readonly getRowThemeOverride: GetRowThemeCallback | undefined;
@@ -833,6 +915,9 @@ interface ResolvedGridHostArgs {
     readonly editOnType: boolean;
     readonly trapFocus: boolean;
     readonly drawFocusRing: boolean | "no-editor";
+
+    readonly scrollOffsetX: number | undefined;
+    readonly scrollOffsetY: number | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -887,6 +972,17 @@ const COLUMN_DRAG_THRESHOLD_PX = 20;
 // Phase 9h: the vertical twin of the above, for row reorder -- source uses the same literal 20 in
 // the same function (`Math.abs(event.clientY - dragStartY) > 20`).
 const ROW_DRAG_THRESHOLD_PX = 20;
+
+// 9g: the cache key for `scaleToRem`. Compared field-by-field rather than by object identity
+// because `resolveArgs` builds a fresh input literal on every call -- identity would never hit.
+function dimensionsAreEqual(a: RemAdjustableDimensions, b: RemAdjustableDimensions): boolean {
+    return (
+        a.rowHeight === b.rowHeight &&
+        a.headerHeight === b.headerHeight &&
+        a.groupHeaderHeight === b.groupHeaderHeight &&
+        a.theme === b.theme
+    );
+}
 
 function rectanglesEqual(a: Rectangle | undefined, b: Rectangle | undefined): boolean {
     if (a === b) return true;
@@ -1436,24 +1532,61 @@ export class GridHostController {
         return result;
     }
 
+    // 9g: the `scaleToRem` result, memoized on everything it is computed from. **Load-bearing**:
+    // the scaled `theme` object is identity-compared by `mergedThemeCache` and, beyond it, by
+    // `computeCanBlit` -- and `resolveArgs` runs several times per draw, so an unmemoized scale
+    // would hand out a fresh theme object every call and silently kill the scroll blit fast path.
+    // With `scaleToRem` off, `remAdjustDimensions` returns its input by identity and this cache
+    // never even gets consulted.
+    private remAdjustCache:
+        | { readonly src: RemAdjustableDimensions; readonly remSize: number; readonly value: RemAdjustableDimensions }
+        | undefined;
+
+    // Measured lazily and refreshed on `scheduleFullRedraw` -- see `GridHostArgs.scaleToRem` for
+    // why this port does not observe the root font size continuously the way source does.
+    private remSize: number | undefined;
+
+    private remAdjust(dimensions: RemAdjustableDimensions, scaleToRem: boolean): RemAdjustableDimensions {
+        if (!scaleToRem) return dimensions;
+        const remSize = (this.remSize ??= measureRemSize());
+        const cached = this.remAdjustCache;
+        if (cached !== undefined && cached.remSize === remSize && dimensionsAreEqual(cached.src, dimensions)) {
+            return cached.value;
+        }
+        const value = remAdjustDimensions(dimensions, true, remSize);
+        this.remAdjustCache = { src: dimensions, remSize, value };
+        return value;
+    }
+
     private resolveArgs(): ResolvedGridHostArgs {
         const args = this.getArgsFn();
-        const headerHeight = args.headerHeight ?? DEFAULT_HEADER_HEIGHT;
+        const baseHeaderHeight = args.headerHeight ?? DEFAULT_HEADER_HEIGHT;
+        const { rowHeight, headerHeight, groupHeaderHeight, theme } = this.remAdjust(
+            {
+                rowHeight: args.rowHeight ?? DEFAULT_ROW_HEIGHT,
+                headerHeight: baseHeaderHeight,
+                groupHeaderHeight: args.groupHeaderHeight ?? baseHeaderHeight,
+                theme: args.theme,
+            },
+            args.scaleToRem === true
+        );
         const rowMarkers = args.rowMarkers ?? "none";
         const hasRowMarkers = rowMarkers !== "none";
         return {
             columns: args.columns,
             getCellContent: args.getCellContent,
             rows: args.rows,
-            rowHeight: args.rowHeight ?? DEFAULT_ROW_HEIGHT,
+            rowHeight,
             headerHeight,
-            groupHeaderHeight: args.groupHeaderHeight ?? headerHeight,
-            theme: args.theme,
+            groupHeaderHeight,
+            theme,
             freezeColumns: args.freezeColumns ?? 0,
             getCellRenderer: args.getCellRenderer,
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
+            rowMarkerStartIndex: args.rowMarkerStartIndex ?? 1,
+            rowMarkerTheme: args.rowMarkerTheme,
             hasRowMarkers,
             rowMarkerOffset: hasRowMarkers ? 1 : 0,
             rowSelect: args.rowSelect ?? "multi",
@@ -1480,6 +1613,7 @@ export class GridHostController {
             onFillPattern: args.onFillPattern,
 
             showTrailingBlankRow: args.showTrailingBlankRow === true,
+            trailingRowOptions: args.trailingRowOptions,
             onRowAppended: args.onRowAppended,
 
             getRowThemeOverride: args.getRowThemeOverride,
@@ -1524,6 +1658,9 @@ export class GridHostController {
             editOnType: args.editOnType ?? true,
             trapFocus: args.trapFocus === true,
             drawFocusRing: args.drawFocusRing ?? true,
+
+            scrollOffsetX: args.scrollOffsetX,
+            scrollOffsetY: args.scrollOffsetY,
         };
     }
 
@@ -1660,6 +1797,7 @@ export class GridHostController {
             width: args.rowMarkerWidth,
             checked: numSelectedRows === 0 ? false : numSelectedRows === args.rows ? true : undefined,
             headerDisabled: args.rowSelect !== "multi",
+            themeOverride: args.rowMarkerTheme,
         };
     }
 
@@ -1668,10 +1806,10 @@ export class GridHostController {
     // (`data-editor.tsx:1309-1382`, cited in full in PORTING-NOTES.md's Phase 4 research section).
     // The row-marker column's trailing-row cell is a plain `loadingCell` (kind `Loading`,
     // `allowOverlay: false`) in source -- no checkbox on the append-row affordance -- and every
-    // other column's trailing-row cell is the `new-row-cell` renderer's `NewRowCell`. Only the first
-    // real (non-marker) column gets a hint string; source derives this per-column from
-    // `trailingRowOptions`, not ported here (see the `GridHostArgs.showTrailingBlankRow` doc
-    // comment) -- a fixed "Add row" hint on the first column is this port's simplification.
+    // other column's trailing-row cell is the `new-row-cell` renderer's `NewRowCell`. 9g layers
+    // `trailingRowOptions` on exactly as source does: the grid-wide `hint` applies to the first real
+    // (non-marker) column only, a column's own `trailingRowOptions` overrides `hint`/`addIcon` for
+    // itself, and `disabled: true` blanks that column's trailing cell entirely.
     //
     // Phase 6: **the returned closure must be identity-stable across draws.** `computeCanBlit`
     // (`render/data-grid-render.blit.ts:247`) compares `getCellContent` by identity, so rebuilding
@@ -1688,6 +1826,13 @@ export class GridHostController {
               readonly rowMarkers: RowMarkerKind;
               readonly rowMarkerOffset: number;
               readonly canReorderRows: boolean;
+              // 9g additions to the key. `columns` is here because the closure now reads each
+              // column's own `trailingRowOptions`; `trailingRowOptions` and `rowMarkerStartIndex`
+              // because it reads those too. The rule this cache lives by is stated above: enumerate
+              // everything the closure captures, and check every entry appears here.
+              readonly columns: readonly GridColumn[];
+              readonly trailingRowOptions: TrailingRowOptions | undefined;
+              readonly rowMarkerStartIndex: number;
               readonly value: (item: Item) => InnerGridCell;
           }
         | undefined;
@@ -1719,7 +1864,10 @@ export class GridHostController {
             cached.rows === args.rows &&
             cached.rowMarkers === args.rowMarkers &&
             cached.rowMarkerOffset === args.rowMarkerOffset &&
-            cached.canReorderRows === canReorderRows
+            cached.canReorderRows === canReorderRows &&
+            cached.columns === args.columns &&
+            cached.trailingRowOptions === args.trailingRowOptions &&
+            cached.rowMarkerStartIndex === args.rowMarkerStartIndex
         ) {
             return cached.value;
         }
@@ -1747,7 +1895,8 @@ export class GridHostController {
                     checkboxStyle: DEFAULT_ROW_MARKER_CHECKBOX_STYLE,
                     checked: this.selection.rows.hasIndex(row),
                     markerKind,
-                    row: row + 1,
+                    // 9g: `rowMarkerStartIndex` (default 1) instead of the hardcoded `+ 1`.
+                    row: args.rowMarkerStartIndex + row,
                     // Phase 9h: the marker cell's drag-handle dots, which are both the affordance
                     // for row reorder and its enable flag -- source sets exactly
                     // `drawHandle: onRowMoved !== undefined` (`data-editor.tsx:1338`).
@@ -1756,9 +1905,19 @@ export class GridHostController {
                 };
             }
             if (isTrailing) {
+                const columnOptions = args.columns[col - rowMarkerOffset]?.trailingRowOptions;
+                if (columnOptions?.disabled === true) {
+                    return { kind: GridCellKind.Loading, allowOverlay: false };
+                }
+                // Divergence, deliberate: source's default hint is `""`, this port's is `"Add row"`
+                // -- the string it has shown since Phase 4d, kept so that adding `trailingRowOptions`
+                // support does not silently blank an affordance every existing consumer already has.
+                // Pass `hint: ""` for source's behaviour.
+                const gridHint = col === rowMarkerOffset ? (args.trailingRowOptions?.hint ?? "Add row") : "";
                 return {
                     kind: InnerGridCellKind.NewRow,
-                    hint: col === rowMarkerOffset ? "Add row" : "",
+                    hint: columnOptions?.hint ?? gridHint,
+                    icon: columnOptions?.addIcon ?? args.trailingRowOptions?.addIcon,
                     allowOverlay: false,
                 };
             }
@@ -1772,6 +1931,9 @@ export class GridHostController {
             rowMarkers: args.rowMarkers,
             rowMarkerOffset: args.rowMarkerOffset,
             canReorderRows,
+            columns: args.columns,
+            trailingRowOptions: args.trailingRowOptions,
+            rowMarkerStartIndex: args.rowMarkerStartIndex,
             value,
         };
         return value;
@@ -1855,8 +2017,17 @@ export class GridHostController {
     /** Call after any `getArgs()`-relevant input changes (columns, rows, sizes, theme, etc). */
     public scheduleFullRedraw(): void {
         if (this.destroyed) return;
+        // 9g: the root font size is re-read here rather than observed continuously -- see
+        // `GridHostArgs.scaleToRem`. Dropping the cached value is enough; `resolveArgs` re-measures
+        // lazily on the next scaled call and skips the work entirely when `scaleToRem` is off.
+        this.remSize = undefined;
         const args = this.resolveArgs();
         this.rebuildScrollContent(args);
+        // 9g: `scrollOffsetX`/`scrollOffsetY`. Applied once per *change* of the value, exactly like
+        // source's layout effect keyed on it -- which is what makes them a "scroll here" instruction
+        // rather than a scroll lock. Must come after `rebuildScrollContent`, since scrolling to an
+        // offset the content is not yet tall/wide enough for is silently clamped to 0.
+        this.applyScrollOffsets(args);
         this.sizeCanvases(args);
         // Keep the scroll offsets consistent with the layout that was just rebuilt. Load-bearing on
         // the very first draw (see `syncScrollOffsets` -- `cellXOffset` rests at `freezeColumns`,
@@ -1887,6 +2058,24 @@ export class GridHostController {
         // not previously arise).
         this.lastFullDrawArg = undefined;
         this.runDraw(args, undefined);
+    }
+
+    // 9g. `undefined` means "never applied yet", which is distinct from `0` -- an initial
+    // `scrollOffsetY: 0` must still be applied once, and the user must be free to scroll away from
+    // it afterwards.
+    private lastAppliedScrollOffsetX: number | undefined;
+    private lastAppliedScrollOffsetY: number | undefined;
+
+    private applyScrollOffsets(args: ResolvedGridHostArgs): void {
+        const { scrollOffsetX, scrollOffsetY } = args;
+        if (scrollOffsetX !== undefined && scrollOffsetX !== this.lastAppliedScrollOffsetX) {
+            this.lastAppliedScrollOffsetX = scrollOffsetX;
+            this.scrollerEl.scrollLeft = scrollOffsetX;
+        }
+        if (scrollOffsetY !== undefined && scrollOffsetY !== this.lastAppliedScrollOffsetY) {
+            this.lastAppliedScrollOffsetY = scrollOffsetY;
+            this.scrollerEl.scrollTop = scrollOffsetY;
+        }
     }
 
     /** Damage-based partial redraw for a known set of changed cells. */
@@ -1989,7 +2178,9 @@ export class GridHostController {
             theme,
             headerHeight: args.headerHeight,
             groupHeaderHeight: this.groupHeaderHeight(args),
-            disabledRows: CompactSelection.empty(),
+            // 9g: `trailingRowOptions.tint`. Source's `disabledRows` memo is exactly this -- the
+            // trailing row alone, or nothing (`data-editor.tsx:3960-3966`).
+            disabledRows: this.disabledRows(args),
             rowHeight: args.rowHeight,
             // Module-scope constant, NOT an inline arrow: `computeCanBlit` compares
             // `verticalBorder` by identity (`render/data-grid-render.blit.ts:246`), so a fresh
@@ -2053,6 +2244,21 @@ export class GridHostController {
         }
 
         this.maybeEmitVisibleRegion(args, mappedColumns, freezeColumns);
+    }
+
+    // 9g: the tinted trailing row, memoized on the one row index it can contain.
+    // `CompactSelection.empty()` is already a singleton, so only the tinted case needs a cache --
+    // and it needs one because `fromSingleSelection` allocates, and this runs per draw.
+    private disabledRowsCache: { readonly row: number; readonly value: CompactSelection } | undefined;
+
+    private disabledRows(args: ResolvedGridHostArgs): CompactSelection {
+        if (!args.showTrailingBlankRow || args.trailingRowOptions?.tint !== true) return CompactSelection.empty();
+        const row = this.effectiveRows(args) - 1;
+        const cached = this.disabledRowsCache;
+        if (cached !== undefined && cached.row === row) return cached.value;
+        const value = CompactSelection.fromSingleSelection(row);
+        this.disabledRowsCache = { row, value };
+        return value;
     }
 
     // --- Phase 9h: fill-handle presentation --------------------------------------------------------

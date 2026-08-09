@@ -132,6 +132,11 @@ export type { CoercePasteValueCallback } from "./paste-coercion.ts";
 export { applyCellValidation } from "./validate-cell.ts";
 export type { ValidateCellCallback, CellValidationResult } from "./validate-cell.ts";
 
+// `scaleToRem` (Phase 9g). Exported for the same reason as the two above -- it is a pure rule with
+// tests, and a consumer scaling their own chrome alongside the grid can reuse it.
+export { remAdjustDimensions, measureRemSize, BASE_REM_SIZE } from "./rem-adjuster.ts";
+export type { RemAdjustableDimensions } from "./rem-adjuster.ts";
+
 // CSS-variable theming (Phase 9). Builds a `Theme` overlay from CSS custom properties resolved off
 // a real element, and keeps it in sync as the page's theme changes -- the bridge that lets a
 // DaisyUI/Tailwind app theme the grid. The addon has no DaisyUI dependency and no knowledge of it;
