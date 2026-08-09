@@ -178,20 +178,28 @@ describe("withCollapsingGroups — auto-expand on selection", () => {
         expect(onCollapsedChange).not.toHaveBeenCalled();
     });
 
-    it("accounts for the row-marker column, which THIS callback alone does not strip", () => {
-        // `applySelection` in `grid-host-controller.ts` hands out the internal `GridSelection`
-        // verbatim, mangled column indices and all — unlike `onCellsEdited`/`onColumnMoved`/the
-        // context-menu callbacks, which all subtract the offset first. Without `rowMarkerOffset`
-        // this expands the group one column to the left of the one the user clicked.
-        const onCollapsedChange = vi.fn();
-        const res = withCollapsingGroups({
+    it("reads the selection in CONSUMER space, and `rowMarkerOffset` no longer shifts it", () => {
+        // Regression. `@onSelectionChanged` used to report mangled column indices while every other
+        // callback reported consumer ones, so this module subtracted `rowMarkerOffset` here. That
+        // split was removed on 2026-08-09; the subtraction then became the bug, expanding the group
+        // one column to the LEFT of the selected one on any grid with row markers. The option is
+        // kept as a deprecated no-op, which is what this pins: passing it changes nothing.
+        const withOffset = vi.fn();
+        withCollapsingGroups({
             columns: COLUMNS,
             collapsed: ["Work"],
-            onCollapsedChange,
+            onCollapsedChange: withOffset,
             rowMarkerOffset: 1,
-        });
-        res.onSelectionChanged(selectionAt(3)); // mangled 3 == consumer column 2 == "Company"
-        expect(onCollapsedChange).toHaveBeenCalledWith([]);
+        }).onSelectionChanged(selectionAt(2)); // consumer column 2 == "Company", in group "Work"
+        expect(withOffset).toHaveBeenCalledWith([]);
+
+        const withoutOffset = vi.fn();
+        withCollapsingGroups({
+            columns: COLUMNS,
+            collapsed: ["Work"],
+            onCollapsedChange: withoutOffset,
+        }).onSelectionChanged(selectionAt(2));
+        expect(withoutOffset).toHaveBeenCalledWith([]);
     });
 
     it("forwards to the consumer's own handler, selection untouched", () => {

@@ -141,6 +141,12 @@ export type { RemAdjustableDimensions } from "./rem-adjuster.ts";
 // exported because they are pure, tested, and the definition of what this addon calls a "click".
 export { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "./click-behavior.ts";
 export type { ClickActivationArgs } from "./click-behavior.ts";
+export { computeGroupHeaderSpan, computeGroupHeaderSelection } from "./group-header-selection.ts";
+export type {
+    GroupedColumnLike,
+    GroupHeaderSelectionInput,
+    GroupHeaderSelectionUpdate,
+} from "./group-header-selection.ts";
 
 // CSS-variable theming (Phase 9). Builds a `Theme` overlay from CSS custom properties resolved off
 // a real element, and keeps it in sync as the page's theme changes -- the bridge that lets a

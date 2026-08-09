@@ -314,6 +314,9 @@ export interface GlideDataGridSignature {
         // drag-selection is not reported as a click. Their `preventDefault()` suppresses the cell
         // renderer's own `onClick` and any activation, but **not** the selection change, which
         // already happened on mousedown (in source too). See `GridHostArgs.onCellClicked`.
+        //
+        // `onGroupHeaderClicked` is the exception, matching source: group headers select on mouseup,
+        // after the callback, so `preventDefault()` there *does* suppress the selection.
         onCellClicked?: (cell: Item, event: CellClickedEventArgs) => void;
         onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
         onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;

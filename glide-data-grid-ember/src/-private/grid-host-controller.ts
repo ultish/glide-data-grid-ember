@@ -63,6 +63,7 @@ import { coercePasteCell, type CoercePasteValueCallback } from "../rendering/pas
 import { applyCellValidation, type ValidateCellCallback } from "../rendering/validate-cell.ts";
 import { copyHeaderRow } from "../rendering/copy-paste.ts";
 import { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "../rendering/click-behavior.ts";
+import { computeGroupHeaderSelection } from "../rendering/group-header-selection.ts";
 import { remAdjustDimensions, measureRemSize, type RemAdjustableDimensions } from "../rendering/rem-adjuster.ts";
 import { sizeColumns, applyColumnGrow } from "../rendering/column-sizer.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
@@ -699,11 +700,15 @@ export interface GridHostArgs {
      * A click on a column *group* header (the band above the headers, when `column.group` is set).
      * Mirrors source's `onGroupHeaderClicked`.
      *
-     * **Known divergence:** in source, `preventDefault()` here suppresses group-header *selection*,
-     * because source selects group headers on mouseup. This port selects them on mousedown together
-     * with ordinary headers (Phase 7b never split the two paths), so by the time this fires the
-     * selection has already happened and `preventDefault()` has nothing to gate. Splitting them is a
-     * Phase 7b change, not a 9g one.
+     * **`preventDefault()` here suppresses the group's column selection** -- and this is the only
+     * click callback in the grid where it can. Group-header selection is applied on *mouseup*, right
+     * after this callback (`data-editor.tsx:2498-2509`); cells and ordinary headers select on
+     * mousedown, long before their callback fires, so theirs cannot be suppressed. The asymmetry is
+     * upstream's.
+     *
+     * The selection covers the clicked group's whole contiguous column span, and only when
+     * `columnSelect` is `"multi"` -- source no-ops entirely otherwise
+     * (`handleGroupHeaderSelection`, `:2143`).
      */
     readonly onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
 
@@ -2848,13 +2853,19 @@ export class GridHostController {
     // mousedown -- source's `isValidClick`/`lastMouseSelectLocation` pair, ported to
     // `rendering/click-behavior.ts` so the drag-is-not-a-click rule has a test.
     //
-    // **`preventDefault()` deliberately cannot suppress the selection change**, and that is worth
-    // stating because it looks like a gap. Selection happens on mousedown, in source
-    // (`data-editor.tsx:2126`, `handleSelect`) exactly as here, and these callbacks fire on the
-    // subsequent mouseup -- so by the time a consumer could call `preventDefault()`, the selection
-    // has already moved. Source's `isPrevented` gates only the renderer's `onClick` and cell
-    // activation. Making it stronger here would give a consumer behaviour their React version does
-    // not have, silently.
+    // For **cells and ordinary headers**, `preventDefault()` deliberately cannot suppress the
+    // selection change, and that is worth stating because it looks like a gap. Selection happens on
+    // mousedown, in source (`data-editor.tsx:2126`, `handleSelect`) exactly as here, and these
+    // callbacks fire on the subsequent mouseup -- so by the time a consumer could call
+    // `preventDefault()`, the selection has already moved. Source's `isPrevented` gates only the
+    // renderer's `onClick` and cell activation there. Making it stronger here would give a consumer
+    // behaviour their React version does not have, silently.
+    //
+    // **Group headers are the one exception, and it is real** (`data-editor.tsx:2498-2509`): source's
+    // mousedown does nothing for a group header but record its location (`:2048-2049`), and
+    // `handleGroupHeaderSelection` runs from *mouseup*, after `onGroupHeaderClicked`, gated on
+    // `!isPrevented`. So `preventDefault()` there genuinely does suppress selection. That asymmetry
+    // is upstream's, not this port's -- see `dispatchClick`.
 
     /** The fields every click event shares with a hover event. Kept in one place so the two paths
      *  cannot drift. */
@@ -2893,8 +2904,15 @@ export class GridHostController {
         const hit = this.resolveMouseHit(args, ev);
 
         if (hit.kind === "header") {
-            if (isValidClick(downState.location, hit.location)) {
-                this.emitHeaderClicked(args, hit);
+            if (!isValidClick(downState.location, hit.location)) return;
+            // Source guards *both* header branches with `if (clickLocation < 0) return;`
+            // (`data-editor.tsx:2483,2498`), ahead of the callback and of the selection -- the
+            // select-all checkbox header is neither a header click nor a group-header selection.
+            if (hit.location[0] - args.rowMarkerOffset < 0) return;
+            const prevented = this.emitHeaderClicked(args, hit);
+            // The one suppressible selection in the whole grid: see the block comment above.
+            if (hit.location[1] === -2 && !prevented) {
+                this.applyGroupHeaderSelection(args, hit);
             }
             return;
         }
@@ -2933,39 +2951,73 @@ export class GridHostController {
 
     /**
      * Fires `onHeaderClicked` or `onGroupHeaderClicked` depending on which band was hit (row `-1`
-     * vs `-2`).
+     * vs `-2`). The row-marker guard lives in the caller, where source has it.
      *
-     * **Returns early for the row-marker column** (`col < 0` after unmangling): source guards both
-     * branches with `if (clickLocation < 0) return;` (`data-editor.tsx:2483,2498`), so the
-     * select-all checkbox header is not reported as a header click.
-     *
-     * Nothing is suppressible through the returned `preventDefault()` in this port. In source it
-     * suppresses `handleGroupHeaderSelection`, which runs on *mouseup* there -- but this port
-     * selects group headers on mousedown along with ordinary headers (Phase 7b never split the two),
-     * so there is nothing left to gate by the time this fires. Recorded as a known divergence rather
-     * than fixed here: splitting group-header selection out is a Phase 7b change, not a 9g one.
+     * Returns `true` if the consumer called `preventDefault()`. That only *means* anything for a
+     * group header, where it suppresses the group's column selection -- `onHeaderClicked` fires
+     * long after an ordinary header's selection has already been applied on mousedown, exactly as
+     * in source. See the block comment at the top of this section.
      */
-    private emitHeaderClicked(args: ResolvedGridHostArgs, hit: MouseHit): void {
+    private emitHeaderClicked(args: ResolvedGridHostArgs, hit: MouseHit): boolean {
         const isGroup = hit.location[1] === -2;
         const callback = isGroup ? args.onGroupHeaderClicked : args.onHeaderClicked;
-        if (callback === undefined) return;
+        if (callback === undefined) return false;
         const [mangledCol] = hit.location;
         const col = mangledCol - args.rowMarkerOffset;
-        if (col < 0) return;
         const bounds = this.computeCellRect(args, mangledCol, hit.location[1]);
+        let prevented = false;
         const common = {
             ...this.clickEventBase(hit),
             bounds,
             group: args.columns[col]?.group ?? "",
             localEventX: hit.localX - bounds.x,
             localEventY: hit.localY - bounds.y,
-            preventDefault: () => {},
+            preventDefault: () => {
+                prevented = true;
+            },
         };
         if (isGroup) {
             args.onGroupHeaderClicked?.(col, { ...common, kind: groupHeaderKind, location: [col, -2] });
         } else {
             args.onHeaderClicked?.(col, { ...common, kind: headerKind, location: [col, -1] });
         }
+        return prevented;
+    }
+
+    /**
+     * Selects the clicked group's whole column span. Port of `handleGroupHeaderSelection`
+     * (`data-editor.tsx:2142-2189`); the branch logic is
+     * {@link computeGroupHeaderSelection} in `rendering/group-header-selection.ts` so it is testable.
+     *
+     * Runs on **mouseup**, after `onGroupHeaderClicked` and only if the consumer did not prevent it.
+     */
+    private applyGroupHeaderSelection(args: ResolvedGridHostArgs, hit: MouseHit): void {
+        const mangledSelection = this.mangledSelection(args);
+        const { mappedColumns } = this.computeMangledLayout(args);
+        const isMultiKey = browserIsOSX.value ? hit.metaKey : hit.ctrlKey;
+        const update = computeGroupHeaderSelection({
+            mappedColumns,
+            col: hit.location[0],
+            rowMarkerOffset: args.rowMarkerOffset,
+            selectedColumns: mangledSelection.columns,
+            columnSelect: args.columnSelect,
+            columnSelectionMode: args.columnSelectionMode,
+            isMultiKey,
+        });
+        if (update === undefined) return;
+        this.applyMangledSelection(
+            args,
+            writerSetSelectedColumns(
+                mangledSelection,
+                update.newColumns,
+                update.append,
+                isMultiKey,
+                this.selectionOptions(args)
+            )
+        );
+        // Source touches neither `lastSelectedColRef` nor `lastSelectedRowRef` here (contrast the
+        // single-column header path, which sets both). Matched deliberately: a shift-click after a
+        // group-header click extends from the last *header* click, not from the group.
     }
 
     /** Fires `onCellActivated`. `mangledLocation` is converted to consumer space here, the single
@@ -3496,7 +3548,14 @@ export class GridHostController {
                     vetoed: false,
                 };
             }
-            this.dispatchHeaderMouseDown(args, hit, isMultiKey);
+            // `resolveMouseHit` folds both header bands into `kind: "header"`, but source keeps
+            // them apart and they behave differently: `handleSelect`'s `groupHeaderKind` branch
+            // (`data-editor.tsx:2048-2049`) does nothing but record the press location. Group-header
+            // *selection* runs from mouseup instead, so `@onGroupHeaderClicked`'s `preventDefault()`
+            // can suppress it -- see `dispatchClick`/`applyGroupHeaderSelection`.
+            if (hit.location[1] !== -2) {
+                this.dispatchHeaderMouseDown(args, hit, isMultiKey);
+            }
         } else if (!hit.isMaybeScrollbar) {
             this.clearSelection();
         }

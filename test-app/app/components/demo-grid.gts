@@ -77,6 +77,7 @@ import {
     type CoercePasteValueCallback,
     type CellActivatedEventArgs,
     type CellActivationBehavior,
+    type GroupHeaderClickedEventArgs,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -268,6 +269,9 @@ export default class DemoGrid extends Component {
 
     // Phase 9: draw-hooks toggle (see the module-scope hooks above).
     @tracked showDrawHooks = false;
+
+    /** Drives `handleGroupHeaderClicked`'s `preventDefault()`. See that method. */
+    @tracked suppressGroupHeaderSelect = false;
 
     get drawCell(): DrawCellCallback | undefined {
         return this.showDrawHooks ? drawCellHook : undefined;
@@ -708,8 +712,23 @@ export default class DemoGrid extends Component {
         this.lastClick = `header ${col}`;
     };
 
-    handleGroupHeaderClicked = (col: number): void => {
+    /**
+     * Group headers are the ONE place where `preventDefault()` suppresses the selection: they select
+     * on mouseup, right after this callback, where cells and ordinary headers select on mousedown
+     * long before theirs fires. Flip "Suppress group select" and click a group band: the readout
+     * still updates, the column selection does not.
+     */
+    handleGroupHeaderClicked = (col: number, event: GroupHeaderClickedEventArgs): void => {
+        if (this.suppressGroupHeaderSelect) {
+            event.preventDefault();
+            this.lastClick = `group header over col ${col} (selection suppressed)`;
+            return;
+        }
         this.lastClick = `group header over col ${col}`;
+    };
+
+    toggleSuppressGroupHeaderSelect = (): void => {
+        this.suppressGroupHeaderSelect = !this.suppressGroupHeaderSelect;
     };
 
     handleCellActivated = (cell: Item, event: CellActivatedEventArgs): void => {
@@ -881,6 +900,9 @@ export default class DemoGrid extends Component {
                 </button>
                 <button type="button" class="gdg-full__toggle" data-test-draw-hooks-toggle {{on "click" this.toggleDrawHooks}}>
                     Draw hooks: <b>{{if this.showDrawHooks "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-suppress-group-select-toggle {{on "click" this.toggleSuppressGroupHeaderSelect}}>
+                    Suppress group select: <b>{{if this.suppressGroupHeaderSelect "on" "off"}}</b>
                 </button>
                 <button type="button" class="gdg-full__toggle" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
                     App-owned search: <b>{{if this.useExternalSearch "on" "off"}}</b>

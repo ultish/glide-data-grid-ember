@@ -34,23 +34,16 @@
 // stays a pure, memoizable function of it. Identical arrangement to `withColumnSort`'s `sort`.
 //
 // -------------------------------------------------------------------------------------------
-// WHAT THIS PORT CANNOT DO YET (both blocked on grid args that don't exist)
+// WHAT THIS PORT CANNOT DO YET
 // -------------------------------------------------------------------------------------------
 //
-//  1. **No group-header click.** Source drives the toggle from `onGroupHeaderClicked`. This addon
-//     has no such arg -- the only group-header event it exposes is `@onGroupHeaderContextMenu`
-//     (Phase 9d). So {@link CollapsingGroupsResult.onGroupHeaderClicked} is returned in the shape
-//     that arg *will* have, and until it exists you wire the same handler to
-//     `@onGroupHeaderContextMenu` (right-click to collapse) or to a toggle in your own chrome via
-//     {@link CollapsingGroupsResult.toggleGroup}. Nothing else about this module changes when the
-//     arg lands.
-//  2. **No collapsed-group header tint.** Source also returns a `getGroupDetails` that gives a
+//  1. **No collapsed-group header tint.** Source also returns a `getGroupDetails` that gives a
 //     collapsed group's header `bgHeaderHasFocus`. This addon hardcodes `getGroupDetails` to an
 //     identity mapping in `grid-host-controller.ts` (`DEFAULT_GROUP_DETAILS`) and exposes no arg, so
 //     the collapsed *cells* are tinted (via each column's `themeOverride`, which is exposed) but the
 //     group header itself is not.
 //
-// Both are `GridHostArgs` additions, not data-source work; see the 9j report.
+// That is a `GridHostArgs` addition, not data-source work; see the 9j report.
 //
 // -------------------------------------------------------------------------------------------
 // IDENTITY STABILITY -- read `column-sort.ts`'s header first.
@@ -103,14 +96,10 @@ export interface CollapsingGroupsProps {
      */
     readonly onSelectionChanged?: (selection: GridSelection) => void;
     /**
-     * `1` if you pass `@rowMarkers` to the grid, otherwise `0`. @defaultValue 0
-     *
-     * Needed **only** by the auto-expand behaviour, and for a genuinely surprising reason worth
-     * stating: `@onSelectionChanged` is the one callback in this addon that reports column indices
-     * in the grid's *mangled* space (row-marker column included). `@onCellsEdited`,
-     * `@onColumnMoved` and the three context-menu callbacks all subtract the offset first;
-     * `applySelection` hands out the internal `GridSelection` verbatim. Getting this wrong expands
-     * the group one column to the left of the one you clicked in.
+     * @deprecated Ignored, and safe to delete. It existed because `@onSelectionChanged` used to
+     * report *mangled* column indices while every other callback reported consumer ones; that split
+     * was removed on 2026-08-09 and every consumer-facing callback now speaks consumer space. Still
+     * accepted so passing it is not a compile error, but passing `1` no longer shifts anything.
      */
     readonly rowMarkerOffset?: number;
 }
@@ -132,12 +121,14 @@ export interface CollapsingGroupsResult {
      */
     readonly onSelectionChanged: (selection: GridSelection) => void;
     /**
-     * Toggle handler shaped for a group-header click, i.e. `(col, event)`.
+     * Pass to `@onGroupHeaderClicked`. Collapses the clicked group, or expands it if already
+     * collapsed. Also works on `@onGroupHeaderContextMenu` (right-click to collapse) or from your
+     * own chrome via {@link CollapsingGroupsResult.toggleGroup}.
      *
-     * **The `@onGroupHeaderClicked` arg it is named for does not exist yet** (see this file's
-     * header). Until it does, wire this to `@onGroupHeaderContextMenu` for right-click-to-collapse,
-     * or call {@link CollapsingGroupsResult.toggleGroup} from your own UI. `event.preventDefault()`
-     * is called when the click actually hits a group, matching source.
+     * It calls `event.preventDefault()` whenever the click hits a real group, matching source --
+     * and on `@onGroupHeaderClicked` that is load-bearing rather than decorative: group headers are
+     * the one band whose selection is applied on *mouseup*, after this callback, so
+     * `preventDefault()` stops the collapse from also selecting every column in the group.
      */
     readonly onGroupHeaderClicked: (col: number, event?: { preventDefault: () => void }) => void;
     /** Collapse the group if expanded, expand it if collapsed. The primitive the rest is built on. */
@@ -298,9 +289,9 @@ export function withCollapsingGroups(p: CollapsingGroupsProps): CollapsingGroups
         onSelectionChanged: (selection: GridSelection): void => {
             const current = selection.current;
             if (current !== undefined) {
-                // See `rowMarkerOffset`'s doc comment: this callback -- alone among the addon's --
-                // reports mangled column indices.
-                const group = columns[current.cell[0] - rowMarkerOffset]?.group ?? "";
+                // Consumer space, same as `columns` -- see `rowMarkerOffset`'s doc comment for the
+                // subtraction that used to be here and why it is gone.
+                const group = columns[current.cell[0]]?.group ?? "";
                 if (group !== "" && isCollapsed(group)) {
                     onCollapsedChange(collapsed.filter(g => g !== group));
                 }
