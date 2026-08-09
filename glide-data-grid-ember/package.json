@@ -1,9 +1,15 @@
 {
     "name": "glide-data-grid-ember",
-    "version": "0.0.0",
-    "description": "The default blueprint for Embroider v2 addons.",
+    "version": "0.1.0",
+    "description": "A fast, canvas-rendered data grid for Ember — an Ember v2 addon port of glide-data-grid.",
     "keywords": [
-        "ember-addon"
+        "ember-addon",
+        "data-grid",
+        "datagrid",
+        "table",
+        "canvas",
+        "glide-data-grid",
+        "virtualized"
     ],
     "repository": {
         "type": "git",
@@ -31,6 +37,7 @@
     },
     "files": [
         "addon-main.cjs",
+        "CHANGELOG.md",
         "declarations",
         "dist"
     ],
