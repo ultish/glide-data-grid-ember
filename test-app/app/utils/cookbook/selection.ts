@@ -21,6 +21,23 @@ export const selectionSection: Section = {
         },
         {
             kind: "code",
+            text: `<GlideDataGrid
+  @rowMarkers="number"
+  @rowMarkerStartIndex={{0}}                  {{! default 1 — 0 makes the numbers match row indices }}
+  @rowMarkerWidth={{48}}
+  @rowMarkerTheme={{this.markerTheme}}        {{! stable object, not an inline hash }}
+  ...
+/>`,
+        },
+        {
+            kind: "list",
+            items: [
+                "`@rowMarkerStartIndex` numbers the first row. It defaults to `1` because that is what a spreadsheet does; set it to `0` and the markers agree with the `row` your `@getCellContent` is asked for, which is worth doing while debugging.",
+                "`@rowMarkerTheme` is a theme overlay for the marker column alone — tint it away from the data without touching `@theme`. Build it once (module constant or `@cached` getter): it lands on a column, so a fresh object every render is churn on a grid arg.",
+            ],
+        },
+        {
+            kind: "code",
             text: `handleSelectionChanged = selection => {
   // selection.current?.cell   -> [col, row] of the focused cell
   // selection.current?.range  -> { x, y, width, height }

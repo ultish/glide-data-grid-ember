@@ -9,6 +9,8 @@ import { emberSection } from "./ember.ts";
 import { editingSection } from "./editing.ts";
 import { selectionSection } from "./selection.ts";
 import { sortingSection } from "./sorting.ts";
+import { composingSection } from "./composing.ts";
+import { hoverSection } from "./hover.ts";
 import { themingSection } from "./theming.ts";
 import { themeReferenceSection } from "./theme-reference.ts";
 import { searchSection } from "./search.ts";
@@ -25,6 +27,8 @@ export const SECTIONS: readonly Section[] = [
     editingSection,
     selectionSection,
     sortingSection,
+    composingSection,
+    hoverSection,
     themingSection,
     themeReferenceSection,
     searchSection,

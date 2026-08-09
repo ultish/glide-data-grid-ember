@@ -83,9 +83,81 @@ export default class PeopleTable extends Component {
             ],
         },
         {
+            kind: "p",
+            text: "**Rejecting or normalising an edit.** `@validateCell` runs on the overlay editor's initial value and again on every change. Return `false` to reject — the editor stays open and usable, but closing it commits nothing — or return a coerced cell to accept a corrected value.",
+        },
+        {
+            kind: "code",
+            text: `validateCell = (cell, newValue, prevValue) => {
+  const [col] = cell;                                  // your coordinate space, no row-marker column
+  if (col !== EMAIL_COL) return true;
+  return newValue.data.includes("@")
+    ? true
+    : { ...newValue, displayData: newValue.data };     // or \`false\` to reject outright
+};`,
+        },
+        {
+            kind: "note",
+            text: "Two things to know before you rely on it. **It applies to the overlay editor only** — paste, fill, cut and delete deliberately never consult it, matching upstream. And **coercion commits but does not redisplay**: upstream re-renders its editor from the coerced value so the user watches the correction happen, whereas this port's editors are DOM factories with no channel to push a value back in, so the coerced value is what gets *committed* while the editor keeps showing what was typed until it closes. Rejection (`false`) behaves identically to upstream. For live-as-you-type correction, write a custom editor.",
+        },
+        {
+            kind: "p",
+            text: "**Paste coercion.** `@coercePasteValue` runs *before* the built-in per-kind rules and before any custom renderer's `onPaste`. Return `undefined` to fall through; returning a cell of a different `kind` than the one being pasted into is ignored, because a column's cells must keep their kind.",
+        },
+        {
+            kind: "code",
+            text: `coercePasteValue = (val, cell) => {
+  if (cell.kind !== "number") return undefined;               // fall through to the defaults
+  const n = Number(val.replace(/[$,\\s]/g, ""));
+  return Number.isNaN(n) ? undefined : { ...cell, data: n, displayData: MONEY.format(n) };
+};`,
+        },
+        {
+            kind: "p",
+            text: "**Copy and delete.** `@copyHeaders` prepends a row of column titles to a copy or cut (copy/cut only — a paste never expects to read them back). `@onDelete` intercepts Delete/Backspace and the clearing half of a cut:",
+        },
+        {
+            kind: "code",
+            text: `<GlideDataGrid @copyHeaders={{true}} @onDelete={{this.handleDelete}} ... />
+
+handleDelete = selection => {
+  if (this.locked) return false;          // false  -> cancel the delete entirely
+  if (selection.columns.length > 0) {     // a GridSelection -> clear THAT instead
+    return { ...selection, current: undefined };
+  }
+  return true;                            // true   -> clear the current selection, as normal
+};`,
+        },
+        {
+            kind: "p",
+            text: "The selection passed in and any selection you return are both in your own coordinate space — no row-marker column, the same as `@onCellsEdited`.",
+        },
+        {
+            kind: "p",
+            text: "**When a click starts an edit.** `@cellActivationBehavior` is `\"second-click\"` by default (a click on the already-selected cell activates it); `\"single-click\"` activates any click, `\"double-click\"` requires a real double-click. A cell's own `activationBehaviorOverride` wins over the grid-wide setting. `@editOnType` (default `true`) is what makes typing a printable character over the selected cell open its editor seeded with that character — set it `false` to require an explicit Enter or activation click.",
+        },
+        {
+            kind: "code",
+            text: `<GlideDataGrid @cellActivationBehavior="single-click" @editOnType={{false}} ... />`,
+        },
+        {
             kind: "code",
             text: `{{! trailing "add row" affordance }}
-<GlideDataGrid @showTrailingBlankRow={{true}} @onRowAppended={{this.addRow}} ... />`,
+<GlideDataGrid
+  @showTrailingBlankRow={{true}}
+  @onRowAppended={{this.addRow}}
+  @trailingRowOptions={{this.trailingRowOptions}}    {{! stable object — see below }}
+  ...
+/>`,
+        },
+        {
+            kind: "list",
+            items: [
+                "`@trailingRowOptions` is cosmetic: `tint` shades the row as not-real-data, `hint` is the text in its first column (this port defaults it to `\"Add row\"`; pass `\"\"` for upstream's empty default), `addIcon` swaps the built-in `+` glyph for a named header icon.",
+                "Upstream's `sticky` and `targetColumn` are deliberately **not** accepted — both would be silently inert here — so nothing you pass is quietly ignored.",
+                "A column's own `trailingRowOptions` overrides `hint`/`addIcon` for that column, and `disabled: true` blanks its trailing cell.",
+                "Build the object in a module constant or a `@cached` getter rather than inline in the template — the general identity-stability rule for grid args, spelled out in **Guide 9 — The identity rules**.",
+            ],
         },
         {
             kind: "code",

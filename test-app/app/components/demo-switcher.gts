@@ -21,6 +21,10 @@
 //   - "Cookbook"       -> `<CookbookPage>`: Phase 10b's task-indexed recipes, as a live page rather
 //                          than a markdown file, so it deploys with the demos it describes. It links
 //                          into the guide rather than restating it -- exactly one copy of everything.
+//   - "Composed hooks" -> `<ComposedDemo>`: 9j's three composable data-source hooks stacked on one
+//                          `recordsSource` -- `withMovableColumns`, `withCollapsingGroups` and
+//                          `UndoRedo` -- with both coordinate spaces printed for every edit, so the
+//                          decorator coordinate contract is *shown* rather than asserted.
 //   - "Async paging"   -> `<AsyncDemo>`: Phase 8's `AsyncRecordsSource` -- 100k rows that aren't in
 //                          memory, fetched a page at a time as `@onVisibleRegionChanged` reports
 //                          what's on screen, each arrival repainted by damage.
@@ -32,6 +36,7 @@ import TrackingDemo from 'test-app/components/tracking-demo';
 import GlideDemo from 'test-app/components/glide-demo';
 import StreamingDemo from 'test-app/components/streaming-demo';
 import AsyncDemo from 'test-app/components/async-demo';
+import ComposedDemo from 'test-app/components/composed-demo';
 import DaisyDemo from 'test-app/components/daisy-demo';
 import CookbookPage from 'test-app/components/cookbook-page';
 import GuidePage from 'test-app/components/guide-page';
@@ -41,6 +46,7 @@ type DemoTab =
   | 'tracking'
   | 'glide'
   | 'streaming'
+  | 'composed'
   | 'async'
   | 'daisy'
   | 'guide'
@@ -63,6 +69,10 @@ export default class DemoSwitcher extends Component {
 
   showStreamingDemo = (): void => {
     this.tab = 'streaming';
+  };
+
+  showComposedDemo = (): void => {
+    this.tab = 'composed';
   };
 
   showAsyncDemo = (): void => {
@@ -99,6 +109,10 @@ export default class DemoSwitcher extends Component {
 
   get isStreaming(): boolean {
     return this.tab === 'streaming';
+  }
+
+  get isComposed(): boolean {
+    return this.tab === 'composed';
   }
 
   get isAsync(): boolean {
@@ -156,6 +170,14 @@ export default class DemoSwitcher extends Component {
           Streaming updates
         </button>
         <button
+          class="btn btn-xs btn-ghost {{if this.isComposed 'btn-active'}}"
+          type="button"
+          data-test-show-composed
+          {{on "click" this.showComposedDemo}}
+        >
+          Composed hooks
+        </button>
+        <button
           class="btn btn-xs btn-ghost {{if this.isAsync 'btn-active'}}"
           type="button"
           data-test-show-async
@@ -195,6 +217,8 @@ export default class DemoSwitcher extends Component {
           <GlideDemo />
         {{else if this.isStreaming}}
           <StreamingDemo />
+        {{else if this.isComposed}}
+          <ComposedDemo />
         {{else if this.isAsync}}
           <AsyncDemo />
         {{else if this.isDaisy}}
