@@ -6,7 +6,7 @@ A fast, canvas-rendered data grid for Ember — an Ember v2 addon port of
 It stays smooth at hundreds of thousands of rows because it never renders cells as DOM: it paints
 only what's on screen, to a canvas, and asks you for those cells one at a time.
 
-**[▶ Live demos and the full cookbook](#live-demos)** — every option, switched on, in a real grid.
+**[▶ Live demos and the full cookbook](https://ultish.github.io/glide-data-grid-ember/)** — every option, switched on, in a real grid.
 
 ## What you get
 
@@ -83,19 +83,21 @@ The addon imports its own CSS, so there is no stylesheet to wire up.
 
 ## Live demos
 
+**[▶ https://ultish.github.io/glide-data-grid-ember/](https://ultish.github.io/glide-data-grid-ember/)**
+
 The test app is the reference: a fully-featured grid with every option switched on and a toggle row
 to change them live, plus focused demos for streaming updates, async paging, theming and the
 [grid.glideapps.com](https://grid.glideapps.com/) replica — and the **cookbook**, a page of
 copy-pasteable recipes for each task you'll hit when integrating.
 
-> 📌 The deployed site link goes here once GitHub Pages is set up. Until then, run it locally:
->
-> ```
-> pnpm install
-> pnpm --filter test-app start
-> ```
->
-> then open <http://localhost:4200> and pick the **Cookbook** tab.
+To run it locally:
+
+```
+pnpm install
+pnpm --filter test-app start
+```
+
+then open <http://localhost:4200> and pick the **Cookbook** tab.
 
 ## Deeper guides
 
