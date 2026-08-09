@@ -44,7 +44,10 @@ describe("resolveNewRowTarget", () => {
     });
 
     test("a per-column target given as an object also resolves by identity", () => {
-        const cols: GridColumn[] = [{ title: "Avatar", width: 60 }, { title: "Name", width: 200 }];
+        const cols: GridColumn[] = [
+            { title: "Avatar", width: 60 },
+            { title: "Name", width: 200 },
+        ];
         const withTarget: GridColumn[] = [{ ...cols[0]!, trailingRowOptions: { targetColumn: cols[1]! } }, cols[1]!];
         expect(resolveNewRowTarget(withTarget, undefined, 0)).toBe(1);
     });

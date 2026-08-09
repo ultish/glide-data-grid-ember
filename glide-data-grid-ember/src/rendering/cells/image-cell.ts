@@ -36,7 +36,13 @@ export const imageCellRenderer: InternalCellRenderer<ImageCell> = {
     needsHover: false,
     useLabel: false,
     needsHoverPosition: false,
-    draw: a => drawImage(a, a.cell.displayData ?? a.cell.data, a.cell.rounding ?? a.theme.roundingRadius ?? 4, a.cell.contentAlign),
+    draw: a =>
+        drawImage(
+            a,
+            a.cell.displayData ?? a.cell.data,
+            a.cell.rounding ?? a.theme.roundingRadius ?? 4,
+            a.cell.contentAlign
+        ),
     measure: (_ctx, cell) => cell.data.length * 50,
     onDelete: c => ({
         ...c,
@@ -55,7 +61,7 @@ export const imageCellRenderer: InternalCellRenderer<ImageCell> = {
                     return undefined;
                 }
             })
-            .filter(x => x !== undefined) as string[];
+            .filter(x => x !== undefined);
 
         if (uris.length === cell.data.length && uris.every((u, i) => u === cell.data[i])) return undefined;
         return {
@@ -67,14 +73,18 @@ export const imageCellRenderer: InternalCellRenderer<ImageCell> = {
 
 const itemMargin = 4;
 
-export function drawImage(args: BaseDrawArgs, data: readonly string[], rounding: number, contentAlign?: BaseGridCell["contentAlign"]) {
+export function drawImage(
+    args: BaseDrawArgs,
+    data: readonly string[],
+    rounding: number,
+    contentAlign?: BaseGridCell["contentAlign"]
+) {
     const { rect, col, row, theme, ctx, imageLoader } = args;
     const { x, y, height: h, width: w } = rect;
 
     const imgHeight = h - theme.cellVerticalPadding * 2;
     const images: (HTMLImageElement | ImageBitmap | undefined)[] = [];
     let totalWidth = 0;
-    // eslint-disable-next-line unicorn/no-for-loop
     for (let index = 0; index < data.length; index++) {
         const i = data[index]!;
         if (i.length === 0) continue;

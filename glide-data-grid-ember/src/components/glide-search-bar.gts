@@ -86,8 +86,11 @@ export default class GlideSearchBar extends Component<GlideSearchBarSignature> {
     get isVisible(): boolean {
         const open = this.state?.isOpen === true;
         if (open && this.closeTimer !== undefined) {
+            // The close timer must be cancelled when search reopens during its exit animation.
             window.clearTimeout(this.closeTimer);
+            // eslint-disable-next-line ember/no-side-effects
             this.closeTimer = undefined;
+            // eslint-disable-next-line ember/no-side-effects
             this.isAnimatingOut = false;
         }
         return open || this.isAnimatingOut;
@@ -172,11 +175,12 @@ export default class GlideSearchBar extends Component<GlideSearchBarSignature> {
 
     <template>
         {{#if this.isVisible}}
+            {{! template-lint-disable no-invalid-interactive no-pointer-down-event-binding }}
             <div
                 class="gdg-search-bar {{unless this.isOpen 'gdg-search-out'}}"
                 {{on "mousedown" this.swallow}}
-                {{on "mousemove" this.swallow}}
                 {{on "mouseup" this.swallow}}
+                {{on "mousemove" this.swallow}}
                 {{on "click" this.swallow}}
                 ...attributes
             >

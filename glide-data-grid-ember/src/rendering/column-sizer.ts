@@ -28,7 +28,7 @@ export function measureCell(
 ): number {
     if (cell === undefined) return DEFAULT_COLUMN_WIDTH;
     const renderer = getCellRenderer(cell);
-    return renderer?.measure?.(ctx as unknown as CanvasRenderingContext2D, cell as never, theme) ?? DEFAULT_COLUMN_WIDTH;
+    return renderer?.measure?.(ctx as unknown as CanvasRenderingContext2D, cell, theme) ?? DEFAULT_COLUMN_WIDTH;
 }
 
 export interface MeasureColumnOptions {
@@ -118,11 +118,11 @@ export function sizeColumns(
     if (ctx !== undefined) ctx.font = theme.baseFontFull;
     try {
         return columns.map((c, i) => {
-            if ("width" in c && typeof c.width === "number") return c as InnerGridColumn;
+            if ("width" in c && typeof c.width === "number") return c;
             // No context available yet (the canvas hasn't been created): fall back rather than
             // measuring against nothing. The controller re-measures once it can.
-            if (ctx === undefined) return { ...c, width: DEFAULT_COLUMN_WIDTH } as InnerGridColumn;
-            return { ...c, width: measureColumn(ctx, theme, c, i, sample, getCellRenderer, options) } as InnerGridColumn;
+            if (ctx === undefined) return { ...c, width: DEFAULT_COLUMN_WIDTH };
+            return { ...c, width: measureColumn(ctx, theme, c, i, sample, getCellRenderer, options) };
         });
     } finally {
         if (ctx !== undefined && previousFont !== undefined) ctx.font = previousFont;

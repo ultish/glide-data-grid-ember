@@ -171,7 +171,15 @@ describe("MangledLayoutCache: the blit property it exists for", () => {
     it("a real column-width change still defeats the blit", () => {
         const cache = new MangledLayoutCache();
         const before = cache.get(cols(3), undefined, 0);
-        const after = cache.get([{ title: "C0", width: 100 }, { title: "C1", width: 180 }, { title: "C2", width: 100 }], undefined, 0);
+        const after = cache.get(
+            [
+                { title: "C0", width: 100 },
+                { title: "C1", width: 180 },
+                { title: "C2", width: 100 },
+            ],
+            undefined,
+            0
+        );
         // One column resized -> `computeCanBlit` reports its index so the caller can slide-blit.
         expect(computeCanBlit(argWith(after.mappedColumns), argWith(before.mappedColumns))).toBe(1);
     });

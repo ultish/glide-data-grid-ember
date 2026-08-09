@@ -97,8 +97,6 @@ import type {
     SelectionBehaviorOptions,
     CellBuffer,
     CopyBuffer,
-    BooleanCell,
-    ProvideEditorCallbackResult,
     CellEditorHandle,
     FillHandleDirection,
     FillPatternEventArgs,
@@ -4541,7 +4539,7 @@ export class GridHostController {
             const { mappedColumns } = this.computeMangledLayout(args);
             const isEditingLastCol = mCol === mappedColumns.length - 1 && committed !== undefined;
             if (isEditingLastCol && movement[0] === 1 && args.onColumnAppended !== undefined) {
-                args.onColumnAppended();
+                void args.onColumnAppended();
             } else {
                 this.moveActiveCell(args, mCol + movement[0], mRow + movement[1]);
             }

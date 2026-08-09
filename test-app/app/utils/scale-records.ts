@@ -89,7 +89,18 @@ export class Employee {
 // ------------------------------------------------------------------------------------------------
 
 const FIRST_NAMES = ["Ada", "Grace", "Alan", "Katherine", "Margaret", "Radia", "Barbara", "Jean", "Lynn", "Frances"];
-const LAST_NAMES = ["Lovelace", "Hopper", "Turing", "Johnson", "Hamilton", "Perlman", "Liskov", "Bartik", "Conway", "Allen"];
+const LAST_NAMES = [
+    "Lovelace",
+    "Hopper",
+    "Turing",
+    "Johnson",
+    "Hamilton",
+    "Perlman",
+    "Liskov",
+    "Bartik",
+    "Conway",
+    "Allen",
+];
 const DEPARTMENTS = ["Engineering", "Design", "Product", "Support", "Research"];
 const CITIES: readonly Address[] = [
     { city: "Lisbon", country: "PT" },
@@ -122,7 +133,10 @@ export function buildEmployees(count: number = SCALE_ROW_COUNT): readonly Employ
         const petCount = Math.floor(rand() * 3); // 0-2 related entities per row
         const pets: Pet[] = [];
         for (let p = 0; p < petCount; p++) {
-            pets.push({ name: pick(PET_NAMES, Math.floor(rand() * 100)), species: pick(SPECIES, Math.floor(rand() * 100)) });
+            pets.push({
+                name: pick(PET_NAMES, Math.floor(rand() * 100)),
+                species: pick(SPECIES, Math.floor(rand() * 100)),
+            });
         }
         out.push(
             new Employee(

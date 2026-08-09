@@ -30,7 +30,7 @@ handleItemHovered = args => {
         {
             kind: "list",
             items: [
-                "`args.kind` is `\"cell\"`, `\"header\"`, `\"group-header\"` or `\"out-of-bounds\"`. Narrow with the exported `headerKind` / `groupHeaderKind` / `outOfBoundsKind` constants — they are value exports precisely so a typo is a compile error.",
+                '`args.kind` is `"cell"`, `"header"`, `"group-header"` or `"out-of-bounds"`. Narrow with the exported `headerKind` / `groupHeaderKind` / `outOfBoundsKind` constants — they are value exports precisely so a typo is a compile error.',
                 "`args.location` is `[col, row]` in **your** coordinate space: the row-marker column is already subtracted, matching `@onCellsEdited`. Hovering the marker column itself reports `col -1`.",
                 "`args.bounds` is the hovered cell's rectangle **in grid-root-relative pixels** — position your tooltip against it, no translation needed. `out-of-bounds` has no bounds.",
                 "Header and group-header events also carry `args.group`. Cells carry `args.isFillHandle`, so you can suppress a tooltip over the fill square.",

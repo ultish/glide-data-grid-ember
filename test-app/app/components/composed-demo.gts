@@ -296,17 +296,15 @@ export default class ComposedDemo extends Component {
                 (drag a column header),
                 <strong>withCollapsingGroups</strong>
                 (click a group header, or the buttons below) and
-                <strong>UndoRedo</strong>. The point is the line at the bottom: reorder the columns,
-                collapse a group, then edit any cell — the edit is reported in
+                <strong>UndoRedo</strong>. The point is the line at the bottom: reorder the columns, collapse a group,
+                then edit any cell — the edit is reported in
                 <em>displayed</em>
                 coordinates and lands in
                 <em>natural</em>
                 ones, and both are printed so a mistranslation would be visible rather than silent.
             </p>
 
-            <div
-                style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 13px system-ui;"
-            >
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 13px system-ui;">
                 <button
                     class="btn btn-xs"
                     type="button"
@@ -336,9 +334,7 @@ export default class ComposedDemo extends Component {
                 </button>
             </div>
 
-            <div
-                style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 13px system-ui;"
-            >
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font: 13px system-ui;">
                 <span style="color: #555;">Collapse group:</span>
                 {{#each this.groupStates as |g|}}
                     <button
@@ -371,11 +367,9 @@ export default class ComposedDemo extends Component {
                 </button>
             </div>
 
-            <p
-                data-test-composed-order
-                style="margin: 0; font: 12px ui-monospace, monospace; color: #666;"
-            >
-                display order: {{this.displayOrder}}
+            <p data-test-composed-order style="margin: 0; font: 12px ui-monospace, monospace; color: #666;">
+                display order:
+                {{this.displayOrder}}
             </p>
 
             <div style="flex: 1 1 auto; min-height: 320px;">
@@ -395,10 +389,7 @@ export default class ComposedDemo extends Component {
                 />
             </div>
 
-            <p
-                data-test-composed-last-edit
-                style="margin: 0; font: 12px ui-monospace, monospace; color: #0a7;"
-            >
+            <p data-test-composed-last-edit style="margin: 0; font: 12px ui-monospace, monospace; color: #0a7;">
                 {{this.lastEdit}}
             </p>
         </div>

@@ -1,5 +1,3 @@
-/* eslint-disable sonarjs/no-duplicate-string */
-/* eslint-disable unicorn/no-for-loop */
 import { deepEqual } from "../common/support.ts";
 import { type Rectangle } from "../data-grid-types.ts";
 import { getStickyWidth, type MappedGridColumn, getFreezeTrailingHeight } from "./data-grid-lib.ts";
@@ -272,10 +270,9 @@ export function computeCanBlit(current: DrawGridArg, last: DrawGridArg | undefin
             // two columns changed, abort
             if (resized !== undefined) return false;
 
-            if (curCol.width === lastCol.width) return false;
-
-            const { width, ...curRest } = curCol;
+            const { width: curWidth, ...curRest } = curCol;
             const { width: lastWidth, ...lastRest } = lastCol;
+            if (curWidth === lastWidth) return false;
 
             // more than width changed, abort
             if (!deepEqual(curRest, lastRest)) return false;

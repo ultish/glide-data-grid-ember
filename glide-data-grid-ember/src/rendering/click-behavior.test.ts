@@ -54,9 +54,7 @@ describe("shouldActivateOnClick", () => {
 
     describe('"second-click"', () => {
         it("activates a click on a cell that was already selected before the press", () => {
-            expect(
-                shouldActivateOnClick({ behavior: "second-click", isDoubleClick: false, ...onSelected })
-            ).toBe(true);
+            expect(shouldActivateOnClick({ behavior: "second-click", isDoubleClick: false, ...onSelected })).toBe(true);
         });
 
         it("does NOT activate the first click on a cell — the press just selected it", () => {

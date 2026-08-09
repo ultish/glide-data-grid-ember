@@ -36,7 +36,7 @@ getCellContent = ([col, row]: Item): GridCell => cellFor(this.people[row]!, col)
         },
         {
             kind: "note",
-            text: "**Nothing about that code is wrong to a type-checker, a linter, or a browser.** It is the shape almost everyone writes first, and the symptom — \"my grid doesn't update\" — points at the grid rather than at the closure. It is the reason `recordsSource` exists.",
+            text: '**Nothing about that code is wrong to a type-checker, a linter, or a browser.** It is the shape almost everyone writes first, and the symptom — "my grid doesn\'t update" — points at the grid rather than at the closure. It is the reason `recordsSource` exists.',
         },
 
         // -- the fix -------------------------------------------------------------------------------
@@ -87,7 +87,11 @@ get getCellContent() {
                     "that one row",
                     "the record's own cache consumed that tag during the eager read",
                 ],
-                ["Write an `@attr` on an Ember Data model", "that one row", "`@attr` is tracked; identical to the row above"],
+                [
+                    "Write an `@attr` on an Ember Data model",
+                    "that one row",
+                    "`@attr` is tracked; identical to the row above",
+                ],
                 [
                     "Replace a nested blob (`person.profile = {...}`)",
                     "that one row",
@@ -122,7 +126,7 @@ get getCellContent() {
         },
         {
             kind: "note",
-            text: "**Two of those rows are the same bug wearing different clothes.** \"`push` the existing array\" and \"mutate an untracked object\" both mean *no tag was dirtied*, and both produce a grid that is confidently displaying stale data. When something doesn't update, ask \"which tracked write was supposed to have happened?\" before looking at the grid at all.",
+            text: '**Two of those rows are the same bug wearing different clothes.** "`push` the existing array" and "mutate an untracked object" both mean *no tag was dirtied*, and both produce a grid that is confidently displaying stale data. When something doesn\'t update, ask "which tracked write was supposed to have happened?" before looking at the grid at all.',
         },
         {
             kind: "p",

@@ -9,8 +9,8 @@
 // cannot be imported by the vitest suite (its constructor needs a real DOM and a real canvas), so
 // moving this out is what lets the coercion rules have tests at all.
 import { GridCellKind, BooleanEmpty, BooleanIndeterminate, isEditableGridCell } from "./data-grid-types.ts";
-import type { GridCell, CustomCell } from "./data-grid-types.ts";
-import type { CustomRenderer, GetCellRendererCallback } from "./cell-types.ts";
+import type { GridCell } from "./data-grid-types.ts";
+import type { GetCellRendererCallback } from "./cell-types.ts";
 import type { CellBuffer } from "./copy-paste.ts";
 
 /**
@@ -95,7 +95,7 @@ export function coercePasteCell(
             // `GridCellKind.Custom` (`readonly !== true`), so falling into `default` here silently
             // made paste into every `CustomRenderer` cell (Phase 5a/5b/5c's extra cells) a no-op.
             // Dispatches to the matching `CustomRenderer.onPaste`, source's own mechanism.
-            const renderer = getCellRenderer(existing) as CustomRenderer<CustomCell> | undefined;
+            const renderer = getCellRenderer(existing);
             if (renderer?.onPaste === undefined) return undefined;
             const newData = renderer.onPaste(raw, existing.data);
             if (newData === undefined) return undefined;

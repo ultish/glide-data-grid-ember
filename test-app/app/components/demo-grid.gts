@@ -20,7 +20,7 @@
 // Holds `@tracked columns` so resize/reorder round-trip visually -- `GridHostController` never
 // mutates column state itself (documented "consumer owns the data" contract in
 // `grid-host-controller.ts`), so a real consumer needs exactly this kind of tracked-state +
-// handler wiring to make resize/reorder actually stick. `ember-route-template`'s `Route(<template>)`
+// handler wiring to make resize/reorder actually stick. The route-template pattern
 // pattern (used in `application.gts`) has no backing class, hence this separate component.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";

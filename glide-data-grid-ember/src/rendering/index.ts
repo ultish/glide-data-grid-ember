@@ -6,7 +6,13 @@
 
 // Core render entry point
 export { drawGrid } from "./render/data-grid-render.ts";
-export type { DrawGridArg, DragAndDropState, HoverInfo, EnqueueCallback, MutableRefObject } from "./render/draw-grid-arg.ts";
+export type {
+    DrawGridArg,
+    DragAndDropState,
+    HoverInfo,
+    EnqueueCallback,
+    MutableRefObject,
+} from "./render/draw-grid-arg.ts";
 export type { BlitData } from "./render/data-grid-render.blit.ts";
 
 // Column mapping / render-lib helpers
@@ -186,7 +192,13 @@ export type { SearchStatus, IncrementalSearchOptions } from "./search.ts";
 // Autoscroll-while-dragging (Phase 9h) -- shared by drag-extend, row reorder and fill-handle drag.
 // Ported from source's `use-autoscroll.ts`; exported so it can be unit-tested and reused, not
 // because consumers are expected to drive it (`<GlideDataGrid>` wires it internally).
-export { Autoscroller, computeScrollEdge, adjustDragLocationForScroll, scrollEdgesAreEqual, NO_SCROLL_EDGE } from "./autoscroll.ts";
+export {
+    Autoscroller,
+    computeScrollEdge,
+    adjustDragLocationForScroll,
+    scrollEdgesAreEqual,
+    NO_SCROLL_EDGE,
+} from "./autoscroll.ts";
 export type { ScrollEdge, AutoscrollerOptions } from "./autoscroll.ts";
 
 // Fill-handle drag-to-fill geometry (Phase 9h). `getClosestRect` turns "the pointer is here, the

@@ -60,7 +60,12 @@ function getButtonInterior(bounds: Rectangle, theme: FullTheme): Rectangle {
     };
 }
 
-function getIsHovered(bounds: Rectangle, posX: number | undefined, posY: number | undefined, theme: FullTheme): boolean {
+function getIsHovered(
+    bounds: Rectangle,
+    posX: number | undefined,
+    posY: number | undefined,
+    theme: FullTheme
+): boolean {
     const { x, y, width, height } = getButtonInterior(bounds, theme);
     return (
         posX !== undefined &&

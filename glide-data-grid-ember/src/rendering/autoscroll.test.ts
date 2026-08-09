@@ -215,7 +215,10 @@ describe("Autoscroller", () => {
 
     it("stops immediately when onTick ends the drag, without scheduling another frame", () => {
         const clock = makeClock();
+        // The callback needs the instance, so initialization must happen in two statements.
         let a!: Autoscroller;
+        // The callback above needs the instance before it is assigned.
+        // eslint-disable-next-line prefer-const
         a = new Autoscroller({ ...clock.options, onTick: () => a.stop() });
         a.setDirection([1, 0]);
         clock.tick(0);

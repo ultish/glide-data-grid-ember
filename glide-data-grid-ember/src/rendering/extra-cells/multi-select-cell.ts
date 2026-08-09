@@ -82,7 +82,11 @@ export const multiSelectCellRenderer: CustomRenderer<MultiSelectCell> = {
             roundedRect(ctx, x, y, width, theme.bubbleHeight, theme.roundingRadius ?? theme.bubbleHeight / 2);
             ctx.fill();
 
-            ctx.fillStyle = matchedOption?.color ? (getLuminance(color) > 0.5 ? "#000000" : "#ffffff") : theme.textBubble;
+            ctx.fillStyle = matchedOption?.color
+                ? getLuminance(color) > 0.5
+                    ? "#000000"
+                    : "#ffffff"
+                : theme.textBubble;
             ctx.fillText(displayText, x + theme.bubblePadding, y + textY + getMiddleCenterBias(ctx, theme));
 
             x += width + theme.bubbleMargin;

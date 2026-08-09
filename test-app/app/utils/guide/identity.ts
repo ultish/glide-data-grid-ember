@@ -56,7 +56,10 @@ export const identitySection: Section = {
                     "`@getCellRenderer` / `@extraCells`",
                     "pass `allExtraCells` (a module constant) or a `@cached` combination — not a fresh array literal",
                 ],
-                ["`@prelightCells`", "pass `undefined` for \"none\", **not** `[]` — a fresh empty array is still a fresh identity"],
+                [
+                    "`@prelightCells`",
+                    'pass `undefined` for "none", **not** `[]` — a fresh empty array is still a fresh identity',
+                ],
                 ["`@highlightRegions`", "same rule, same fix"],
                 [
                     "`@columns`",

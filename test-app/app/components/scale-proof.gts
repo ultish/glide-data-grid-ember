@@ -70,6 +70,8 @@ export default class ScaleProof extends Component {
         super(...args);
         markProjectionBaseline();
         // Runs after the first render, so this captures the cold sweep.
+        // ember/no-runloop: this delayed read must happen after the render pass.
+        // eslint-disable-next-line ember/no-runloop
         next(this, () => this.captureReport("Initial build (cold)"));
     }
 
@@ -118,6 +120,8 @@ export default class ScaleProof extends Component {
         markProjectionBaseline();
         const t0 = performance.now();
         mutate();
+        // ember/no-runloop: this delayed read must happen after the render pass.
+        // eslint-disable-next-line ember/no-runloop
         next(this, () => this.captureReport(label, performance.now() - t0));
     }
 

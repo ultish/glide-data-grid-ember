@@ -134,7 +134,10 @@ describe("copyHeaderRow", () => {
     });
 
     it("prepends cleanly onto a copy buffer", () => {
-        const { textPlain } = getCopyBufferContents([copyHeaderRow(columns, [0, 1]), [textCell("a"), textCell("b")]], [0, 1]);
+        const { textPlain } = getCopyBufferContents(
+            [copyHeaderRow(columns, [0, 1]), [textCell("a"), textCell("b")]],
+            [0, 1]
+        );
         expect(textPlain).toBe("One\tTwo\na\tb");
     });
 

@@ -23,8 +23,16 @@ export const dataSection: Section = {
             head: ["Your data is…", "Use", "Live demo"],
             rows: [
                 ["an array you hold in memory", "`recordsSource`", "Scale proof, Tracking"],
-                ["paged, streamed or generated on demand", "`AsyncRecordsSource` + `@onVisibleRegionChanged`", "Async paging"],
-                ["a firehose where you know which cells changed", "`updateCells()` from `@onReady`", "Streaming updates"],
+                [
+                    "paged, streamed or generated on demand",
+                    "`AsyncRecordsSource` + `@onVisibleRegionChanged`",
+                    "Async paging",
+                ],
+                [
+                    "a firehose where you know which cells changed",
+                    "`updateCells()` from `@onReady`",
+                    "Streaming updates",
+                ],
             ],
         },
         {

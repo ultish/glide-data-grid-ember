@@ -41,11 +41,11 @@ export interface BaseDrawArgs {
 
 /** @category Drawing */
 
-export type DrawStateTuple = [any, (state: any) => void];
+export type DrawStateTuple = [unknown, (state: unknown) => void];
 
 export interface DrawArgs<T extends InnerGridCell> extends BaseDrawArgs {
     cell: T;
-    requestAnimationFrame: (state?: any) => void;
+    requestAnimationFrame: (state?: unknown) => void;
     drawState: DrawStateTuple;
     frameTime: number;
     overrideCursor: ((cursor: CSSCursorValue) => void) | undefined;
@@ -56,7 +56,7 @@ export interface DrawArgs<T extends InnerGridCell> extends BaseDrawArgs {
 export interface PrepResult {
     font: string | undefined;
     fillStyle: string | undefined;
-    renderer: {};
+    renderer: object;
     deprep: ((args: Pick<BaseDrawArgs, "ctx">) => void) | undefined;
 }
 

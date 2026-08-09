@@ -240,6 +240,8 @@ export interface GlideDataGridSignature {
          *
          * Ignored if you pass `@getCellRenderer` explicitly -- that arg is the full manual override.
          */
+        // Renderer payloads are intentionally heterogeneous at this public boundary.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         extraCells?: readonly CustomRenderer<any>[];
         /**
          * Extra/override header-icon glyphs (`column.icon`), merged over the built-in set. The

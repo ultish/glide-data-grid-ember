@@ -110,7 +110,7 @@ export function themeFromCss(element: HTMLElement, mapping: CssThemeMapping): Pa
         const resolved = resolveCssColor(element, expression);
         if (resolved !== undefined) out[key] = resolved;
     }
-    return out as Partial<Theme>;
+    return out;
 }
 
 /**

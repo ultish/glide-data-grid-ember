@@ -1,4 +1,3 @@
-/* eslint-disable unicorn/no-for-loop */
 import type { FullTheme } from "../theme.ts";
 import {
     type Item,
@@ -21,35 +20,30 @@ export interface MappedGridColumn extends FullyDefined<InnerGridColumn> {
 // Phase 1 note: source wrapped this in `React.useMemo`. The memoization is stripped here and the
 // pure mapping logic is exported as a plain function; Ember's reactivity layer (a later phase) will
 // supply memoization via `@cached` at the call site instead.
-export function mapColumns(
-    columns: readonly InnerGridColumn[],
-    freezeColumns: number
-): readonly MappedGridColumn[] {
-    return columns.map(
-        (c, i): MappedGridColumn => ({
-            group: c.group,
-            grow: c.grow,
-            hasMenu: c.hasMenu,
-            icon: c.icon,
-            id: c.id,
-            menuIcon: c.menuIcon,
-            overlayIcon: c.overlayIcon,
-            sourceIndex: i,
-            sticky: i < freezeColumns,
-            indicatorIcon: c.indicatorIcon,
-            style: c.style,
-            themeOverride: c.themeOverride,
-            title: c.title,
-            trailingRowOptions: c.trailingRowOptions,
-            width: c.width,
-            growOffset: c.growOffset,
-            rowMarker: c.rowMarker,
-            rowMarkerChecked: c.rowMarkerChecked,
-            headerRowMarkerTheme: c.headerRowMarkerTheme,
-            headerRowMarkerAlwaysVisible: c.headerRowMarkerAlwaysVisible,
-            headerRowMarkerDisabled: c.headerRowMarkerDisabled,
-        })
-    );
+export function mapColumns(columns: readonly InnerGridColumn[], freezeColumns: number): readonly MappedGridColumn[] {
+    return columns.map((c, i): MappedGridColumn => ({
+        group: c.group,
+        grow: c.grow,
+        hasMenu: c.hasMenu,
+        icon: c.icon,
+        id: c.id,
+        menuIcon: c.menuIcon,
+        overlayIcon: c.overlayIcon,
+        sourceIndex: i,
+        sticky: i < freezeColumns,
+        indicatorIcon: c.indicatorIcon,
+        style: c.style,
+        themeOverride: c.themeOverride,
+        title: c.title,
+        trailingRowOptions: c.trailingRowOptions,
+        width: c.width,
+        growOffset: c.growOffset,
+        rowMarker: c.rowMarker,
+        rowMarkerChecked: c.rowMarkerChecked,
+        headerRowMarkerTheme: c.headerRowMarkerTheme,
+        headerRowMarkerAlwaysVisible: c.headerRowMarkerAlwaysVisible,
+        headerRowMarkerDisabled: c.headerRowMarkerDisabled,
+    }));
 }
 
 export function gridSelectionHasItem(sel: GridSelection, item: Item): boolean {

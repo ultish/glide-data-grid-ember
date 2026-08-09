@@ -23,7 +23,7 @@ export type Sprite = (props: SpriteProps) => string;
  *
  * @category Columns
  */
-export type SpriteMap = Record<string | HeaderIcon, Sprite>;
+export type SpriteMap = Record<string, Sprite>;
 
 /** @category Columns */
 export type SpriteVariant = "normal" | "selected" | "special";
@@ -52,7 +52,7 @@ export class SpriteManager {
     }
 
     public drawSprite(
-        sprite: HeaderIcon | string,
+        sprite: string,
         variant: SpriteVariant,
         ctx: CanvasRenderingContext2D,
         x: number,
@@ -84,7 +84,7 @@ export class SpriteManager {
             if (promise === undefined) return;
 
             this.inFlight++;
-            promise
+            void promise
                 .then(() => {
                     spriteCtx.drawImage(imgSource, 0, 0, rSize, rSize);
                 })

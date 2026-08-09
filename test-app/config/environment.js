@@ -1,56 +1,56 @@
-'use strict';
+"use strict";
 
 module.exports = function (environment) {
-  const ENV = {
-    modulePrefix: 'test-app',
-    environment,
-    rootURL: '/',
-    locationType: 'history',
-    EmberENV: {
-      EXTEND_PROTOTYPES: false,
-      FEATURES: {
-        // Here you can enable experimental features on an ember canary build
-        // e.g. EMBER_NATIVE_DECORATOR_SUPPORT: true
-      },
-    },
+    const ENV = {
+        modulePrefix: "test-app",
+        environment,
+        rootURL: "/",
+        locationType: "history",
+        EmberENV: {
+            EXTEND_PROTOTYPES: false,
+            FEATURES: {
+                // Here you can enable experimental features on an ember canary build
+                // e.g. EMBER_NATIVE_DECORATOR_SUPPORT: true
+            },
+        },
 
-    APP: {
-      // Here you can pass flags/options to your application instance
-      // when it is created
-    },
-  };
+        APP: {
+            // Here you can pass flags/options to your application instance
+            // when it is created
+        },
+    };
 
-  if (environment === 'development') {
-    // ENV.APP.LOG_RESOLVER = true;
-    // ENV.APP.LOG_ACTIVE_GENERATION = true;
-    // ENV.APP.LOG_TRANSITIONS = true;
-    // ENV.APP.LOG_TRANSITIONS_INTERNAL = true;
-    // ENV.APP.LOG_VIEW_LOOKUPS = true;
-  }
-
-  if (environment === 'test') {
-    // Testem prefers this...
-    ENV.locationType = 'none';
-
-    // keep test console output quieter
-    ENV.APP.LOG_ACTIVE_GENERATION = false;
-    ENV.APP.LOG_VIEW_LOOKUPS = false;
-
-    ENV.APP.rootElement = '#ember-testing';
-    ENV.APP.autoboot = false;
-  }
-
-  if (environment === 'production') {
-    // GitHub Pages project sites need a non-root base path, e.g. `/glide-data-grid-ember/`.
-    // Local `vite build` keeps `/` unless ROOT_URL is set.
-    if (process.env.ROOT_URL !== undefined) {
-      ENV.rootURL = process.env.ROOT_URL;
+    if (environment === "development") {
+        // ENV.APP.LOG_RESOLVER = true;
+        // ENV.APP.LOG_ACTIVE_GENERATION = true;
+        // ENV.APP.LOG_TRANSITIONS = true;
+        // ENV.APP.LOG_TRANSITIONS_INTERNAL = true;
+        // ENV.APP.LOG_VIEW_LOOKUPS = true;
     }
-    // Optional override (default remains `history`; CI may set `hash`).
-    if (process.env.LOCATION_TYPE) {
-      ENV.locationType = process.env.LOCATION_TYPE;
-    }
-  }
 
-  return ENV;
+    if (environment === "test") {
+        // Testem prefers this...
+        ENV.locationType = "none";
+
+        // keep test console output quieter
+        ENV.APP.LOG_ACTIVE_GENERATION = false;
+        ENV.APP.LOG_VIEW_LOOKUPS = false;
+
+        ENV.APP.rootElement = "#ember-testing";
+        ENV.APP.autoboot = false;
+    }
+
+    if (environment === "production") {
+        // GitHub Pages project sites need a non-root base path, e.g. `/glide-data-grid-ember/`.
+        // Local `vite build` keeps `/` unless ROOT_URL is set.
+        if (process.env.ROOT_URL !== undefined) {
+            ENV.rootURL = process.env.ROOT_URL;
+        }
+        // Optional override (default remains `history`; CI may set `hash`).
+        if (process.env.LOCATION_TYPE) {
+            ENV.locationType = process.env.LOCATION_TYPE;
+        }
+    }
+
+    return ENV;
 };

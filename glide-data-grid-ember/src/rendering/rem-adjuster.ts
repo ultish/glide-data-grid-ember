@@ -48,7 +48,8 @@ export function remAdjustDimensions(
     const base = getDataEditorTheme();
 
     return {
-        rowHeight: typeof rowHeight === "number" ? rowHeight * scaler : (row: number) => Math.ceil(rowHeight(row) * scaler),
+        rowHeight:
+            typeof rowHeight === "number" ? rowHeight * scaler : (row: number) => Math.ceil(rowHeight(row) * scaler),
         headerHeight: Math.ceil(headerHeight * scaler),
         groupHeaderHeight: Math.ceil(groupHeaderHeight * scaler),
         theme: {

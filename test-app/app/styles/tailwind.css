@@ -17,5 +17,14 @@
  * list: selecting a theme with no CSS silently falls back to the previous theme's values, which
  * reads as "the switcher is broken" rather than "that theme was never built". */
 @plugin "daisyui" {
-  themes: light --default, dark, cupcake, synthwave, dracula, retro, forest, aqua, nord;
+    themes:
+        light --default,
+        dark,
+        cupcake,
+        synthwave,
+        dracula,
+        retro,
+        forest,
+        aqua,
+        nord;
 }

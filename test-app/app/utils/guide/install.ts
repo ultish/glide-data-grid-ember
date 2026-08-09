@@ -68,7 +68,7 @@ export default class PeopleTable extends Component {
         { kind: "live" },
         {
             kind: "note",
-            text: "**The grid sizes itself to its container and has no `width`/`height` args.** A container with no height renders a zero-height grid, which is by a wide margin the most common \"nothing appears\". If your first render is blank, check this before anything else.",
+            text: '**The grid sizes itself to its container and has no `width`/`height` args.** A container with no height renders a zero-height grid, which is by a wide margin the most common "nothing appears". If your first render is blank, check this before anything else.',
         },
         {
             kind: "p",

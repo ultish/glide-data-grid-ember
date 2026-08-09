@@ -4,8 +4,14 @@ export const searchSection: Section = {
     id: "search",
     title: "Search",
     blocks: [
-        { kind: "p", text: "Two shapes, both driving the same engine. Take either — or both, as the full grid demo does." },
-        { kind: "p", text: "**The addon's bar**, rendered in the grid's own block so it inherits the grid's CSS and theme. Cmd/Ctrl+F opens it; nothing else to write." },
+        {
+            kind: "p",
+            text: "Two shapes, both driving the same engine. Take either — or both, as the full grid demo does.",
+        },
+        {
+            kind: "p",
+            text: "**The addon's bar**, rendered in the grid's own block so it inherits the grid's CSS and theme. Cmd/Ctrl+F opens it; nothing else to write.",
+        },
         {
             kind: "code",
             text: `import GlideSearchBar from "glide-data-grid-ember/components/glide-search-bar";

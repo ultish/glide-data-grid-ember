@@ -97,7 +97,8 @@ export default class DaisyDemo extends Component {
     // the only demo exercising auto-sizing, so it is also the regression surface for it -- if every
     // column here comes out the same width, measurement has stopped working.
     readonly columns: readonly GridColumn[] = demoColumns.slice(0, 10).map(c => {
-        const { width: _width, ...rest } = c as { width?: number } & GridColumn;
+        const { width, ...rest } = c as { width?: number } & GridColumn;
+        void width;
         return rest as GridColumn;
     });
     readonly rows = DEMO_ROW_COUNT;
@@ -151,15 +152,13 @@ export default class DaisyDemo extends Component {
             </div>
 
             <p class="text-xs opacity-70">
-                The buttons above are DaisyUI components and the grid below is a canvas — both are
-                driven by the same
+                The buttons above are DaisyUI components and the grid below is a canvas — both are driven by the same
                 <code>data-theme</code>
                 attribute on
                 <code>&lt;html&gt;</code>. The grid follows via
                 <code>CssThemeWatcher</code>, which resolves DaisyUI's
                 <code>oklch()</code>
-                custom properties into a grid theme and republishes it only when a value really
-                changed.
+                custom properties into a grid theme and republishes it only when a value really changed.
             </p>
 
             <div class="flex-1 min-h-0 rounded-box overflow-hidden border border-base-300">

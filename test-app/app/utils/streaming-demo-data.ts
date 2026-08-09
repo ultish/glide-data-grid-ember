@@ -247,7 +247,7 @@ const store = buildStore();
 
 // A separate PRNG for the live ticker: the *initial* table is deterministic (see above), the
 // stream deliberately is not.
-const tickRand = mulberry32((Date.now() & 0xffff) || 1);
+const tickRand = mulberry32(Date.now() & 0xffff || 1);
 
 /**
  * Mutates one row's numbers in place and recomputes its display strings. Does **not** repaint —

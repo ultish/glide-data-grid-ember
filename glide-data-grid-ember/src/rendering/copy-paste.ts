@@ -23,7 +23,7 @@ export type StringArrayCellBuffer = {
 /** @category Copy/Paste */
 export type BasicCellBuffer = {
     formatted: string;
-    rawValue: string | number | boolean | BooleanEmpty | BooleanIndeterminate | undefined;
+    rawValue: string | number | boolean | BooleanEmpty | BooleanIndeterminate;
     format: "string" | "number" | "boolean" | "url";
     doNotEscape?: boolean;
 };
@@ -309,8 +309,8 @@ export function decodeHTML(html: string): CopyBuffer | undefined {
             }
 
             const attributeValue = clone.getAttribute("gdg-raw-value");
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const formatValue = (clone.getAttribute("gdg-format") ?? "string") as any; // fix me at some point
+            const formatValue: BasicCellBuffer["format"] =
+                (clone.getAttribute("gdg-format") as BasicCellBuffer["format"] | null) ?? "string";
             if (clone.querySelector("a") !== null) {
                 current?.push({
                     // raw value is the href

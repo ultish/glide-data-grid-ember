@@ -63,7 +63,7 @@ describe("measureCell", () => {
 });
 
 describe("measureColumn", () => {
-    const column: GridColumn = { title: "T", width: 0 } as GridColumn;
+    const column: GridColumn = { title: "T", width: 0 };
     const sample = (values: string[]): CellArray => values.map(v => [text(v)]);
 
     test("takes the widest cell", () => {
@@ -86,15 +86,15 @@ describe("measureColumn", () => {
     });
 
     test("the header is measured too, so a wide title still fits", () => {
-        const wide: GridColumn = { title: "a-very-wide-title", width: 0 } as GridColumn;
+        const wide: GridColumn = { title: "a-very-wide-title", width: 0 };
         // Header: 17 chars * 10 + 2 * cellHorizontalPadding. Well past the 26px the "a" cell wants.
         const result = measureColumn(stubCtx(), theme, wide, 0, sample(["a"]), renderer, opts);
         expect(result).toBe(170 + theme.cellHorizontalPadding * 2);
     });
 
     test("an icon adds an allowance to the header measurement", () => {
-        const plain: GridColumn = { title: "title", width: 0 } as GridColumn;
-        const withIcon: GridColumn = { title: "title", width: 0, icon: "headerString" } as GridColumn;
+        const plain: GridColumn = { title: "title", width: 0 };
+        const withIcon: GridColumn = { title: "title", width: 0, icon: "headerString" };
         const a = measureColumn(stubCtx(), theme, plain, 0, sample(["a"]), renderer, opts);
         const b = measureColumn(stubCtx(), theme, withIcon, 0, sample(["a"]), renderer, opts);
         expect(b - a).toBe(28);
@@ -219,8 +219,12 @@ describe("sizeColumns", () => {
 // N1 (TBD.md): `GridColumn.grow` was declared, and `growOffset` read in three resize callbacks, but
 // nothing ever computed it -- the field was dead. These pin the distribution pass that fixes it.
 describe("applyColumnGrow", () => {
-    const col = (id: string, width: number, grow?: number): InnerGridColumn =>
-        ({ id, title: id, width, ...(grow === undefined ? {} : { grow }) }) as InnerGridColumn;
+    const col = (id: string, width: number, grow?: number): InnerGridColumn => ({
+        id,
+        title: id,
+        width,
+        ...(grow === undefined ? {} : { grow }),
+    });
 
     test("returns the input array by identity when no column grows", () => {
         // Identity matters, not just equality: `mappedColumns` feeds `computeCanBlit`, so a fresh

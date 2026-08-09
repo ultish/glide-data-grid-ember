@@ -235,6 +235,8 @@ export function getDataEditorDarkTheme(): Partial<Theme> {
 }
 
 export function mergeAndRealizeTheme(theme: Theme, ...overlays: Partial<Theme | undefined>[]): FullTheme {
+    /* The theme is a dynamic key/value overlay by design. */
+    /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return */
     const merged: any = { ...theme };
 
     for (const overlay of overlays) {

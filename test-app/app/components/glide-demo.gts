@@ -34,11 +34,7 @@ import {
     type Item,
     type Rectangle,
 } from "glide-data-grid-ember/rendering/index";
-import {
-    GLIDE_DEMO_COLUMNS,
-    GLIDE_DEMO_ROW_COUNT,
-    makeGlideDemoGetCellContent,
-} from "test-app/utils/glide-demo-data";
+import { GLIDE_DEMO_COLUMNS, GLIDE_DEMO_ROW_COUNT, makeGlideDemoGetCellContent } from "test-app/utils/glide-demo-data";
 
 // The "Performance" column is a Phase 5a sparkline `CustomCell`; the Phase 4 built-in registry
 // alone can't render it. `@extraCells` (Phase 9) hands the array straight to the grid, which
@@ -189,11 +185,15 @@ export default class GlideDemo extends Component {
     }
 
     get menuSortAscActive(): boolean {
-        return this.sortColumnId !== undefined && this.sortColumnId === this.menuColumnId && this.sortDirection === "asc";
+        return (
+            this.sortColumnId !== undefined && this.sortColumnId === this.menuColumnId && this.sortDirection === "asc"
+        );
     }
 
     get menuSortDescActive(): boolean {
-        return this.sortColumnId !== undefined && this.sortColumnId === this.menuColumnId && this.sortDirection === "desc";
+        return (
+            this.sortColumnId !== undefined && this.sortColumnId === this.menuColumnId && this.sortDirection === "desc"
+        );
     }
 
     get menuStyle(): ReturnType<typeof htmlSafe> {
@@ -298,17 +298,14 @@ export default class GlideDemo extends Component {
             {{#if this.menuState}}
                 {{! Backdrop: closes the menu on any outside click, and keeps that click from also
                     reaching the grid underneath. }}
+                {{! template-lint-disable no-invalid-interactive no-pointer-down-event-binding }}
                 <div
                     data-test-sort-menu-backdrop
                     role="presentation"
                     style="position: fixed; inset: 0; z-index: 20;"
                     {{on "mousedown" this.closeMenu}}
                 ></div>
-                <div
-                    data-test-sort-menu
-                    style={{this.menuStyle}}
-                    class="gdg-demo-sort-menu"
-                >
+                <div data-test-sort-menu style={{this.menuStyle}} class="gdg-demo-sort-menu">
                     <div class="gdg-demo-sort-menu__title">{{this.menuColumnTitle}}</div>
                     <button
                         type="button"

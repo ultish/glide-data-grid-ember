@@ -208,7 +208,10 @@ describe("recordsSource", () => {
             });
 
             src.onCellsEdited?.([
-                { location: [1, 2], value: { kind: GridCellKind.Text, data: "x", displayData: "x", allowOverlay: true } },
+                {
+                    location: [1, 2],
+                    value: { kind: GridCellKind.Text, data: "x", displayData: "x", allowOverlay: true },
+                },
             ]);
 
             expect(edited).toHaveLength(1);
@@ -222,7 +225,10 @@ describe("recordsSource", () => {
             const src = recordsSource({ records, columns: COLUMNS, toCell, onCellEdited: () => calls++ });
 
             src.onCellsEdited?.([
-                { location: [0, 9], value: { kind: GridCellKind.Text, data: "x", displayData: "x", allowOverlay: true } },
+                {
+                    location: [0, 9],
+                    value: { kind: GridCellKind.Text, data: "x", displayData: "x", allowOverlay: true },
+                },
             ]);
 
             expect(calls).toBe(0);

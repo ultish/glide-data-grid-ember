@@ -41,7 +41,9 @@ export { imageCellRenderer } from "./image-cell.ts";
 export { newRowCellRenderer } from "./new-row-cell.ts";
 export { markerCellRenderer } from "./marker-cell.ts";
 
-export const getCellRenderer: GetCellRendererCallback = <T extends InnerGridCell>(cell: T): CellRenderer<T> | undefined => {
+export const getCellRenderer: GetCellRendererCallback = <T extends InnerGridCell>(
+    cell: T
+): CellRenderer<T> | undefined => {
     switch (cell.kind) {
         case GridCellKind.Text:
             return textCellRenderer as unknown as CellRenderer<T>;
