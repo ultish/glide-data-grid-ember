@@ -283,21 +283,37 @@ export interface GlideDataGridSignature {
         // / `outOfBoundsKind` discriminants.
         onItemHovered?: (args: GridMouseEventArgs) => void;
 
-        // Data / editing (Phase 9g) -- forwarded straight through to `GridHostArgs`; see that
-        // interface's doc comments, especially `validateCell`'s note about the coercion path.
-        // `@validateCell` applies to the overlay editor only (as in source), `@coercePasteValue`
-        // runs ahead of the built-in paste rules, `@copyHeaders` prepends column titles to a
-        // copy/cut, and `@onDelete` can veto or redirect a Delete/Backspace (and the clearing half
-        // of a cut).
+        // Data / editing (Phase 9g) -- forwarded straight through to `GridHostArgs`.
+        // `@coercePasteValue` runs ahead of the built-in paste rules, `@copyHeaders` prepends column
+        // titles to a copy/cut, and `@onDelete` can veto or redirect a Delete/Backspace (and the
+        // clearing half of a cut).
+
+        /**
+         * Reject or normalise an edit before it commits. Applies to the **overlay editor only**, on
+         * its initial value and on every change, exactly as source applies it -- paste, fill, cut
+         * and delete deliberately do not consult it.
+         *
+         * Return `false` to reject: the editor stays open and usable, but closing it commits
+         * nothing. Return a `ValidatedGridCell` to coerce. `cell` is in your own coordinate space
+         * (no row-marker column), matching `@onCellsEdited`.
+         *
+         * **Coercion behaves differently here than in React glide-data-grid, and you will notice.**
+         * Source re-renders its editor from the coerced value, so the user watches the correction
+         * happen as they type. This addon's editors are DOM factories (`CellEditorHandle`) with no
+         * channel to push a value back in, so the coerced value is what gets **committed** while the
+         * editor keeps displaying what was typed until it closes. If you need the live-correction
+         * UX, do it in a custom editor rather than here. Rejection (`false`) is faithful to source.
+         */
         validateCell?: ValidateCellCallback;
         coercePasteValue?: CoercePasteValueCallback;
         copyHeaders?: boolean;
         onDelete?: (selection: GridSelection) => boolean | GridSelection;
 
         // Click / activation notifications (Phase 9g). All three click callbacks fire on
-        // **mousedown**, not mouseup -- which is what makes their `preventDefault()` able to
-        // suppress the selection change, the renderer's own `onClick` and any activation. See
-        // `GridHostArgs.onCellClicked` for the full note on that divergence from source.
+        // **mouseup**, and only when it lands on the same target the mousedown did -- so beginning a
+        // drag-selection is not reported as a click. Their `preventDefault()` suppresses the cell
+        // renderer's own `onClick` and any activation, but **not** the selection change, which
+        // already happened on mousedown (in source too). See `GridHostArgs.onCellClicked`.
         onCellClicked?: (cell: Item, event: CellClickedEventArgs) => void;
         onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
         onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;

@@ -137,6 +137,11 @@ export type { ValidateCellCallback, CellValidationResult } from "./validate-cell
 export { remAdjustDimensions, measureRemSize, BASE_REM_SIZE } from "./rem-adjuster.ts";
 export type { RemAdjustableDimensions } from "./rem-adjuster.ts";
 
+// Click-vs-drag and click-activation rules (Phase 9g). `<GlideDataGrid>` applies these internally;
+// exported because they are pure, tested, and the definition of what this addon calls a "click".
+export { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "./click-behavior.ts";
+export type { ClickActivationArgs } from "./click-behavior.ts";
+
 // CSS-variable theming (Phase 9). Builds a `Theme` overlay from CSS custom properties resolved off
 // a real element, and keeps it in sync as the page's theme changes -- the bridge that lets a
 // DaisyUI/Tailwind app theme the grid. The addon has no DaisyUI dependency and no knowledge of it;

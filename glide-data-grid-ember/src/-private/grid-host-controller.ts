@@ -62,6 +62,7 @@ import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts
 import { coercePasteCell, type CoercePasteValueCallback } from "../rendering/paste-coercion.ts";
 import { applyCellValidation, type ValidateCellCallback } from "../rendering/validate-cell.ts";
 import { copyHeaderRow } from "../rendering/copy-paste.ts";
+import { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "../rendering/click-behavior.ts";
 import { remAdjustDimensions, measureRemSize, type RemAdjustableDimensions } from "../rendering/rem-adjuster.ts";
 import { sizeColumns, applyColumnGrow } from "../rendering/column-sizer.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
@@ -662,30 +663,48 @@ export interface GridHostArgs {
 
     // --- Phase 9g: click / activation notifications ----------------------------------------------
     //
-    // **One divergence applies to all three click callbacks, and it is worth reading once.** Source
-    // fires them on *mouseup*, after checking that the mousedown landed on the same target. This
-    // port dispatches all of its selection logic on *mousedown* (a structural difference dating to
-    // Phase 3a), so these fire there too. Two consequences:
+    // **All three fire on mouseup, and only when the mouseup lands on the same target as the
+    // mousedown** -- source's `isValidClick` rule, ported in `rendering/click-behavior.ts`. That
+    // same-target check *is* the definition of a click as opposed to a drag: without it, a consumer
+    // wiring "open this row" to `onCellClicked` would see it fire every time a user merely began a
+    // drag-selection.
     //
-    //   * `preventDefault()` genuinely works -- it suppresses the renderer's `onClick`, the
-    //     selection change and any activation, exactly as source's does. That is the reason for
-    //     choosing mousedown: a `preventDefault` that silently did nothing would be a far worse
-    //     trap than an early event.
-    //   * The initial press of a drag-select counts as a click. Source would not report that one.
+    // **`preventDefault()` does not suppress the selection change**, and that is deliberate rather
+    // than a gap. Selection happens on mousedown -- in source (`data-editor.tsx:2126`) exactly as
+    // here -- and these callbacks fire on the mouseup after it, so the selection has already moved
+    // by the time a consumer could object. Source's `isPrevented` gates precisely two things, and so
+    // does this port: the cell renderer's own `onClick`, and cell activation.
 
     /**
-     * A click on a data cell, fired **before** the selection changes so `preventDefault()` can
-     * suppress it. `cell` is in your own coordinate space; a click on the row-marker column reports
-     * `-1`, as source does. Mirrors source's `onCellClicked`.
+     * A click on a data cell. `cell` is in your own coordinate space; a click on the row-marker
+     * column reports `-1`, as source does. Mirrors source's `onCellClicked`.
+     *
+     * `preventDefault()` suppresses the cell renderer's `onClick` and any activation that would
+     * have followed -- **not** the selection change, which already happened on mousedown. See the
+     * section comment above.
      */
     readonly onCellClicked?: (cell: Item, event: CellClickedEventArgs) => void;
 
-    /** A click on a column header, same contract as {@link onCellClicked}. `preventDefault()`
-     *  suppresses column selection. Mirrors source's `onHeaderClicked`. */
+    /**
+     * A click on a column header. Same mouseup + same-target contract as {@link onCellClicked}.
+     * Not fired for the row-marker column's select-all header, matching source's
+     * `if (clickLocation < 0) return`. Mirrors source's `onHeaderClicked`.
+     *
+     * `preventDefault()` suppresses nothing here -- source has nothing left to gate at this point
+     * either, since column selection ran on mousedown.
+     */
     readonly onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
 
-    /** A click on a column *group* header (the band above the headers, when `column.group` is set).
-     *  Mirrors source's `onGroupHeaderClicked`. */
+    /**
+     * A click on a column *group* header (the band above the headers, when `column.group` is set).
+     * Mirrors source's `onGroupHeaderClicked`.
+     *
+     * **Known divergence:** in source, `preventDefault()` here suppresses group-header *selection*,
+     * because source selects group headers on mouseup. This port selects them on mousedown together
+     * with ordinary headers (Phase 7b never split the two paths), so by the time this fires the
+     * selection has already happened and `preventDefault()` has nothing to gate. Splitting them is a
+     * Phase 7b change, not a 9g one.
+     */
     readonly onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
 
     /**
@@ -1073,6 +1092,14 @@ interface MouseHit {
 // coordinate spaces this controller juggles throughout (see the row-marker-mangling comments
 // elsewhere in this file) -- `realLocation` is what `getCellContent`/`onCellsEdited` use,
 // `mangledLocation` is what `computeBounds`/damage `CellSet`s use.
+/** What a mousedown records for the subsequent mousemove (drag-extend) and mouseup (click) to read.
+ *  `location` is a `hit.location` and `previousSelection` is mangled to match, so the two can be
+ *  compared without a conversion. */
+interface MouseDownState {
+    readonly location: Item;
+    readonly previousSelection: MangledSelection;
+}
+
 interface OverlayState {
     readonly realLocation: Item;
     readonly mangledLocation: Item;
@@ -1212,7 +1239,11 @@ export class GridHostController {
     // "dragging out of a freshly-selected row-marker cell" case.
     // `previousSelection` is MANGLED, matching `location` (a `hit.location`), so the two can be
     // compared without a conversion in `handleDragMove`.
-    private mouseDownState: { location: Item; previousSelection: MangledSelection } | undefined = undefined;
+    // 9g also reads both fields on mouseup: `location` is the same-cell half of `isValidClick`, and
+    // `previousSelection` is the "was it already selected *before* this press" half of the
+    // activation decision. Source keeps them in the same two places (`mouseDownData.current` and
+    // `mouseState.previousSelection`) and reads them from `onMouseUp` for the same two reasons.
+    private mouseDownState: MouseDownState | undefined = undefined;
     // Column a header-menu-glyph mousedown landed on, if any -- mouseup re-checks the same column
     // is still under the menu bounds before firing `onHeaderMenuClick` (mirrors source's
     // down/up-position match in `onPointerUp`/`onClickImpl`, `data-grid.tsx:1176-1244`).
@@ -2813,9 +2844,17 @@ export class GridHostController {
 
     // --- Phase 9g: click notifications ------------------------------------------------------------
     //
-    // See `GridHostArgs.onCellClicked` for the one divergence that applies to all three: these fire
-    // on mousedown, not mouseup, because that is where this port dispatches selection -- which is
-    // precisely what makes their `preventDefault()` able to suppress anything.
+    // All three fire from `onMouseUp`, gated on the mouseup landing on the same target as the
+    // mousedown -- source's `isValidClick`/`lastMouseSelectLocation` pair, ported to
+    // `rendering/click-behavior.ts` so the drag-is-not-a-click rule has a test.
+    //
+    // **`preventDefault()` deliberately cannot suppress the selection change**, and that is worth
+    // stating because it looks like a gap. Selection happens on mousedown, in source
+    // (`data-editor.tsx:2126`, `handleSelect`) exactly as here, and these callbacks fire on the
+    // subsequent mouseup -- so by the time a consumer could call `preventDefault()`, the selection
+    // has already moved. Source's `isPrevented` gates only the renderer's `onClick` and cell
+    // activation. Making it stronger here would give a consumer behaviour their React version does
+    // not have, silently.
 
     /** The fields every click event shares with a hover event. Kept in one place so the two paths
      *  cannot drift. */
@@ -2834,9 +2873,38 @@ export class GridHostController {
         };
     }
 
+    /**
+     * Mouseup click dispatch (9g). Port of the tail of source's `onMouseUp`
+     * (`data-editor.tsx:2482-2513`): headers and group headers report a click and nothing else,
+     * cells go through the fuller `handleMaybeClick` sequence.
+     *
+     * Both header branches require the mouseup to land on the same header as the mousedown, which
+     * is source's `col === lastMouseDownCol && row === lastMouseDownRow`. For cells the equivalent
+     * check lives inside `dispatchCellMouseUp`, because source runs part of that path even for an
+     * invalid click.
+     */
+    private dispatchClick(ev: MouseEvent, downState: MouseDownState): void {
+        // Source's `if (args.kind === "cell" && (args.button === 0 || args.button === 1))`, hoisted:
+        // the header branches carry the same `button === 0` guard, and a right-click is a context
+        // menu, handled by its own listener.
+        if (ev.button !== 0 && ev.button !== 1) return;
+
+        const args = this.resolveArgs();
+        const hit = this.resolveMouseHit(args, ev);
+
+        if (hit.kind === "header") {
+            if (isValidClick(downState.location, hit.location)) {
+                this.emitHeaderClicked(args, hit);
+            }
+            return;
+        }
+        if (hit.kind !== "cell") return;
+        this.dispatchCellMouseUp(args, hit, downState);
+    }
+
     /** Fires `onCellClicked`. Returns `true` if the consumer called `preventDefault()`, in which
-     *  case the caller must skip the renderer's `onClick`, the selection change and activation --
-     *  the same three things source's `isPrevented` suppresses. */
+     *  case the caller skips the renderer's `onClick` and activation -- the two things, and only the
+     *  two things, source's `isPrevented` suppresses. */
     private emitCellClicked(args: ResolvedGridHostArgs, hit: MouseHit): boolean {
         const callback = args.onCellClicked;
         if (callback === undefined) return false;
@@ -2863,34 +2931,41 @@ export class GridHostController {
         return prevented;
     }
 
-    /** Fires `onHeaderClicked` or `onGroupHeaderClicked` depending on which band was hit (row `-1`
-     *  vs `-2`). Returns `true` if the consumer prevented the default column-selection handling. */
-    private emitHeaderClicked(args: ResolvedGridHostArgs, hit: MouseHit): boolean {
+    /**
+     * Fires `onHeaderClicked` or `onGroupHeaderClicked` depending on which band was hit (row `-1`
+     * vs `-2`).
+     *
+     * **Returns early for the row-marker column** (`col < 0` after unmangling): source guards both
+     * branches with `if (clickLocation < 0) return;` (`data-editor.tsx:2483,2498`), so the
+     * select-all checkbox header is not reported as a header click.
+     *
+     * Nothing is suppressible through the returned `preventDefault()` in this port. In source it
+     * suppresses `handleGroupHeaderSelection`, which runs on *mouseup* there -- but this port
+     * selects group headers on mousedown along with ordinary headers (Phase 7b never split the two),
+     * so there is nothing left to gate by the time this fires. Recorded as a known divergence rather
+     * than fixed here: splitting group-header selection out is a Phase 7b change, not a 9g one.
+     */
+    private emitHeaderClicked(args: ResolvedGridHostArgs, hit: MouseHit): void {
         const isGroup = hit.location[1] === -2;
         const callback = isGroup ? args.onGroupHeaderClicked : args.onHeaderClicked;
-        if (callback === undefined) return false;
+        if (callback === undefined) return;
         const [mangledCol] = hit.location;
         const col = mangledCol - args.rowMarkerOffset;
+        if (col < 0) return;
         const bounds = this.computeCellRect(args, mangledCol, hit.location[1]);
-        const group = args.columns[col]?.group ?? "";
-        let prevented = false;
-        const preventDefault = (): void => {
-            prevented = true;
-        };
         const common = {
             ...this.clickEventBase(hit),
             bounds,
-            group,
+            group: args.columns[col]?.group ?? "",
             localEventX: hit.localX - bounds.x,
             localEventY: hit.localY - bounds.y,
-            preventDefault,
+            preventDefault: () => {},
         };
         if (isGroup) {
             args.onGroupHeaderClicked?.(col, { ...common, kind: groupHeaderKind, location: [col, -2] });
         } else {
             args.onHeaderClicked?.(col, { ...common, kind: headerKind, location: [col, -1] });
         }
-        return prevented;
     }
 
     /** Fires `onCellActivated`. `mangledLocation` is converted to consumer space here, the single
@@ -3429,6 +3504,8 @@ export class GridHostController {
 
     private readonly onMouseUp = (ev: MouseEvent): void => {
         if (this.destroyed) return;
+        // 9g: captured before it is cleared -- the click callbacks below need the press location.
+        const downState = this.mouseDownState;
         this.mouseDownState = undefined;
         // Phase 9h: every drag ends here, however it ends -- including a mouseup outside the grid.
         this.autoscroller.stop();
@@ -3462,6 +3539,17 @@ export class GridHostController {
             this.overFillHandle = hit.kind === "cell" && this.hitTestFillHandle(args, hit.localX, hit.localY);
             this.applyCursor();
             return;
+        }
+
+        // 9g: the click notifications, placed here on purpose -- ahead of the drag branches below,
+        // several of which `return` unconditionally on a press that never became a drag (a plain
+        // header click leaves `dragColState` set but inactive, for instance). A press that DID
+        // become a drag is not a click and is skipped; so is a resize, whose mousedown returns
+        // before recording `mouseDownState` at all, exactly as source's does.
+        const dragHappened =
+            this.dragRowState?.active === true || this.dragColState?.active === true || this.resizeState !== undefined;
+        if (!dragHappened && downState !== undefined) {
+            this.dispatchClick(ev, downState);
         }
 
         // Phase 9h: row reorder. Only a drag that crossed the dead-zone and actually landed
@@ -3522,11 +3610,6 @@ export class GridHostController {
     private dispatchCellMouseDown(args: ResolvedGridHostArgs, hit: MouseHit, isMultiKey: boolean): void {
         const [col, row] = hit.location;
         this.lastSelectedCol = undefined;
-
-        // 9g. Fired for every cell click including the row-marker column (which reports col `-1`)
-        // and the trailing blank row, matching source, and *before* anything else happens so
-        // `preventDefault()` can suppress all of it.
-        if (this.emitCellClicked(args, hit)) return;
 
         if (args.hasRowMarkers && col === 0) {
             // Row-marker column click (`data-editor.tsx:1853-1911`). Phase 4d: no-op on the
@@ -3625,72 +3708,18 @@ export class GridHostController {
 
         // Ordinary cell click (`data-editor.tsx:1915-1993`). Everything from here down works in
         // MANGLED space, because `col`/`row` came from `hit.location`.
+        //
+        // **Selection only.** The renderer's `onClick` and cell activation used to live here too;
+        // 9g moved them to `dispatchCellMouseUp`, where source has always had them. See that
+        // method's doc comment for why that ordering is load-bearing rather than cosmetic.
         const mangledSelection = this.mangledSelection(args);
         const current = mangledSelection.current;
         const cellCol = current?.cell[0];
         const cellRow = current?.cell[1];
 
-        // Renderer-level click hook (Phase 4a) -- e.g. boolean-cell's checkbox-glyph hit-test.
-        // Fires on every valid click on the cell regardless of prior selection state, mirrors
-        // source's `handleMaybeClick` calling `r.onClick` before its activation-behavior switch
-        // (`data-editor.tsx:2377-2394`). If it returns a new cell, that's a direct edit+redraw and
-        // this click is fully consumed -- it neither re-selects nor activates the overlay editor
-        // (matches boolean-cell's own `onSelect` calling `preventDefault()` over the same region,
-        // which source uses to suppress the normal activation path for the exact same click).
-        const cellContent = this.mangledGetCellContent(args)(hit.location);
-        const renderer = args.getCellRenderer(cellContent);
-        if (renderer?.onClick !== undefined && !isInnerOnlyCellKind(cellContent.kind)) {
-            const cellRect = this.computeCellRect(args, col, row);
-            // Phase 6: the renderer's `onClick` gets the same fully-merged per-cell theme its
-            // `draw()` was given (column -> row -> cell overrides applied), not just the global
-            // theme -- several renderers hit-test against theme-derived geometry
-            // (`cellHorizontalPadding`, `checkboxMaxSize`, ...) which an override can change.
-            const theme = this.themeForCell(args, cellContent as GridCell, col, row);
-            const clickArgs = {
-                cell: cellContent as never,
-                posX: hit.localX - cellRect.x,
-                posY: hit.localY - cellRect.y,
-                bounds: cellRect,
-                location: hit.location,
-                theme,
-                preventDefault: () => {},
-                shiftKey: hit.shiftKey,
-                ctrlKey: hit.ctrlKey,
-                metaKey: hit.metaKey,
-                isTouch: false,
-                isEdge: false,
-                button: 0,
-                buttons: 1,
-                scrollEdge: [0, 0] as const,
-            };
-            const newVal = renderer.onClick(clickArgs);
-            if (newVal !== undefined) {
-                this.commitCellEdit(args, hit.location, newVal as GridCell);
-                return;
-            }
-        }
-
-        // 9g: all three of source's activation behaviours, where Phase 4a only had `"second-click"`.
-        // A cell's own `activationBehaviorOverride` wins over the grid-wide setting, as in source.
-        const behavior = (cellContent as GridCell).activationBehaviorOverride ?? args.cellActivationBehavior;
-        const isOnSelectedCell = cellCol === col && cellRow === row;
-        // `"second-click"` needs no double-click timing: a double-click's *second* mousedown already
-        // satisfies "click on the already-selected cell". `"double-click"` is the stricter form that
-        // additionally requires `MouseEvent.detail >= 2`.
-        const shouldActivate =
-            behavior === "single-click" || (isOnSelectedCell && (behavior === "second-click" || hit.isDoubleClick));
-        const activation: CellActivatedEventArgs = {
-            inputType: "pointer",
-            pointerActivation: hit.isDoubleClick ? "double-click" : behavior,
-            pointerType: "mouse",
-        };
-
-        if (isOnSelectedCell) {
-            // The selection is already exactly this cell, so there is nothing to change either way;
-            // the only question was whether to activate.
-            if (shouldActivate) {
-                this.activateCell(args, hit.location, cellContent, { highlight: true, activation });
-            }
+        if (cellCol === col && cellRow === row) {
+            // Already exactly this cell: nothing to select. Source still runs its `setCurrent` here,
+            // but with an identical value, so skipping is equivalent and avoids a redraw.
             return;
         }
 
@@ -3720,11 +3749,104 @@ export class GridHostController {
             this.applyMangledSelection(args, result.selection);
         }
         this.lastSelectedRow = undefined;
-        // `"single-click"` activates a cell that was not previously selected, so this runs *after*
-        // the selection above -- the editor must open over the cell that is now current.
-        if (shouldActivate) {
-            this.activateCell(args, hit.location, cellContent, { highlight: true, activation });
+    }
+
+    /**
+     * The mouseup half of a cell click: `onCellClicked`, the renderer's `onClick`, and activation.
+     *
+     * Port of source's `handleMaybeClick` (`data-editor.tsx:2367-2432`), and the ordering here is
+     * source's, not this port's convenience:
+     *
+     *   1. `onCellClicked` fires **only for a valid click** -- a mouseup on the same cell as the
+     *      mousedown. A press on one cell released over another is a drag, and a drag is not a
+     *      click. This is the check that keeps a consumer's row-open handler from firing every time
+     *      the user *begins* a drag-selection.
+     *   2. `preventDefault()` then suppresses steps 3 and 4, and **nothing else**. In particular it
+     *      cannot suppress the selection change -- that already happened, back on mousedown, in
+     *      both source and this port. That is not an oversight to be "fixed" later: source's
+     *      `isPrevented` gates exactly these two things (`data-editor.tsx:2375-2431`) and a
+     *      consumer porting a recipe would be surprised by anything stronger.
+     *   3. The renderer's own `onClick` (boolean-cell's checkbox hit-test, and friends). Also gated
+     *      on a valid click. Returning a cell commits it and consumes the gesture entirely.
+     *   4. Activation -- `onCellActivated` plus opening the editor.
+     */
+    private dispatchCellMouseUp(args: ResolvedGridHostArgs, hit: MouseHit, downState: MouseDownState): void {
+        const [col, row] = hit.location;
+        const validClick = isValidClick(downState.location, hit.location);
+
+        let prevented = false;
+        if (validClick) {
+            prevented = this.emitCellClicked(args, hit);
         }
+        if (prevented) return;
+
+        const cellContent = this.mangledGetCellContent(args)(hit.location);
+
+        // Renderer-level click hook (Phase 4a) -- e.g. boolean-cell's checkbox-glyph hit-test.
+        // If it returns a new cell, that's a direct edit+redraw and this click is fully consumed:
+        // it does not go on to activate the overlay editor (matches boolean-cell's own `onSelect`
+        // calling `preventDefault()` over the same region, which source uses for the same click).
+        const renderer = args.getCellRenderer(cellContent);
+        if (validClick && renderer?.onClick !== undefined && !isInnerOnlyCellKind(cellContent.kind)) {
+            const cellRect = this.computeCellRect(args, col, row);
+            // Phase 6: the renderer's `onClick` gets the same fully-merged per-cell theme its
+            // `draw()` was given (column -> row -> cell overrides applied), not just the global
+            // theme -- several renderers hit-test against theme-derived geometry
+            // (`cellHorizontalPadding`, `checkboxMaxSize`, ...) which an override can change.
+            const theme = this.themeForCell(args, cellContent as GridCell, col, row);
+            const newVal = renderer.onClick({
+                cell: cellContent as never,
+                posX: hit.localX - cellRect.x,
+                posY: hit.localY - cellRect.y,
+                bounds: cellRect,
+                location: hit.location,
+                theme,
+                // Source shares one `isPrevented` ref across the whole mouseup, so a renderer
+                // preventing here also suppresses activation below.
+                preventDefault: () => {
+                    prevented = true;
+                },
+                shiftKey: hit.shiftKey,
+                ctrlKey: hit.ctrlKey,
+                metaKey: hit.metaKey,
+                isTouch: false,
+                isEdge: false,
+                button: hit.button,
+                buttons: hit.buttons,
+                scrollEdge: NO_SCROLL_EDGE,
+            });
+            if (newVal !== undefined) {
+                this.commitCellEdit(args, hit.location, newVal as GridCell);
+                return;
+            }
+        }
+        if (prevented) return;
+
+        // 9g: all three of source's activation behaviours, where Phase 4a only had `"second-click"`.
+        // A cell's own `activationBehaviorOverride` wins over the grid-wide setting, as in source.
+        const behavior = (cellContent as GridCell).activationBehaviorOverride ?? args.cellActivationBehavior;
+        if (
+            !shouldActivateOnClick({
+                behavior,
+                isDoubleClick: hit.isDoubleClick,
+                location: hit.location,
+                // "Selected now" is post-mousedown; "selected before" is what `mouseDownState`
+                // captured. Both are required -- see `shouldActivateOnClick`.
+                currentCell: this.mangledSelection(args).current?.cell,
+                previousCell: downState.previousSelection.current?.cell,
+            })
+        ) {
+            return;
+        }
+
+        this.activateCell(args, hit.location, cellContent, {
+            highlight: true,
+            activation: {
+                inputType: "pointer",
+                pointerActivation: resolvePointerActivation(behavior, hit.isDoubleClick),
+                pointerType: "mouse",
+            },
+        });
     }
 
     // Port of `handleSelect`'s `args.kind === "header"` branch (`data-editor.tsx:1994-2047`).
@@ -3733,11 +3855,6 @@ export class GridHostController {
         // space. The row half (the select-all checkbox below) does not -- rows carry no column
         // coordinate -- and deliberately stays on `this.selection`/`applySelection`.
         const [col] = hit.location;
-
-        // 9g. Same contract as `onCellClicked`: fired first, and `preventDefault()` suppresses the
-        // column-selection handling below. Row `-2` routes to `onGroupHeaderClicked` instead.
-        if (this.emitHeaderClicked(args, hit)) return;
-
         const mangledSelection = this.mangledSelection(args);
         const selectedColumns = mangledSelection.columns;
         const selectedRows = this.selection.rows;
@@ -4171,8 +4288,8 @@ export class GridHostController {
         state.stopStayOnScreen = this.setupStayOnScreen(container);
 
         // Deferred, not called synchronously here (Phase 4a bug found via browser testing): this
-        // whole method runs inside a native `mousedown` handler, and the activating click's
-        // `mouseup`/`click` haven't been dispatched yet -- Chrome delivers them to whatever element
+        // method runs inside a native mouse-event handler, and the activating gesture's remaining
+        // events haven't been dispatched yet -- Chrome delivers them to whatever element
         // now sits under the pointer, which after `appendChild` above is this editor's freshly-
         // focused textarea, and its default caret-placement-from-click-point handling on that
         // `mouseup` was observed to silently collapse the `setSelectionRange(0, length)`
@@ -4187,9 +4304,9 @@ export class GridHostController {
 
         // Click-outside commits (mirrors source's `ClickOutsideContainer` -> `onClickOutside` ->
         // save, not cancel). Registered on the next tick rather than synchronously: this method is
-        // itself always called from within a `mousedown` dispatch (an activation click or a
-        // type-to-overwrite keydown that started life as a click's Enter-equivalent), and adding a
-        // capture-phase `window` listener mid-dispatch must not risk catching that same event.
+        // always called from within a native event dispatch (a mouseup that activated a cell, or a
+        // keydown), and adding a capture-phase `window` listener mid-dispatch must not risk catching
+        // that same gesture.
         window.setTimeout(() => {
             if (this.overlayState === state) {
                 window.addEventListener("mousedown", this.onOverlayOutsideClick, true);

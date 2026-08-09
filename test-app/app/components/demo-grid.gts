@@ -697,8 +697,10 @@ export default class DemoGrid extends Component {
     };
 
     handleCellClicked = (cell: Item): void => {
-        // Calling `event.preventDefault()` here would suppress the selection change, the renderer's
-        // own `onClick` and any activation -- the whole click. This demo only reports.
+        // Fires on mouseup, and only when it lands on the cell the mousedown did -- so starting a
+        // drag-selection does NOT report a click here. Watch this readout while dragging: it stays
+        // put. Calling `event.preventDefault()` would suppress the cell renderer's own `onClick` and
+        // any activation, but not the selection change, which already happened on mousedown.
         this.lastClick = `cell ${cell[0]},${cell[1]}`;
     };
 
