@@ -274,16 +274,21 @@ Top addon rules by count — the shape suggests a lot is mechanical:
 23  @typescript-eslint/no-unnecessary-type-assertion
 15  @typescript-eslint/no-explicit-any
  8  @typescript-eslint/no-unsafe-assignment
- 7  unicorn/no-for-loop
  5  sonarjs/no-duplicate-string
  5  @typescript-eslint/no-unused-vars
  4  @typescript-eslint/no-unsafe-call
 ```
 
-Start with `pnpm lint:fix` and prettier `--write`, then hand-fix the rest. **Be careful with
-`unicorn/no-for-loop` in `src/rendering/`** — those loops are ported near-verbatim from source and are
-on the paint path; converting them to `for...of` changes allocation behaviour. Prefer a targeted
-disable with a comment explaining the port-fidelity reason.
+Start with `pnpm lint:fix` and prettier `--write`, then hand-fix the rest.
+
+**General caution for `src/rendering/`**: that code is ported near-verbatim from source and sits on
+the paint path, so prefer a targeted disable with a comment explaining the port-fidelity reason over
+a rewrite that changes allocation behaviour in a draw loop.
+
+(An earlier revision of this file warned specifically about `unicorn/no-for-loop`. **That rule is not
+configured in this repo** — `eslint-plugin-unicorn` is not a dependency and the Ember plugin does not
+bring it in. The count came from misreading eslint's "Definition for rule was not found" messages as
+violations.)
 
 Was parked earlier by user preference ("id prefer doing feature than fixing linting for now"); that
 parking is void now that CI runs on `main`.
