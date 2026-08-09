@@ -39,3 +39,19 @@ export type { RecordsSourceProps, RecordsSourceResult } from "./records-source.t
 // Phase 8c -- async paged records source (port of source's `use-async-data-source`)
 export { AsyncRecordsSource } from "./async-records-source.ts";
 export type { AsyncRecordsSourceOptions, RowRange, UpdateCellsApi } from "./async-records-source.ts";
+
+// 9j -- movable columns (port of source's `use-movable-columns`). Remaps columns, so it implements
+// both halves of the coordinate contract above, exactly as `withColumnSort` does for rows.
+export { withMovableColumns, columnOrderKey } from "./movable-columns.ts";
+export type { MovableColumnsProps, MovableColumnsResult } from "./movable-columns.ts";
+
+// 9j -- collapsing column groups (port of source's `use-collapsing-groups`). Note this one remaps
+// *nothing*: collapsing shrinks widths, it never moves a column, so there is no write path to
+// translate. See its header -- that is a finding, not an omission.
+export { withCollapsingGroups } from "./collapsing-groups.ts";
+export type { CollapsingGroupsProps, CollapsingGroupsResult } from "./collapsing-groups.ts";
+
+// 9j -- undo/redo (port of source's `use-undo-redo`). A class, like `AsyncRecordsSource`, because it
+// owns history; its `wrap()` is called per-render so it can never hold a stale `getCellContent`.
+export { UndoRedo } from "./undo-redo.ts";
+export type { UndoRedoOptions, UndoRedoState, UndoRedoWrappable } from "./undo-redo.ts";

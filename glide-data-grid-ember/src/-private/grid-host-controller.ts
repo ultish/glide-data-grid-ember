@@ -25,7 +25,6 @@
 // `root`, per the source's own approach -- `destroy()` removes them again.
 import {
     drawGrid,
-    mapColumns,
     CellSet,
     AnimationManager,
     SpriteManager,
@@ -116,6 +115,15 @@ import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
 import { browserIsSafari, browserIsOSX } from "../rendering/common/browser-detect.ts";
 import { isGridSurfaceTarget } from "./grid-event-target.ts";
+import { MangledLayoutCache, type MangledLayout, type RowMarkerColumnSpec } from "./mangled-layout.ts";
+import {
+    asConsumerSelection,
+    EMPTY_SELECTION,
+    MangledSelectionCache,
+    unmangleSelection,
+    type ConsumerSelection,
+    type MangledSelection,
+} from "./selection-space.ts";
 
 // Public args this controller is driven by. `getArgs()` is called fresh on every draw/scroll/hover
 // pass -- the controller never caches the result across calls, per the calling convention: the
@@ -621,10 +629,9 @@ const DEFAULT_SELECTION_OPTIONS: Pick<SelectionBehaviorOptions, "rangeBehavior" 
 };
 const DEFAULT_ROW_SELECTION_MODE: "auto" | "multi" = "auto";
 const DEFAULT_COLUMN_SELECTION_MODE: "auto" | "multi" = "auto";
+// The marker *body* cell's checkbox style. Its header-column counterpart lives in
+// `mangled-layout.ts` alongside the rest of the synthetic column (Phase 9k).
 const DEFAULT_ROW_MARKER_CHECKBOX_STYLE: "square" | "circle" = "square";
-// Row markers are always sticky when enabled, matching source's
-// `mangledFreezeColumns = Math.min(mangledCols.length, freezeColumns + (hasRowMarkers ? 1 : 0))`
-// (`data-editor.tsx:3994`).
 function rowMarkerWidthDefault(rows: number): number {
     return rows > 10_000 ? 48 : rows > 1000 ? 44 : rows > 100 ? 36 : 32;
 }
@@ -860,16 +867,28 @@ export class GridHostController {
     // `onGridSelectionChange` aren't passed. A later phase can add controlled-mode support
     // (accepting an external `GridSelection` + only calling `onSelectionChanged`, never mutating
     // `this.selection` itself) without changing anything else here.
-    private selection: GridSelection = {
-        current: undefined,
-        rows: CompactSelection.empty(),
-        columns: CompactSelection.empty(),
-    };
+    //
+    // **Held in the CONSUMER's column space** (2026-08-09) -- column 0 is the consumer's first
+    // column, never the synthetic row-marker column. That is what `@onSelectionChanged` reports,
+    // consistently with `@onCellsEdited` and the three context-menu callbacks; before this it
+    // reported the internal mangled space and disagreed with all four. Source draws the same line
+    // (`shiftSelection(newVal, -rowMarkerOffset)` at its `onGridSelectionChange` boundary,
+    // `data-editor.tsx:1009`).
+    //
+    // Everything that works in the render engine's column space -- hit-testing, `computeCellRect`,
+    // keyboard nav, copy/cut/delete/paste, fill and drag-extend -- goes through
+    // `mangledSelection(args)` / `applyMangledSelection(args, ...)` instead. Those two are the only
+    // conversion points, and `-private/selection-space.ts`'s branded `MangledSelection` type is what
+    // makes a missed conversion a compile error rather than a silent off-by-one column.
+    private selection: ConsumerSelection = EMPTY_SELECTION;
+    private readonly mangledSelectionCache = new MangledSelectionCache();
     // Set on mousedown (any kind except a header-menu click), cleared on mouseup. Mirrors source's
     // `mouseDownData.current` (location) + `mouseState.previousSelection`
     // (`data-editor.tsx:2091-2123`) -- both are needed by drag-extend to detect the
     // "dragging out of a freshly-selected row-marker cell" case.
-    private mouseDownState: { location: Item; previousSelection: GridSelection } | undefined = undefined;
+    // `previousSelection` is MANGLED, matching `location` (a `hit.location`), so the two can be
+    // compared without a conversion in `handleDragMove`.
+    private mouseDownState: { location: Item; previousSelection: MangledSelection } | undefined = undefined;
     // Column a header-menu-glyph mousedown landed on, if any -- mouseup re-checks the same column
     // is still under the menu bounds before firing `onHeaderMenuClick` (mirrors source's
     // down/up-position match in `onPointerUp`/`onClickImpl`, `data-grid.tsx:1176-1244`).
@@ -907,7 +926,10 @@ export class GridHostController {
     // Fill-handle drag state (Phase 9h). Set on a mousedown that landed on the fill handle itself;
     // `highlight` is the region the pointer has dragged out so far (source's
     // `fillHighlightRegion`), drawn as a dashed highlight and turned into edits on mouseup.
-    private fillState: { previousSelection: GridSelection; highlight: Rectangle | undefined } | undefined = undefined;
+    // Both fields are MANGLED: `highlight` is dragged out from `hit.location`s and is handed to the
+    // renderer as a highlight region, and `previousSelection` is compared/combined with it.
+    private fillState: { previousSelection: MangledSelection; highlight: Rectangle | undefined } | undefined =
+        undefined;
     // Whether the pointer is currently hovering the fill handle -- cursor feedback only (source's
     // `overFill`).
     private overFillHandle = false;
@@ -1362,27 +1384,20 @@ export class GridHostController {
     // DOES render correctly today because header-marker drawing is already Phase-1-ported render
     // logic (`render/data-grid-render.header.ts:433-455`), driven purely by
     // `InnerGridColumn.rowMarker`/`rowMarkerChecked` -- only the body cells are a known gap.
-    private mangledColumns(args: ResolvedGridHostArgs): InnerGridColumn[] {
-        const inner = this.sizedColumns(args);
-        if (!args.hasRowMarkers) return inner;
-        const numSelectedRows = this.selection.rows.length;
-        const rowMarkerChecked = numSelectedRows === 0 ? false : numSelectedRows === args.rows ? true : undefined;
-        const markerColumn: InnerGridColumn = {
-            title: "",
-            width: args.rowMarkerWidth,
-            hasMenu: false,
-            style: "normal",
-            rowMarker: DEFAULT_ROW_MARKER_CHECKBOX_STYLE,
-            rowMarkerChecked,
-            headerRowMarkerDisabled: args.rowSelect !== "multi",
-        };
-        return [markerColumn, ...inner];
+    private mangledColumns(args: ResolvedGridHostArgs): readonly InnerGridColumn[] {
+        return this.computeMangledLayout(args).mangledColumns;
     }
 
-    private mangledFreezeColumns(args: ResolvedGridHostArgs, mangledColumnCount: number): number {
-        // Row markers are always sticky when enabled, matching source's `mangledFreezeColumns`
-        // (`data-editor.tsx:3994`).
-        return Math.min(mangledColumnCount, args.freezeColumns + (args.hasRowMarkers ? 1 : 0));
+    // Phase 9k: the marker column's inputs, as three primitives the layout cache can compare.
+    // Rebuilt per call (it is cheap) precisely so the cache -- not this method -- owns identity.
+    private rowMarkerSpec(args: ResolvedGridHostArgs): RowMarkerColumnSpec | undefined {
+        if (!args.hasRowMarkers) return undefined;
+        const numSelectedRows = this.selection.rows.length;
+        return {
+            width: args.rowMarkerWidth,
+            checked: numSelectedRows === 0 ? false : numSelectedRows === args.rows ? true : undefined,
+            headerDisabled: args.rowSelect !== "multi",
+        };
     }
 
     // Phase 4d: also mangles in the synthetic trailing blank row (`showTrailingBlankRow`) when
@@ -1499,14 +1514,16 @@ export class GridHostController {
         return value;
     }
 
-    private computeMangledLayout(args: ResolvedGridHostArgs): {
-        mappedColumns: readonly MappedGridColumn[];
-        freezeColumns: number;
-    } {
-        const mangledCols = this.mangledColumns(args);
-        const freezeColumns = this.mangledFreezeColumns(args, mangledCols.length);
-        const mappedColumns = mapColumns(mangledCols, freezeColumns);
-        return { mappedColumns, freezeColumns };
+    // Phase 9k. Was: rebuild the marker column, the mangled array and `mapColumns`' output on
+    // **every** call -- and this runs on every draw, scroll, hover, hit-test and scroll-into-view.
+    // `computeCanBlit` compares `mappedColumns` by reference first and only falls back to a
+    // per-column `deepEqual` when the reference differs; above 100 columns it gives up and refuses
+    // to blit at all. See `mangled-layout.ts` for the cache and its key, and
+    // `mangled-layout.test.ts` for the identity contract, which is the part no other check catches.
+    private readonly mangledLayoutCache = new MangledLayoutCache();
+
+    private computeMangledLayout(args: ResolvedGridHostArgs): MangledLayout {
+        return this.mangledLayoutCache.get(this.sizedColumns(args), this.rowMarkerSpec(args), args.freezeColumns);
     }
 
     private selectionOptions(args: ResolvedGridHostArgs): SelectionBehaviorOptions {
@@ -1517,20 +1534,50 @@ export class GridHostController {
         };
     }
 
+    /**
+     * `this.selection` in the render engine's / hit-testing column space.
+     *
+     * Memoized on `this.selection`'s identity, and that is load-bearing rather than a micro-opt:
+     * `computeCanBlit` identity-compares `DrawGridArg.selection`, so shifting afresh per draw would
+     * silently disable the scroll blit fast path -- the same defect class Phase 6 fixed three
+     * instances of. With `rowMarkers: "none"` the shift is the identity function and returns the
+     * very same object, so a marker-less grid is byte-identical to the pre-9k behaviour.
+     */
+    private mangledSelection(args: ResolvedGridHostArgs): MangledSelection {
+        return this.mangledSelectionCache.get(this.selection, args.rowMarkerOffset);
+    }
+
     // Central selection-mutation entry point -- every writer call above routes its result through
     // here. Notifies `onSelectionChanged` and redraws. Uses a full redraw rather than a
     // damage-restricted one for simplicity (selection changes can touch an unbounded set of cells --
     // e.g. select-all -- so computing a precise damage set isn't obviously cheaper); revisit if
     // selection-change redraw cost becomes a real perf problem.
-    private applySelection(newSelection: GridSelection): void {
+    //
+    // `newSelection` is in the CONSUMER's column space, which is also exactly what
+    // `onSelectionChanged` receives -- see the `selection` field's comment. Callers holding a
+    // mangled selection use `applyMangledSelection` below.
+    //
+    // Note which direction the brand protects: `MangledSelection` is an intersection, so it *is*
+    // assignable here. What the compiler rejects is the opposite and far more likely mistake --
+    // handing a consumer-space selection to something that needs mangled columns (`DrawGridArg`,
+    // `computeCellRect`, `selectedRegion`, the fill/drag state). Every mangled value in this file
+    // originates from `mangledSelection()` and stays branded through the space-preserving writers
+    // in `selection-behavior.ts`, so those sites cannot be fed an unconverted value.
+    private applySelection(newSelection: ConsumerSelection): void {
         this.selection = newSelection;
         const args = this.resolveArgs();
         args.onSelectionChanged?.(newSelection);
         this.scheduleFullRedraw();
     }
 
+    /** `applySelection` for a selection computed in the render engine's column space. The single
+     *  conversion back out to consumer space. */
+    private applyMangledSelection(args: ResolvedGridHostArgs, newSelection: MangledSelection): void {
+        this.applySelection(unmangleSelection(newSelection, args.rowMarkerOffset));
+    }
+
     private clearSelection(): void {
-        this.applySelection({ current: undefined, rows: CompactSelection.empty(), columns: CompactSelection.empty() });
+        this.applySelection(EMPTY_SELECTION);
         this.lastSelectedRow = undefined;
         this.lastSelectedCol = undefined;
     }
@@ -1587,7 +1634,9 @@ export class GridHostController {
         this.drawWithDamage(new CellSet(cells.map(c => [c.cell[0] + rowMarkerOffset, c.cell[1]] as Item)));
     }
 
-    /** Current selection. Read-only snapshot -- mutate via user interaction, not directly. */
+    /** Current selection, in the **consumer's** column space (no row-marker column) -- the same
+     *  space `@onSelectionChanged` reports and `@onCellsEdited` speaks. Read-only snapshot --
+     *  mutate via user interaction, not directly. */
     public getSelection(): GridSelection {
         return this.selection;
     }
@@ -1682,7 +1731,9 @@ export class GridHostController {
             resizeCol: this.resizeState?.col,
             isFocused: this.isFocused,
             drawFocus: true,
-            selection: this.selection,
+            // Mangled, and memoized so its identity is stable across draws (`computeCanBlit`
+            // compares this field by reference).
+            selection: this.mangledSelection(args),
             // Phase 9h: opt-in, matching source (`fillHandle?: boolean`, no default). Before 9h this
             // was hardcoded to `DEFAULT_FILL_HANDLE`, so the handle was always drawn and dragging it
             // did nothing whatsoever.
@@ -2290,7 +2341,8 @@ export class GridHostController {
     // `size` px across but accepts anything within `size` px of its centre in each axis.
     private hitTestFillHandle(args: ResolvedGridHostArgs, localX: number, localY: number): boolean {
         if (!args.fillHandle) return false;
-        const current = this.selection.current;
+        // Mangled: `current.range` is fed straight to `computeCellRect`.
+        const current = this.mangledSelection(args).current;
         if (current === undefined) return false;
         const [handleCol, handleRow] = rectBottomRight(current.range);
         if (handleRow >= this.effectiveRows(args)) return false;
@@ -2663,7 +2715,7 @@ export class GridHostController {
         // Mirrors source's `setMouseState({previousSelection: gridSelection, fillHandle: fh})`
         // (`data-editor.tsx:2120-2123`) -- recorded for every kind (cell/header/out-of-bounds), not
         // just cell clicks, since drag-extend needs to know where the drag started regardless.
-        this.mouseDownState = { location: hit.location, previousSelection: this.selection };
+        this.mouseDownState = { location: hit.location, previousSelection: this.mangledSelection(args) };
 
         if (hit.kind === "cell") {
             // Phase 9h: a mousedown on the fill handle starts a fill drag and is exclusive with
@@ -2671,7 +2723,7 @@ export class GridHostController {
             // handleSelect(args)` (`data-editor.tsx:2126`). The selection must stay put: it is the
             // fill's pattern source.
             if (this.hitTestFillHandle(args, hit.localX, hit.localY)) {
-                this.fillState = { previousSelection: this.selection, highlight: undefined };
+                this.fillState = { previousSelection: this.mangledSelection(args), highlight: undefined };
                 this.applyCursor();
                 return;
             }
@@ -2733,8 +2785,10 @@ export class GridHostController {
             if (fill.highlight !== undefined && previous !== undefined) {
                 const combined = combineRects(previous.range, fill.highlight);
                 this.fillPattern(args, previous.range, combined);
-                this.applySelection({
-                    ...this.selection,
+                // Everything here is mangled (`previous` came from `fillState`, `combined` from a
+                // drag in hit-test space), so the grown selection is converted on the way in.
+                this.applyMangledSelection(args, {
+                    ...this.mangledSelection(args),
                     current: { ...previous, range: combined },
                 });
             } else {
@@ -2821,6 +2875,9 @@ export class GridHostController {
             )
                 return;
 
+            // Row selection carries no column coordinate, so this whole branch stays in consumer
+            // space: it reads `this.selection`, and `setSelectedRows` passes `current`/`columns`
+            // through untouched, so `applySelection` receives consumer space as it requires.
             const selectedRows = this.selection.rows;
             const isSelected = selectedRows.hasIndex(row);
             const lastHighlighted = this.lastSelectedRow;
@@ -2901,8 +2958,10 @@ export class GridHostController {
             return;
         }
 
-        // Ordinary cell click (`data-editor.tsx:1915-1993`).
-        const current = this.selection.current;
+        // Ordinary cell click (`data-editor.tsx:1915-1993`). Everything from here down works in
+        // MANGLED space, because `col`/`row` came from `hit.location`.
+        const mangledSelection = this.mangledSelection(args);
+        const current = mangledSelection.current;
         const cellCol = current?.cell[0];
         const cellRow = current?.cell[1];
 
@@ -2963,32 +3022,36 @@ export class GridHostController {
             const top = Math.min(row, cellRow);
             const bottom = Math.max(row, cellRow);
             const result = setCurrentSelection(
-                this.selection,
+                mangledSelection,
                 { ...current, range: { x: left, y: top, width: right - left + 1, height: bottom - top + 1 } },
                 true,
                 isMultiKey,
                 "click",
                 this.selectionOptions(args)
             );
-            this.applySelection(result.selection);
+            this.applyMangledSelection(args, result.selection);
         } else {
             const result = setCurrentSelection(
-                this.selection,
+                mangledSelection,
                 { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 } },
                 true,
                 isMultiKey,
                 "click",
                 this.selectionOptions(args)
             );
-            this.applySelection(result.selection);
+            this.applyMangledSelection(args, result.selection);
         }
         this.lastSelectedRow = undefined;
     }
 
     // Port of `handleSelect`'s `args.kind === "header"` branch (`data-editor.tsx:1994-2047`).
     private dispatchHeaderMouseDown(args: ResolvedGridHostArgs, hit: MouseHit, isMultiKey: boolean): void {
+        // `col` is a `hit.location` column, so the column half of this method works in MANGLED
+        // space. The row half (the select-all checkbox below) does not -- rows carry no column
+        // coordinate -- and deliberately stays on `this.selection`/`applySelection`.
         const [col] = hit.location;
-        const selectedColumns = this.selection.columns;
+        const mangledSelection = this.mangledSelection(args);
+        const selectedColumns = mangledSelection.columns;
         const selectedRows = this.selection.rows;
 
         if (args.hasRowMarkers && col === 0) {
@@ -3034,13 +3097,15 @@ export class GridHostController {
         ) {
             const newSlice: Slice = [Math.min(lastCol, col), Math.max(lastCol, col) + 1];
             if (isMultiKey || DEFAULT_COLUMN_SELECTION_MODE === "multi") {
-                this.applySelection(
-                    writerSetSelectedColumns(this.selection, undefined, newSlice, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                this.applyMangledSelection(
+                    args,
+                    writerSetSelectedColumns(mangledSelection, undefined, newSlice, isMultiKey, DEFAULT_SELECTION_OPTIONS)
                 );
             } else {
-                this.applySelection(
+                this.applyMangledSelection(
+                    args,
                     writerSetSelectedColumns(
-                        this.selection,
+                        mangledSelection,
                         CompactSelection.fromSingleSelection(newSlice),
                         undefined,
                         isMultiKey,
@@ -3050,9 +3115,10 @@ export class GridHostController {
             }
         } else if (args.columnSelect === "multi" && (isMultiKey || DEFAULT_COLUMN_SELECTION_MODE === "multi")) {
             if (selectedColumns.hasIndex(col)) {
-                this.applySelection(
+                this.applyMangledSelection(
+                    args,
                     writerSetSelectedColumns(
-                        this.selection,
+                        mangledSelection,
                         selectedColumns.remove(col),
                         undefined,
                         isMultiKey,
@@ -3060,16 +3126,18 @@ export class GridHostController {
                     )
                 );
             } else {
-                this.applySelection(
-                    writerSetSelectedColumns(this.selection, undefined, col, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                this.applyMangledSelection(
+                    args,
+                    writerSetSelectedColumns(mangledSelection, undefined, col, isMultiKey, DEFAULT_SELECTION_OPTIONS)
                 );
             }
             this.lastSelectedCol = col;
         } else if (args.columnSelect !== "none") {
             if (selectedColumns.hasIndex(col)) {
-                this.applySelection(
+                this.applyMangledSelection(
+                    args,
                     writerSetSelectedColumns(
-                        this.selection,
+                        mangledSelection,
                         selectedColumns.remove(col),
                         undefined,
                         isMultiKey,
@@ -3077,9 +3145,10 @@ export class GridHostController {
                     )
                 );
             } else {
-                this.applySelection(
+                this.applyMangledSelection(
+                    args,
                     writerSetSelectedColumns(
-                        this.selection,
+                        mangledSelection,
                         CompactSelection.fromSingleSelection(col),
                         undefined,
                         isMultiKey,
@@ -3098,7 +3167,7 @@ export class GridHostController {
     // neither concept exists in this port yet.
     private handleDragMove(
         args: ResolvedGridHostArgs,
-        mouseDownState: { location: Item; previousSelection: GridSelection },
+        mouseDownState: { location: Item; previousSelection: MangledSelection },
         location: Item
     ): void {
         const [col] = location;
@@ -3135,11 +3204,14 @@ export class GridHostController {
             return;
         }
 
+        // Mangled from here down: `col` is a hit-test column and the clamp is against
+        // `args.rowMarkerOffset`.
+        const mangledSelection = this.mangledSelection(args);
         if (
-            this.selection.current !== undefined &&
+            mangledSelection.current !== undefined &&
             (args.rangeSelect === "rect" || args.rangeSelect === "multi-rect")
         ) {
-            const [selectedCol, selectedRow] = this.selection.current.cell;
+            const [selectedCol, selectedRow] = mangledSelection.current.cell;
             const targetRow = row < 0 ? this.cellYOffset : row;
             const targetCol = Math.max(col, args.rowMarkerOffset);
 
@@ -3153,14 +3225,14 @@ export class GridHostController {
             };
 
             const result = setCurrentSelection(
-                this.selection,
-                { ...this.selection.current, range: newRange },
+                mangledSelection,
+                { ...mangledSelection.current, range: newRange },
                 true,
                 false,
                 "drag",
                 this.selectionOptions(args)
             );
-            this.applySelection(result.selection);
+            this.applyMangledSelection(args, result.selection);
         }
     }
 
@@ -3594,9 +3666,11 @@ export class GridHostController {
 
         // Cell activation (Phase 4a) -- Enter, Delete/Backspace, and type-to-overwrite. All three
         // are no-ops with nothing selected, mirroring source's early-outs for the same keys.
-        if (this.selection.current !== undefined) {
-            const activationArgs = this.resolveArgs();
-            const mangledLocation = this.selection.current.cell;
+        const activationArgs = this.resolveArgs();
+        // `activateCell`/`mangledGetCellContent` both work in the render engine's column space.
+        const activationCurrent = this.mangledSelection(activationArgs).current;
+        if (activationCurrent !== undefined) {
+            const mangledLocation = activationCurrent.cell;
 
             if (ev.key === "Enter" && !primary && !ev.altKey) {
                 const cellContent = this.mangledGetCellContent(activationArgs)(mangledLocation);
@@ -3647,10 +3721,12 @@ export class GridHostController {
         if (ev.altKey) return;
         // Mirrors source's `if (gridSelection.current === undefined) return false;` early-out --
         // every nav key below is a no-op with nothing selected yet.
-        if (this.selection.current === undefined) return;
-
         const args = this.resolveArgs();
-        const [col, row] = this.selection.current.cell;
+        // Mangled: every `targetCol` below is clamped against `args.rowMarkerOffset` /
+        // `mappedColumns.length` and handed to `moveActiveCell`, all of which are mangled space.
+        const navCurrent = this.mangledSelection(args).current;
+        if (navCurrent === undefined) return;
+        const [col, row] = navCurrent.cell;
 
         if (primary && ev.shiftKey) {
             // primary+shift+Arrow/Home/End ("jump and extend selection to an edge") not ported --
@@ -3734,18 +3810,21 @@ export class GridHostController {
         const col = Math.min(Math.max(colIn, minCol), maxCol);
         const row = Math.min(Math.max(rowIn, 0), this.effectiveRows(args) - 1);
 
-        const current = this.selection.current;
+        // `colIn` is mangled (callers: keyboard nav, overlay-editor movement, search navigation),
+        // so the whole method is.
+        const mangledSelection = this.mangledSelection(args);
+        const current = mangledSelection.current;
         if (current !== undefined && current.cell[0] === col && current.cell[1] === row) return false;
 
         const result = setCurrentSelection(
-            this.selection,
+            mangledSelection,
             { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 } },
             true,
             false,
             "keyboard-nav",
             this.selectionOptions(args)
         );
-        this.applySelection(result.selection);
+        this.applyMangledSelection(args, result.selection);
         this.scrollCellIntoView(args, col, row);
         return true;
     }
@@ -3758,7 +3837,10 @@ export class GridHostController {
     // (`selection.current.cell`); shrinks back in on the near edge once the far edge has retreated
     // past the anchor. Exactly one of `dx`/`dy` is non-zero per call (a single arrow keypress).
     private adjustSelection(args: ResolvedGridHostArgs, dx: -1 | 0 | 1, dy: -1 | 0 | 1): void {
-        const current = this.selection.current;
+        // Mangled: the column clamps below are `args.rowMarkerOffset` and `mappedColumns.length`,
+        // and `scrollCellIntoView` takes a mangled column.
+        const mangledSelection = this.mangledSelection(args);
+        const current = mangledSelection.current;
         if (current === undefined) return;
         const [col, row] = current.cell;
         const old = current.range;
@@ -3805,14 +3887,14 @@ export class GridHostController {
         }
 
         const result = setCurrentSelection(
-            this.selection,
+            mangledSelection,
             { cell: current.cell, range: { x: left, y: top, width: right - left, height: bottom - top } },
             true,
             false,
             "keyboard-select",
             this.selectionOptions(args)
         );
-        this.applySelection(result.selection);
+        this.applyMangledSelection(args, result.selection);
 
         // Scroll the edge that actually moved into view (mirrors source's per-branch `scrollTo`
         // calls in `adjustSelection`), not the anchor cell.
@@ -3823,24 +3905,28 @@ export class GridHostController {
 
     // Port of `handleFixedKeybindings`'s `selectAll` branch (`data-editor.tsx`). Note this
     // deliberately does NOT go through the `setCurrentSelection` writer (source calls
-    // `setGridSelection` directly here too) -- and the range's `width` is `args.columns.length`,
-    // the caller's *un-mangled* column count, not `mappedColumns.length` -- select-all spans every
-    // real column starting right after the row-marker column (if any), never the marker column
-    // itself. `rows`/`columns` CompactSelections stay empty; "select all" is expressed purely via
-    // `current.range` covering the whole grid, matching source exactly (verified against
-    // `data-editor.tsx`'s `keys.selectAll` branch).
+    // `setGridSelection` directly here too). `rows`/`columns` CompactSelections stay empty;
+    // "select all" is expressed purely via `current.range` covering the whole grid, matching source
+    // exactly (verified against `data-editor.tsx`'s `keys.selectAll` branch).
+    //
+    // Built directly in CONSUMER space, which is what makes it read as plainly as it does: the
+    // range is columns `0 .. columns.length` of rows `0 .. rows`. Source writes the same thing
+    // shifted (`x: rowMarkerOffset`, width `columns.length`) because its internal selection is
+    // mangled; `mangledSelection()` reproduces exactly that on the way to the renderer, so the
+    // marker column still never ends up inside the selection.
     private selectAll(args: ResolvedGridHostArgs): void {
         const current = this.selection.current;
-        const newSelection: GridSelection = {
-            columns: CompactSelection.empty(),
-            rows: CompactSelection.empty(),
-            current: {
-                cell: current?.cell ?? [args.rowMarkerOffset, 0],
-                range: { x: args.rowMarkerOffset, y: 0, width: args.columns.length, height: args.rows },
-                rangeStack: [],
-            },
-        };
-        this.applySelection(newSelection);
+        this.applySelection(
+            asConsumerSelection({
+                columns: CompactSelection.empty(),
+                rows: CompactSelection.empty(),
+                current: {
+                    cell: current?.cell ?? [0, 0],
+                    range: { x: 0, y: 0, width: args.columns.length, height: args.rows },
+                    rangeStack: [],
+                },
+            })
+        );
     }
 
     // --- search (Phase 9e) -------------------------------------------------------------------
@@ -4135,7 +4221,7 @@ export class GridHostController {
     private selectedRegion(
         args: ResolvedGridHostArgs
     ): { colStart: number; colEnd: number; rowStart: number; rowEnd: number } | undefined {
-        const sel = this.selection;
+        const sel = this.mangledSelection(args);
         const { mappedColumns } = this.computeMangledLayout(args);
         if (sel.current !== undefined) {
             const r = sel.current.range;
@@ -4352,17 +4438,20 @@ export class GridHostController {
         // Paste-target anchor: current range's top-left, else sole selected column (row 0) or
         // sole selected row (first real column), else no-op. Mirrors source's paste-target
         // resolution (PORTING-NOTES.md, `data-editor.tsx:3646-3654`).
+        // Mangled, so the `- args.rowMarkerOffset` in the loop below (and the marker-column
+        // fallbacks here) stay exactly as they were.
+        const sel = this.mangledSelection(args);
         let anchorCol: number;
         let anchorRow: number;
-        if (this.selection.current !== undefined) {
-            anchorCol = this.selection.current.range.x;
-            anchorRow = this.selection.current.range.y;
-        } else if (this.selection.columns.length > 0) {
-            anchorCol = this.selection.columns.first() ?? args.rowMarkerOffset;
+        if (sel.current !== undefined) {
+            anchorCol = sel.current.range.x;
+            anchorRow = sel.current.range.y;
+        } else if (sel.columns.length > 0) {
+            anchorCol = sel.columns.first() ?? args.rowMarkerOffset;
             anchorRow = 0;
-        } else if (this.selection.rows.length > 0) {
+        } else if (sel.rows.length > 0) {
             anchorCol = args.rowMarkerOffset;
-            anchorRow = this.selection.rows.first() ?? 0;
+            anchorRow = sel.rows.first() ?? 0;
         } else {
             return;
         }

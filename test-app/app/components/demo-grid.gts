@@ -494,20 +494,18 @@ export default class DemoGrid extends Component {
         return this.selectedColumn === undefined ? undefined : demoColumnNote(this.selectedColumn);
     }
 
-    /** `@onSelectionChanged` reports the grid's **internal** column space, which includes the
-     *  row-marker column when one exists -- unlike `@onCellsEdited` and the context-menu callbacks,
-     *  which subtract it. Everything below therefore corrects for it before showing a column
-     *  number or looking a column up. */
-    private get rowMarkerOffset(): number {
-        return this.rowMarkers === "none" ? 0 : 1;
-    }
-
+    // This component used to carry a `rowMarkerOffset` getter and subtract it from every column
+    // index below, because `@onSelectionChanged` reported the grid's *internal* column space while
+    // `@onCellsEdited` and the context-menu callbacks reported the consumer's. That split is gone as
+    // of 2026-08-09 -- the grid now reports consumer space everywhere, matching source -- so the
+    // correction has been deleted rather than kept "just in case": leaving it would have subtracted
+    // the offset twice and pointed every column note at the wrong column.
     handleSelectionChanged = (selection: GridSelection): void => {
         const current = selection.current;
         const parts: string[] = [];
-        this.selectedColumn = current === undefined ? undefined : current.cell[0] - this.rowMarkerOffset;
+        this.selectedColumn = current === undefined ? undefined : current.cell[0];
         if (current !== undefined) {
-            const r = { ...current.range, x: current.range.x - this.rowMarkerOffset };
+            const r = current.range;
             parts.push(r.width * r.height === 1 ? `cell ${r.x},${r.y}` : `range ${r.width}x${r.height} at ${r.x},${r.y}`);
         }
         if (selection.rows.length > 0) parts.push(`${selection.rows.length} row(s)`);

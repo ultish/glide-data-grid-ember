@@ -34,8 +34,8 @@ export interface SelectionBehaviorOptions {
     readonly rangeSelectionColumnSpanning: boolean;
 }
 
-export interface SetCurrentResult {
-    readonly selection: GridSelection;
+export interface SetCurrentResult<T extends GridSelection = GridSelection> {
+    readonly selection: T;
     // Mirrors the `expand` argument source's `setCurrent` forwards verbatim into its
     // `setGridSelection(newVal, expand)` callback -- when true, source runs the result through
     // `expandSelection` (data-editor/data-editor-fns.ts) to grow the selection to cover any
@@ -55,15 +55,21 @@ export interface SetCurrentResult {
  * `rangeStack` (multi-rect/multi-cell selection); `trigger === "drag"` preserves the *previous*
  * selection's `rangeStack` so an in-progress drag can keep growing a multi-range selection instead
  * of collapsing it.
+ *
+ * **Space-preserving**, hence the generic: every column index in the result comes either from
+ * `valueIn` or from `gridSelection`, so the caller's coordinate space (consumer or mangled -- see
+ * `-private/selection-space.ts`) survives the call. The single `as T` below is that invariant
+ * stated once, in the one place it is actually true, rather than as a cast at each of the six call
+ * sites in `GridHostController`.
  */
-export function setCurrentSelection(
-    gridSelection: GridSelection,
+export function setCurrentSelection<T extends GridSelection>(
+    gridSelection: T,
     valueIn: Pick<NonNullable<GridSelection["current"]>, "cell" | "range"> | undefined,
     expand: boolean,
     append: boolean,
     trigger: SelectionTrigger,
     options: SelectionBehaviorOptions
-): SetCurrentResult {
+): SetCurrentResult<T> {
     const { rangeBehavior, columnBehavior, rowBehavior, rangeSelect, rangeSelectionColumnSpanning } = options;
     let value = valueIn;
 
@@ -117,17 +123,19 @@ export function setCurrentSelection(
         };
     }
 
-    return { selection: newVal, expand };
+    return { selection: newVal as T, expand };
 }
 
-/** Port of `useSelectionBehavior`'s `setSelectedRows`. Pure -- does not mutate `gridSelection`. */
-export function setSelectedRows(
-    gridSelection: GridSelection,
+/** Port of `useSelectionBehavior`'s `setSelectedRows`. Pure -- does not mutate `gridSelection`.
+ *  Space-preserving (see `setCurrentSelection`'s note): it only ever passes `current`/`columns`
+ *  through untouched, and rows carry no column coordinate at all. */
+export function setSelectedRows<T extends GridSelection>(
+    gridSelection: T,
     newRowsIn: CompactSelection | undefined,
     append: Slice | number | undefined,
     allowMixed: boolean,
     options: Pick<SelectionBehaviorOptions, "rangeBehavior" | "columnBehavior" | "rowBehavior">
-): GridSelection {
+): T {
     const { rangeBehavior, columnBehavior, rowBehavior } = options;
     let newRows = newRowsIn ?? gridSelection.rows;
     if (append !== undefined) {
@@ -138,7 +146,7 @@ export function setSelectedRows(
             current: undefined,
             columns: CompactSelection.empty(),
             rows: newRows,
-        };
+        } as T;
     }
     const rangeMixed = (allowMixed && rangeBehavior === "mixed") || rangeBehavior === "additive";
     const columnMixed = (allowMixed && columnBehavior === "mixed") || columnBehavior === "additive";
@@ -147,17 +155,19 @@ export function setSelectedRows(
         current,
         columns: columnMixed ? gridSelection.columns : CompactSelection.empty(),
         rows: newRows,
-    };
+    } as T;
 }
 
-/** Port of `useSelectionBehavior`'s `setSelectedColumns`. Pure -- does not mutate `gridSelection`. */
-export function setSelectedColumns(
-    gridSelection: GridSelection,
+/** Port of `useSelectionBehavior`'s `setSelectedColumns`. Pure -- does not mutate `gridSelection`.
+ *  Space-preserving: `newColsIn`/`append` are column indices in the *caller's* space and are
+ *  returned in it unchanged. */
+export function setSelectedColumns<T extends GridSelection>(
+    gridSelection: T,
     newColsIn: CompactSelection | undefined,
     append: number | Slice | undefined,
     allowMixed: boolean,
     options: Pick<SelectionBehaviorOptions, "rangeBehavior" | "columnBehavior" | "rowBehavior">
-): GridSelection {
+): T {
     const { rangeBehavior, columnBehavior, rowBehavior } = options;
     let newCols = newColsIn ?? gridSelection.columns;
     if (append !== undefined) {
@@ -168,7 +178,7 @@ export function setSelectedColumns(
             current: undefined,
             rows: CompactSelection.empty(),
             columns: newCols,
-        };
+        } as T;
     }
     const rangeMixed = (allowMixed && rangeBehavior === "mixed") || rangeBehavior === "additive";
     const rowMixed = (allowMixed && rowBehavior === "mixed") || rowBehavior === "additive";
@@ -177,5 +187,5 @@ export function setSelectedColumns(
         current,
         rows: rowMixed ? gridSelection.rows : CompactSelection.empty(),
         columns: newCols,
-    };
+    } as T;
 }
