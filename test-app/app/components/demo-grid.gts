@@ -42,7 +42,12 @@ import {
     setDemoActivityListener,
     DEMO_ROW_COUNT,
 } from "test-app/utils/demo-data";
-import { formatSearchStatus } from "glide-data-grid-ember/rendering/index";
+import {
+    formatSearchStatus,
+    headerKind,
+    groupHeaderKind,
+    outOfBoundsKind,
+} from "glide-data-grid-ember/rendering/index";
 import { cached } from "@glimmer/tracking";
 import {
     allExtraCells,
@@ -63,6 +68,7 @@ import {
     type GridSelection,
     type Highlight,
     type SpriteMap,
+    type GridMouseEventArgs,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -158,6 +164,13 @@ function groupFor(index: number): string | undefined {
 // works through each renderer's own `measure()` and most custom renderers don't have one.
 const AUTO_SIZED_COLUMN = 3;
 
+// N1: the two columns that share leftover container width. `grow` is orthogonal to `width` -- these
+// keep their fixed widths as a *floor* and split whatever space is left over 2:1, so widening the
+// window widens column 1 twice as fast as column 2. Nothing demoed `grow` before, which is precisely
+// how it stayed dead: the type field existed and `growOffset` was read in three resize callbacks,
+// but no code ever computed it, so setting `grow` did nothing and said nothing.
+const GROW_COLUMNS: Readonly<Record<number, number>> = { 1: 2, 2: 1 };
+
 function buildDemoColumns(): readonly GridColumn[] {
     return demoColumns.map((column, i) => {
         const common = {
@@ -171,6 +184,7 @@ function buildDemoColumns(): readonly GridColumn[] {
             // Every column's own `icon` comes from `demo-data.ts`; column 0 is overridden with
             // the custom glyph below purely to prove `@headerIcons` merges over the built-in set.
             icon: i === 0 ? "demoStar" : column.icon,
+            ...(GROW_COLUMNS[i] === undefined ? {} : { grow: GROW_COLUMNS[i] }),
         };
         // The distinction is exactly this: a column WITH `width` is a `SizedGridColumn`, one
         // WITHOUT is an `AutoGridColumn` that the grid measures. There is no `width: "auto"`.
@@ -484,6 +498,9 @@ export default class DemoGrid extends Component {
     // Note `@onVisibleRegionChanged` is already deferred to a microtask by the addon precisely so
     // setting tracked state from it is safe -- see its doc comment.
     @tracked selectionSummary = "none";
+    /** N2: what `@onItemHovered` last reported. This is the raw material a tooltip is built from —
+     *  the demo just prints it, so a regression is visible without reading code. */
+    @tracked hoverSummary = "—";
     @tracked visibleRegionSummary = "-";
     @tracked lastFill: string | undefined;
     /** Column of the selected cell, in the consumer's own space. Drives the per-column note. */
@@ -500,6 +517,19 @@ export default class DemoGrid extends Component {
     // of 2026-08-09 -- the grid now reports consumer space everywhere, matching source -- so the
     // correction has been deleted rather than kept "just in case": leaving it would have subtracted
     // the offset twice and pointed every column note at the wrong column.
+    handleItemHovered = (args: GridMouseEventArgs): void => {
+        if (args.kind === outOfBoundsKind) {
+            this.hoverSummary = "off-grid";
+            return;
+        }
+        const [col, row] = args.location;
+        // `location` arrives in consumer space already — the row-marker column is subtracted by the
+        // grid, so a hover over the marker itself reports col -1.
+        const where =
+            args.kind === headerKind ? "header" : args.kind === groupHeaderKind ? "group header" : `row ${row}`;
+        this.hoverSummary = `col ${col}, ${where}`;
+    };
+
     handleSelectionChanged = (selection: GridSelection): void => {
         const current = selection.current;
         const parts: string[] = [];
@@ -592,6 +622,7 @@ export default class DemoGrid extends Component {
             {{! Notification-only args, rendered so they are observable rather than merely wired. }}
             <div class="gdg-full__status">
                 <span>Selection: <b data-test-selection-summary>{{this.selectionSummary}}</b></span>
+                <span>Hover: <b data-test-hover-summary>{{this.hoverSummary}}</b></span>
                 <span>Visible: <b data-test-visible-region>{{this.visibleRegionSummary}}</b></span>
                 {{#if this.lastFill}}<span>Last fill: <b data-test-last-fill>{{this.lastFill}}</b></span>{{/if}}
                 {{! Cell-carried callbacks (button / uri / links) have no other way to be seen. }}
@@ -697,6 +728,7 @@ export default class DemoGrid extends Component {
                     @onReady={{this.handleReady}}
                     @onSearchStateChange={{this.handleSearchStateChange}}
                     @onSelectionChanged={{this.handleSelectionChanged}}
+                    @onItemHovered={{this.handleItemHovered}}
                     @onVisibleRegionChanged={{this.handleVisibleRegionChanged}}
                     @onHeaderMenuClick={{this.handleHeaderMenuClick}}
                     @onCellContextMenu={{this.handleCellContextMenu}}

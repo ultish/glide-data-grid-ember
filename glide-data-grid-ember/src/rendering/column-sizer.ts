@@ -128,3 +128,53 @@ export function sizeColumns(
         if (ctx !== undefined && previousFont !== undefined) ctx.font = previousFont;
     }
 }
+
+/**
+ * Distribute the container's leftover width across columns that declare `grow` (N1 in `TBD.md`).
+ *
+ * Ported from `use-column-sizer.ts:218-245`. `GridColumn.grow` and `InnerGridColumn.growOffset` were
+ * both ported in Phase 1 and `growOffset` is *read* in three of the controller's resize callbacks —
+ * but nothing ever computed it, so the field was dead: a consumer read the addon's own exported type,
+ * set `grow`, and got silence. This is the missing pass.
+ *
+ * Applies to **every** column, not only auto-sized ones — `grow` and `width` are orthogonal, and a
+ * fixed-width column with `grow: 1` is a perfectly ordinary way to say "take the slack".
+ *
+ * `growOffset` is recorded separately from the widened `width` because the resize callbacks report
+ * both a raw and a grow-inclusive size (`newSize` / `newSizeWithGrow`); without it the two can never
+ * differ, which is what made the dead field visible in the first place.
+ *
+ * Returns the input array **by identity** when there is nothing to distribute, so the caller's
+ * `computeCanBlit` identity checks are unaffected in the common case.
+ */
+export function applyColumnGrow(columns: readonly InnerGridColumn[], clientWidth: number): InnerGridColumn[] {
+    let totalWidth = 0;
+    let totalGrow = 0;
+    const distribute: number[] = [];
+    for (const [i, c] of columns.entries()) {
+        totalWidth += c.width;
+        if (c.grow !== undefined && c.grow > 0) {
+            totalGrow += c.grow;
+            distribute.push(i);
+        }
+    }
+
+    if (totalWidth >= clientWidth || distribute.length === 0 || totalGrow <= 0) {
+        return columns as InnerGridColumn[];
+    }
+
+    const result = [...columns];
+    const extra = clientWidth - totalWidth;
+    let remaining = extra;
+    for (let di = 0; di < distribute.length; di++) {
+        const i = distribute[di]!;
+        const source = columns[i]!;
+        const weighted = (source.grow ?? 0) / totalGrow;
+        // The last grower absorbs the rounding remainder, so the columns always exactly fill the
+        // container rather than leaving a 1-2px gap. Source does the same.
+        const toAdd = di === distribute.length - 1 ? remaining : Math.min(remaining, Math.floor(extra * weighted));
+        result[i] = { ...source, growOffset: toAdd, width: source.width + toAdd };
+        remaining -= toAdd;
+    }
+    return result;
+}

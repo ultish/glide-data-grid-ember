@@ -1,8 +1,21 @@
 // Phase 9i tests. The whole module is measurable in bare Node because it takes a `MeasureContext`
 // rather than a real canvas -- the stub below is the entire fake needed.
 import { describe, expect, test } from "vitest";
-import { DEFAULT_COLUMN_WIDTH, measureCell, measureColumn, sizeColumns, type MeasureContext } from "./column-sizer.ts";
-import { GridCellKind, type CellArray, type GridCell, type GridColumn } from "./data-grid-types.ts";
+import {
+    applyColumnGrow,
+    DEFAULT_COLUMN_WIDTH,
+    measureCell,
+    measureColumn,
+    sizeColumns,
+    type MeasureContext,
+} from "./column-sizer.ts";
+import {
+    GridCellKind,
+    type CellArray,
+    type GridCell,
+    type GridColumn,
+    type InnerGridColumn,
+} from "./data-grid-types.ts";
 import type { GetCellRendererCallback } from "./cell-types.ts";
 import { getDataEditorTheme, mergeAndRealizeTheme } from "./theme.ts";
 
@@ -200,5 +213,56 @@ describe("sizeColumns", () => {
         const columns = [{ title: "A" }] as unknown as GridColumn[];
         expect(() => sizeColumns(columns, ctx, theme, sample, exploding, opts)).toThrow("boom");
         expect(ctx.font).toBe("italic 17px serif");
+    });
+});
+
+// N1 (TBD.md): `GridColumn.grow` was declared, and `growOffset` read in three resize callbacks, but
+// nothing ever computed it -- the field was dead. These pin the distribution pass that fixes it.
+describe("applyColumnGrow", () => {
+    const col = (id: string, width: number, grow?: number): InnerGridColumn =>
+        ({ id, title: id, width, ...(grow === undefined ? {} : { grow }) }) as InnerGridColumn;
+
+    test("returns the input array by identity when no column grows", () => {
+        // Identity matters, not just equality: `mappedColumns` feeds `computeCanBlit`, so a fresh
+        // array here would defeat the blit fast path for every grid that does not use `grow`.
+        const columns = [col("a", 100), col("b", 100)];
+        expect(applyColumnGrow(columns, 1000)).toBe(columns);
+    });
+
+    test("returns the input by identity when the columns already overflow", () => {
+        const columns = [col("a", 600, 1), col("b", 600, 1)];
+        expect(applyColumnGrow(columns, 500)).toBe(columns);
+    });
+
+    test("distributes leftover width in proportion to `grow`", () => {
+        // 300 used of 600 -> 300 spare, split 1:2.
+        const result = applyColumnGrow([col("a", 100, 1), col("b", 100, 2), col("c", 100)], 600);
+
+        expect(result[0]!.width).toBe(200);
+        expect(result[0]!.growOffset).toBe(100);
+        expect(result[1]!.width).toBe(300);
+        expect(result[1]!.growOffset).toBe(200);
+        // No `grow` -> untouched, and no `growOffset` invented.
+        expect(result[2]!.width).toBe(100);
+        expect(result[2]!.growOffset).toBeUndefined();
+    });
+
+    test("fills the container exactly, giving the rounding remainder to the last grower", () => {
+        // 100 spare split three ways does not divide evenly; source lets the last absorb the rest
+        // rather than leaving a visible gap at the right edge.
+        const result = applyColumnGrow([col("a", 100, 1), col("b", 100, 1), col("c", 100, 1)], 400);
+
+        expect(result.reduce((sum, c) => sum + c.width, 0)).toBe(400);
+        expect(result[2]!.growOffset).toBe(34);
+    });
+
+    test("applies to fixed-width columns too -- `grow` and `width` are orthogonal", () => {
+        const result = applyColumnGrow([col("fixed", 200, 1)], 500);
+        expect(result[0]!.width).toBe(500);
+    });
+
+    test("ignores non-positive `grow`", () => {
+        const columns = [col("a", 100, 0), col("b", 100)];
+        expect(applyColumnGrow(columns, 900)).toBe(columns);
     });
 });

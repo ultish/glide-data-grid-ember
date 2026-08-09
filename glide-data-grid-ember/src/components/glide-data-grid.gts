@@ -63,6 +63,7 @@ import type {
     Highlight,
     FillHandleDirection,
     FillPatternEventArgs,
+    GridMouseEventArgs,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -243,6 +244,14 @@ export interface GlideDataGridSignature {
         onCellContextMenu?: (location: Item, event: ContextMenuEventArgs) => void;
         onHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
         onGroupHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
+
+        // Fires when the hovered cell/header changes, and when the pointer leaves the grid
+        // (`kind: "out-of-bounds"`). This is what tooltips are built on. `location` is in your
+        // coordinate space -- the row-marker column is already subtracted, matching
+        // `@onCellsEdited`. Emitted on *change* only, never per mousemove, so consumer work stays
+        // off the pointer path. Narrow the union with the exported `headerKind` / `groupHeaderKind`
+        // / `outOfBoundsKind` discriminants.
+        onItemHovered?: (args: GridMouseEventArgs) => void;
     };
 }
 
@@ -340,6 +349,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onCellContextMenu: this.args.onCellContextMenu,
         onHeaderContextMenu: this.args.onHeaderContextMenu,
         onGroupHeaderContextMenu: this.args.onGroupHeaderContextMenu,
+            onItemHovered: this.args.onItemHovered,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s

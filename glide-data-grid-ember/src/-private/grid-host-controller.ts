@@ -60,7 +60,7 @@ import {
     computeFillEdits,
 } from "../rendering/index.ts";
 import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
-import { sizeColumns } from "../rendering/column-sizer.ts";
+import { sizeColumns, applyColumnGrow } from "../rendering/column-sizer.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import type {
     DrawGridArg,
@@ -98,6 +98,14 @@ import type {
     FillHandleDirection,
     FillPatternEventArgs,
     ScrollEdge,
+    GridMouseEventArgs,
+} from "../rendering/index.ts";
+import {
+    headerKind,
+    groupHeaderKind,
+    outOfBoundsKind,
+    OutOfBoundsRegionAxis,
+    NO_SCROLL_EDGE,
 } from "../rendering/index.ts";
 import {
     computeBounds,
@@ -504,6 +512,21 @@ export interface GridHostArgs {
     /** Right-click on a column *group* header (the band above the headers, when `column.group` is
      *  set). `col` is in your coordinate space. */
     readonly onGroupHeaderContextMenu?: (col: number, event: ContextMenuEventArgs) => void;
+
+    /**
+     * Fires whenever the hovered cell, header or group header changes, and when the pointer leaves
+     * the grid entirely (`kind: "out-of-bounds"`). **This is what tooltips are built on** — source's
+     * `Tooltips` story is exactly this callback plus a positioned DOM node.
+     *
+     * `location` is in **your** coordinate space: the row-marker column is already subtracted, the
+     * same as `onCellsEdited` and the context-menu callbacks. Rows `-1` and `-2` mean the column
+     * header and the group header above it.
+     *
+     * Emitted only on *change*, not per mousemove — source does the same
+     * (`data-editor.tsx:2731`, an equality check against the previous args), and per-pixel emission
+     * would put consumer work directly on the pointer path.
+     */
+    readonly onItemHovered?: (args: GridMouseEventArgs) => void;
 }
 
 /** What a context-menu callback receives alongside the target. */
@@ -615,6 +638,7 @@ interface ResolvedGridHostArgs {
     readonly onCellContextMenu: ((location: Item, event: ContextMenuEventArgs) => void) | undefined;
     readonly onHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
     readonly onGroupHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
+    readonly onItemHovered: ((args: GridMouseEventArgs) => void) | undefined;
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
@@ -1125,6 +1149,8 @@ export class GridHostController {
               readonly rows: number;
               readonly minColumnWidth: number;
               readonly maxColumnWidth: number;
+              /** Container width, keyed because `grow` distributes the leftover against it. */
+              readonly width: number;
               readonly result: InnerGridColumn[];
           }
         | undefined;
@@ -1149,7 +1175,10 @@ export class GridHostController {
             cached.getCellRenderer === args.getCellRenderer &&
             cached.rows === args.rows &&
             cached.minColumnWidth === args.minColumnWidth &&
-            cached.maxColumnWidth === args.maxColumnWidth
+            cached.maxColumnWidth === args.maxColumnWidth &&
+            // `grow` distributes the container's leftover width, so the result depends on the
+            // container width and must be re-derived when the grid is resized.
+            cached.width === this.width
         ) {
             return cached.result;
         }
@@ -1184,6 +1213,12 @@ export class GridHostController {
             );
         }
 
+        // N1: distribute leftover width to columns declaring `grow`. Runs for fixed-width columns
+        // too -- `grow` and `width` are orthogonal -- which is why it sits outside the `hasAuto`
+        // branch above. Returns `result` by identity when no column grows, so the blit path's
+        // per-column identity comparison is unaffected for the overwhelmingly common case.
+        result = applyColumnGrow(result, this.width);
+
         this.autoSizeCache = {
             columns: args.columns,
             theme,
@@ -1191,6 +1226,7 @@ export class GridHostController {
             rows: args.rows,
             minColumnWidth: args.minColumnWidth,
             maxColumnWidth: args.maxColumnWidth,
+            width: this.width,
             result,
         };
         return result;
@@ -1261,6 +1297,7 @@ export class GridHostController {
             onCellContextMenu: args.onCellContextMenu,
             onHeaderContextMenu: args.onHeaderContextMenu,
             onGroupHeaderContextMenu: args.onGroupHeaderContextMenu,
+            onItemHovered: args.onItemHovered,
         };
     }
 
@@ -2211,6 +2248,12 @@ export class GridHostController {
 
         this.hoveredItem = item;
 
+        // N2 (TBD.md): the hover was fully tracked here since Phase 2 and handed out nowhere, which
+        // made tooltips impossible to build. Emitted here, after the `itemsAreEqual` early-return
+        // above, so this fires on *change* only -- source does the same and for the same reason
+        // (`data-editor.tsx:2731`): a per-mousemove emit would put consumer work on the pointer path.
+        this.emitItemHovered(args, item, ev, x, y);
+
         if (item === undefined) {
             // Off-grid entirely: clear hover and let the animation manager play its leave animation.
             this.hoverInfo = undefined;
@@ -2253,6 +2296,80 @@ export class GridHostController {
 
         this.animationManager.setHovered(cellNeedsHover ? item : undefined);
     };
+
+    /**
+     * Build and dispatch `onItemHovered` for a newly-hovered target (N2 in `TBD.md`).
+     *
+     * Populates the **already-ported** `GridMouseEventArgs` union from `rendering/event-args.ts`
+     * rather than inventing a narrower hover-specific type: the union was ported in Phase 1 and had
+     * never been constructed anywhere, so this is the first thing to actually use it, and matching
+     * source's shape here is what lets a consumer port a `Tooltips`-style recipe unchanged.
+     *
+     * `location` is converted to the consumer's coordinate space, mirroring
+     * `data-editor.tsx:2808` (`location[0] - rowMarkerOffset`). A hover over the row-marker column
+     * itself therefore reports `-1`, exactly as source does — it does not suppress the event.
+     */
+    private emitItemHovered(
+        args: ResolvedGridHostArgs,
+        item: Item | undefined,
+        ev: MouseEvent,
+        x: number,
+        y: number
+    ): void {
+        const onItemHovered = args.onItemHovered;
+        if (onItemHovered === undefined) return;
+
+        const base = {
+            shiftKey: ev.shiftKey,
+            ctrlKey: ev.ctrlKey,
+            metaKey: ev.metaKey,
+            // Touch is 9c, deferred — see PHASES.md. `touchMode` is hardcoded `false` throughout
+            // this controller, so reporting `false` here is consistent rather than a guess.
+            isTouch: false,
+            isEdge: false,
+            button: ev.button,
+            buttons: ev.buttons,
+            scrollEdge: NO_SCROLL_EDGE,
+        } as const;
+
+        if (item === undefined) {
+            onItemHovered({
+                ...base,
+                kind: outOfBoundsKind,
+                location: [0, 0],
+                isMaybeScrollbar: false,
+                region: [OutOfBoundsRegionAxis.Center, OutOfBoundsRegionAxis.Center],
+            });
+            return;
+        }
+
+        const [mangledCol, row] = item;
+        const bounds = this.computeCellRect(args, mangledCol, row);
+        const col = mangledCol - args.rowMarkerOffset;
+        const localEventX = x - bounds.x;
+        const localEventY = y - bounds.y;
+
+        if (row === -1 || row === -2) {
+            // `resolveMouseHit` encodes the column header as row -1 and the group header as -2.
+            const group = args.columns[col]?.group ?? "";
+            onItemHovered(
+                row === -2
+                    ? { ...base, kind: groupHeaderKind, location: [col, -2], bounds, group, localEventX, localEventY }
+                    : { ...base, kind: headerKind, location: [col, -1], bounds, group, localEventX, localEventY }
+            );
+            return;
+        }
+
+        onItemHovered({
+            ...base,
+            kind: "cell",
+            location: [col, row],
+            bounds,
+            isFillHandle: this.overFillHandle,
+            localEventX,
+            localEventY,
+        });
+    }
 
     // --- Phase 9h: shared drag plumbing (drag-extend / row reorder / fill) -------------------------
 

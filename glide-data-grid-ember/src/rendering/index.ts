@@ -177,7 +177,14 @@ export type {
     BaseGridMouseEventArgs,
     GridMouseEventArgs,
     GridMouseCellEventArgs,
+    GridMouseHeaderEventArgs,
+    GridMouseGroupHeaderEventArgs,
+    GridMouseOutOfBoundsEventArgs,
     GridKeyEventArgs,
     CellActivatedEventArgs,
     FillPatternEventArgs,
 } from "./event-args.ts";
+// Value exports, not types: these are the discriminants of the `GridMouseEventArgs` union, so a
+// consumer narrowing an `@onItemHovered` event needs them at runtime. Unexported until N2 landed,
+// because until then nothing in this addon ever constructed that union.
+export { headerKind, groupHeaderKind, outOfBoundsKind, OutOfBoundsRegionAxis } from "./event-args.ts";
