@@ -1230,7 +1230,15 @@ Items 1–6 all came from the user reviewing the demo and the cookbook on 2026-0
      `glide-data-grid-ember`, workflow filename `release.yml`) — the full checklist is in the header
      comment of `.github/workflows/release.yml`;
    - GitHub repo Settings → Pages → Source: **GitHub Actions**, for `pages.yml`;
-   - **verify `pnpm --filter test-app build` actually honours `ROOT_URL` under Vite.** The
+   - ~~**verify `pnpm --filter test-app build` actually honours `ROOT_URL` under Vite.**~~ —
+     **TESTED 2026-08-09, and it did NOT. Fixed.** `ROOT_URL` reached `ENV.rootURL` correctly, but
+     that is an *Ember* setting (what the router strips from the path). Vite's `base` is a separate
+     knob governing the `src`/`href` written into `index.html` and the chunk URLs in the bundle, and
+     nothing was setting it — so a Pages build emitted `/assets/main-*.js`, absolute from the domain
+     root, and the deployed page would have loaded and then 404'd on its own JavaScript. **A blank
+     screen, with a completely clean build log.** `test-app/vite.config.mjs` now sets
+     `base: process.env.ROOT_URL ?? '/'`; verified that a `ROOT_URL` build prefixes every asset and a
+     local build is byte-identical to before. Original note kept: the
      choices-ember original this was copied from is an `ember-cli` build; the env var is read in
      `config/environment.js` either way, but this has not been run.
 
