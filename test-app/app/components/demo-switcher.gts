@@ -28,209 +28,223 @@
 //   - "Async paging"   -> `<AsyncDemo>`: Phase 8's `AsyncRecordsSource` -- 100k rows that aren't in
 //                          memory, fetched a page at a time as `@onVisibleRegionChanged` reports
 //                          what's on screen, each arrival repainted by damage.
-import Component from '@glimmer/component';
-import { tracked } from '@glimmer/tracking';
-import { on } from '@ember/modifier';
-import DemoGrid from 'test-app/components/demo-grid';
-import TrackingDemo from 'test-app/components/tracking-demo';
-import GlideDemo from 'test-app/components/glide-demo';
-import StreamingDemo from 'test-app/components/streaming-demo';
-import AsyncDemo from 'test-app/components/async-demo';
-import ComposedDemo from 'test-app/components/composed-demo';
-import DaisyDemo from 'test-app/components/daisy-demo';
-import CookbookPage from 'test-app/components/cookbook-page';
-import GuidePage from 'test-app/components/guide-page';
+//   - "Apollo (faked)" -> `<ApolloDemo>`: the guide's Apollo performance claim, made observable. A
+//                          local fake of `InMemoryCache`'s immutability (no `@apollo/client`, no
+//                          `glimmer-apollo` -- both deliberately not dependencies) drives two grids
+//                          from the same subscription: one fed the raw result array, one fed
+//                          reconciled tracked view models. Two projection counters side by side.
+import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
+import { on } from "@ember/modifier";
+import DemoGrid from "test-app/components/demo-grid";
+import TrackingDemo from "test-app/components/tracking-demo";
+import GlideDemo from "test-app/components/glide-demo";
+import StreamingDemo from "test-app/components/streaming-demo";
+import AsyncDemo from "test-app/components/async-demo";
+import ComposedDemo from "test-app/components/composed-demo";
+import ApolloDemo from "test-app/components/apollo-demo";
+import DaisyDemo from "test-app/components/daisy-demo";
+import CookbookPage from "test-app/components/cookbook-page";
+import GuidePage from "test-app/components/guide-page";
 
 type DemoTab =
-  | 'full-grid'
-  | 'tracking'
-  | 'glide'
-  | 'streaming'
-  | 'composed'
-  | 'async'
-  | 'daisy'
-  | 'guide'
-  | 'cookbook';
+    "full-grid" | "tracking" | "glide" | "streaming" | "composed" | "async" | "apollo" | "daisy" | "guide" | "cookbook";
 
 export default class DemoSwitcher extends Component {
-  @tracked tab: DemoTab = 'full-grid';
+    @tracked tab: DemoTab = "full-grid";
 
-  showFullGrid = (): void => {
-    this.tab = 'full-grid';
-  };
+    showFullGrid = (): void => {
+        this.tab = "full-grid";
+    };
 
-  showTrackingDemo = (): void => {
-    this.tab = 'tracking';
-  };
+    showTrackingDemo = (): void => {
+        this.tab = "tracking";
+    };
 
-  showGlideDemo = (): void => {
-    this.tab = 'glide';
-  };
+    showGlideDemo = (): void => {
+        this.tab = "glide";
+    };
 
-  showStreamingDemo = (): void => {
-    this.tab = 'streaming';
-  };
+    showStreamingDemo = (): void => {
+        this.tab = "streaming";
+    };
 
-  showComposedDemo = (): void => {
-    this.tab = 'composed';
-  };
+    showComposedDemo = (): void => {
+        this.tab = "composed";
+    };
 
-  showAsyncDemo = (): void => {
-    this.tab = 'async';
-  };
+    showAsyncDemo = (): void => {
+        this.tab = "async";
+    };
 
-  showDaisyDemo = (): void => {
-    this.tab = 'daisy';
-  };
+    showApolloDemo = (): void => {
+        this.tab = "apollo";
+    };
 
-  showGuide = (): void => {
-    this.tab = 'guide';
-  };
+    showDaisyDemo = (): void => {
+        this.tab = "daisy";
+    };
 
-  showCookbook = (): void => {
-    this.tab = 'cookbook';
-  };
+    showGuide = (): void => {
+        this.tab = "guide";
+    };
 
-  get isDaisy(): boolean {
-    return this.tab === 'daisy';
-  }
+    showCookbook = (): void => {
+        this.tab = "cookbook";
+    };
 
-  get isFullGrid(): boolean {
-    return this.tab === 'full-grid';
-  }
+    get isDaisy(): boolean {
+        return this.tab === "daisy";
+    }
 
-  get isTracking(): boolean {
-    return this.tab === 'tracking';
-  }
+    get isFullGrid(): boolean {
+        return this.tab === "full-grid";
+    }
 
-  get isGlide(): boolean {
-    return this.tab === 'glide';
-  }
+    get isTracking(): boolean {
+        return this.tab === "tracking";
+    }
 
-  get isStreaming(): boolean {
-    return this.tab === 'streaming';
-  }
+    get isGlide(): boolean {
+        return this.tab === "glide";
+    }
 
-  get isComposed(): boolean {
-    return this.tab === 'composed';
-  }
+    get isStreaming(): boolean {
+        return this.tab === "streaming";
+    }
 
-  get isAsync(): boolean {
-    return this.tab === 'async';
-  }
+    get isComposed(): boolean {
+        return this.tab === "composed";
+    }
 
-  get isGuide(): boolean {
-    return this.tab === 'guide';
-  }
+    get isAsync(): boolean {
+        return this.tab === "async";
+    }
 
-  get isCookbook(): boolean {
-    return this.tab === 'cookbook';
-  }
+    get isApollo(): boolean {
+        return this.tab === "apollo";
+    }
 
-  <template>
-    <div style="display: flex; flex-direction: column; height: 100%; gap: 8px;">
-      {{! Natural (fractional) height, deliberately. A row of 13px system-ui buttons measures
+    get isGuide(): boolean {
+        return this.tab === "guide";
+    }
+
+    get isCookbook(): boolean {
+        return this.tab === "cookbook";
+    }
+
+    <template>
+        <div style="display: flex; flex-direction: column; height: 100%; gap: 8px;">
+            {{! Natural (fractional) height, deliberately. A row of 13px system-ui buttons measures
     21.5px here, which leaves every grid below it on a fractional height -- the exact
     case that used to blank the canvas on damage-only repaints, fixed in Phase 8 (see
     `data-grid-render.ts`'s backing-size comment). Keeping it fractional means the demos
     keep exercising that path instead of tiptoeing around it. }}
-      <div
-        style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; font: 13px system-ui;"
-      >
-        <button
-          class="btn btn-xs btn-ghost {{if this.isFullGrid 'btn-active'}}"
-          type="button"
-          data-test-show-full-grid
-          {{on "click" this.showFullGrid}}
-        >
-          Full grid demo
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isTracking 'btn-active'}}"
-          type="button"
-          data-test-show-tracking
-          {{on "click" this.showTrackingDemo}}
-        >
-          Tracking proof demo
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isGlide 'btn-active'}}"
-          type="button"
-          data-test-show-glide
-          {{on "click" this.showGlideDemo}}
-        >
-          Glide demo grid
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isStreaming 'btn-active'}}"
-          type="button"
-          data-test-show-streaming
-          {{on "click" this.showStreamingDemo}}
-        >
-          Streaming updates
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isComposed 'btn-active'}}"
-          type="button"
-          data-test-show-composed
-          {{on "click" this.showComposedDemo}}
-        >
-          Composed hooks
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isAsync 'btn-active'}}"
-          type="button"
-          data-test-show-async
-          {{on "click" this.showAsyncDemo}}
-        >
-          Async paging
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isDaisy 'btn-active'}}"
-          type="button"
-          data-test-show-daisy
-          {{on "click" this.showDaisyDemo}}
-        >
-          DaisyUI theming
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isGuide 'btn-active'}}"
-          type="button"
-          data-test-show-guide
-          {{on "click" this.showGuide}}
-        >
-          Guide
-        </button>
-        <button
-          class="btn btn-xs btn-ghost {{if this.isCookbook 'btn-active'}}"
-          type="button"
-          data-test-show-cookbook
-          {{on "click" this.showCookbook}}
-        >
-          Cookbook
-        </button>
-      </div>
-      <div style="flex: 1 1 auto; min-height: 0;">
-        {{#if this.isTracking}}
-          <TrackingDemo />
-        {{else if this.isGlide}}
-          <GlideDemo />
-        {{else if this.isStreaming}}
-          <StreamingDemo />
-        {{else if this.isComposed}}
-          <ComposedDemo />
-        {{else if this.isAsync}}
-          <AsyncDemo />
-        {{else if this.isDaisy}}
-          <DaisyDemo />
-        {{else if this.isGuide}}
-          <GuidePage />
-        {{else if this.isCookbook}}
-          <CookbookPage />
-        {{else}}
-          <DemoGrid />
-        {{/if}}
-      </div>
-    </div>
-  </template>
+            <div style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; font: 13px system-ui;">
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isFullGrid 'btn-active'}}"
+                    type="button"
+                    data-test-show-full-grid
+                    {{on "click" this.showFullGrid}}
+                >
+                    Full grid demo
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isTracking 'btn-active'}}"
+                    type="button"
+                    data-test-show-tracking
+                    {{on "click" this.showTrackingDemo}}
+                >
+                    Tracking proof demo
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isGlide 'btn-active'}}"
+                    type="button"
+                    data-test-show-glide
+                    {{on "click" this.showGlideDemo}}
+                >
+                    Glide demo grid
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isStreaming 'btn-active'}}"
+                    type="button"
+                    data-test-show-streaming
+                    {{on "click" this.showStreamingDemo}}
+                >
+                    Streaming updates
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isComposed 'btn-active'}}"
+                    type="button"
+                    data-test-show-composed
+                    {{on "click" this.showComposedDemo}}
+                >
+                    Composed hooks
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isAsync 'btn-active'}}"
+                    type="button"
+                    data-test-show-async
+                    {{on "click" this.showAsyncDemo}}
+                >
+                    Async paging
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isApollo 'btn-active'}}"
+                    type="button"
+                    data-test-show-apollo
+                    {{on "click" this.showApolloDemo}}
+                >
+                    Apollo (faked)
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isDaisy 'btn-active'}}"
+                    type="button"
+                    data-test-show-daisy
+                    {{on "click" this.showDaisyDemo}}
+                >
+                    DaisyUI theming
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isGuide 'btn-active'}}"
+                    type="button"
+                    data-test-show-guide
+                    {{on "click" this.showGuide}}
+                >
+                    Guide
+                </button>
+                <button
+                    class="btn btn-xs btn-ghost {{if this.isCookbook 'btn-active'}}"
+                    type="button"
+                    data-test-show-cookbook
+                    {{on "click" this.showCookbook}}
+                >
+                    Cookbook
+                </button>
+            </div>
+            <div style="flex: 1 1 auto; min-height: 0;">
+                {{#if this.isTracking}}
+                    <TrackingDemo />
+                {{else if this.isGlide}}
+                    <GlideDemo />
+                {{else if this.isStreaming}}
+                    <StreamingDemo />
+                {{else if this.isComposed}}
+                    <ComposedDemo />
+                {{else if this.isAsync}}
+                    <AsyncDemo />
+                {{else if this.isApollo}}
+                    <ApolloDemo />
+                {{else if this.isDaisy}}
+                    <DaisyDemo />
+                {{else if this.isGuide}}
+                    <GuidePage />
+                {{else if this.isCookbook}}
+                    <CookbookPage />
+                {{else}}
+                    <DemoGrid />
+                {{/if}}
+            </div>
+        </div>
+    </template>
 }

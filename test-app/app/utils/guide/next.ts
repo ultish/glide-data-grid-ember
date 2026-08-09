@@ -17,10 +17,16 @@ export const nextSection: Section = {
             head: ["You want to…", "Cookbook chapter"],
             rows: [
                 ["size, freeze, group, auto-size or make columns resizable", "**Columns**"],
-                ["make cells editable, add a trailing \"new row\", handle pastes", "**Editing**"],
-                ["read or control the selection, add row markers, drag rows, use the fill handle", "**Selection, row markers, reordering, fill**"],
+                ['make cells editable, add a trailing "new row", handle pastes', "**Editing**"],
+                [
+                    "read or control the selection, add row markers, drag rows, use the fill handle",
+                    "**Selection, row markers, reordering, fill**",
+                ],
                 ["sort, and build the header dropdown that drives it", "**Sorting, and the header menu**"],
-                ["restyle it, or drive the canvas from your app's CSS variables", "**Theming** and **Theme reference**"],
+                [
+                    "restyle it, or drive the canvas from your app's CSS variables",
+                    "**Theming** and **Theme reference**",
+                ],
                 ["add find-in-grid, or wire your own search input", "**Search**"],
                 ["show a right-click menu on a cell, header or group header", "**Context menus**"],
                 ["ship a cell type the addon doesn't have", "**Custom cell types**"],
@@ -30,7 +36,7 @@ export const nextSection: Section = {
         },
         {
             kind: "p",
-            text: "**Every other tab in this app is a working demo of something in one of the two documents**, and the recipes are lifted from them — so if a recipe stops working, a demo stops working. The **Full grid demo** is the reference integration with every shipped arg switched on; the **Tracking proof demo** is chapter 3 and chapter 4's measurements, live; **Streaming updates** and **Async paging** are chapter 8; **DaisyUI theming** is chapter 10.",
+            text: "**Every other tab in this app is a working demo of something in one of the two documents**, and the recipes are lifted from them — so if a recipe stops working, a demo stops working. The **Full grid demo** is the reference integration with every shipped arg switched on; the **Tracking proof demo** is chapter 3 and chapter 4's measurements, live; **Streaming updates** and **Async paging** are chapter 8; **Apollo (faked)** is chapter 5's performance trade-off, with both projection counters on screen; **DaisyUI theming** is chapter 10.",
         },
         {
             kind: "note",

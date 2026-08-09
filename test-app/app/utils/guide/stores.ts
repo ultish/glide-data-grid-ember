@@ -10,9 +10,18 @@
 //
 // Consequence stated honestly and NOT as a defect: `recordsSource` keys its per-row caches on the
 // `records` *array* identity, and Apollo produces a new array on every tick, so a one-field
-// subscription update re-projects every row. No benchmark figure appears here because none has been
-// taken — do not invent one. `glimmer-apollo` is deliberately not a dependency of this workspace;
-// the examples are illustrative, exactly like `object-scan` in chapter 6.
+// subscription update re-projects every row.
+//
+// As of 2026-08-09 that consequence is **observable**, not just argued: the **Apollo (faked)** tab
+// (`app/components/apollo-demo.gts` + `app/utils/apollo-fake.ts`) drives two grids from one
+// subscription and counts `toCell` calls on each — 200 of 200 for the raw result array, 1 for the
+// reconciled view models. The reconcile code in this chapter is LIFTED from that demo; keep the two
+// in step rather than editing one. `@apollo/client` and `glimmer-apollo` are still deliberately not
+// dependencies of this workspace (the demo fakes only the semantics that matter, and its header says
+// which), exactly like `object-scan` in chapter 6.
+//
+// Still true and still worth guarding: no *timing* figure appears here, because none has been taken.
+// The demo makes the ratio visible; it does not tell you where the crossover sits. Do not invent one.
 //
 // The Ember Data live-array trap in here is not theoretical — it was a real addon-level defect fixed
 // on 2026-08-09 (blank rows for records appended to a live array), and it is exactly the kind of
@@ -111,8 +120,9 @@ export default class PeopleTable extends Component {
     }
   };
 
+  // \`toCell\` is chapter 6's flattening function — one name, one job, passed straight through.
   @cached get gridArgs() {
-    return recordsSource({ records: this.people, columns: COLUMNS, toCell: gqlPersonToCell });
+    return recordsSource({ records: this.people, columns: COLUMNS, toCell });
   }
 }`,
         },
@@ -164,7 +174,7 @@ reconcile = rows => {
         // -- glimmer-apollo ---------------------------------------------------------------------------
         {
             kind: "p",
-            text: "**Apollo, via `glimmer-apollo`.** If your GraphQL goes through Apollo Client, you do not need the raw-client plumbing above at all: `glimmer-apollo` already bridges Apollo to autotracking. `useQuery`, `useMutation` and `useSubscription` are used as **class fields**, and the object each returns exposes `loading`, `data` and `error` as `@tracked` properties. So the \"plain objects are not tracked\" problem is solved one level up: the tracked thing is the **result**, and each new result is a new array — which is exactly the signal `recordsSource` keys on.",
+            text: '**Apollo, via `glimmer-apollo`.** If your GraphQL goes through Apollo Client, you do not need the raw-client plumbing above at all: `glimmer-apollo` already bridges Apollo to autotracking. `useQuery`, `useMutation` and `useSubscription` are used as **class fields**, and the object each returns exposes `loading`, `data` and `error` as `@tracked` properties. So the "plain objects are not tracked" problem is solved one level up: the tracked thing is the **result**, and each new result is a new array — which is exactly the signal `recordsSource` keys on.',
         },
         {
             kind: "code",
@@ -212,7 +222,7 @@ export default class PeopleTable extends Component {
     return recordsSource({
       records: this.peopleQuery.data?.people ?? NONE,
       columns: COLUMNS,
-      toCell: personToCell,
+      toCell,                 // chapter 6's flattening function, unchanged
       onCellEdited: this.onEdit,
     });
   }
@@ -250,10 +260,26 @@ personUpdates = useSubscription(this, () => [
             kind: "table",
             head: ["Behaviour", "Ember Data", "Apollo (InMemoryCache)"],
             rows: [
-                ["A field changes. What happens to the object?", "it mutates **in place**", "a **new** object is produced"],
-                ["Does the record's identity change?", "never — stable for the life of the record", "yes, for the changed entity"],
-                ["Does the containing array's identity change?", "no — a live array keeps one identity forever", "yes — it holds a changed child"],
-                ["Is identity a usable change signal?", "**no.** It never moves; the tracked tag is the signal", "**yes.** `!==` means genuinely different data"],
+                [
+                    "A field changes. What happens to the object?",
+                    "it mutates **in place**",
+                    "a **new** object is produced",
+                ],
+                [
+                    "Does the record's identity change?",
+                    "never — stable for the life of the record",
+                    "yes, for the changed entity",
+                ],
+                [
+                    "Does the containing array's identity change?",
+                    "no — a live array keeps one identity forever",
+                    "yes — it holds a changed child",
+                ],
+                [
+                    "Is identity a usable change signal?",
+                    "**no.** It never moves; the tracked tag is the signal",
+                    "**yes.** `!==` means genuinely different data",
+                ],
                 [
                     "Memoize rows in a `WeakMap` keyed on the record?",
                     "**unsafe** — same key, new contents, stale rows forever",
@@ -267,7 +293,7 @@ personUpdates = useSubscription(this, () => [
         },
         {
             kind: "note",
-            text: "**That last row is why chapter 4's warning does not transfer.** \"Don't memoize rows in a `WeakMap` keyed on the record object\" is a rule about *mutable* stores — the key stays put while the contents move underneath it. Apollo's results are immutable, so the same technique is sound there for precisely the reason it is broken for Ember Data. The rule is not \"identity-keyed caching is bad\"; it is **\"match your memoization to which way your data layer moves.\"**",
+            text: '**That last row is why chapter 4\'s warning does not transfer.** "Don\'t memoize rows in a `WeakMap` keyed on the record object" is a rule about *mutable* stores — the key stays put while the contents move underneath it. Apollo\'s results are immutable, so the same technique is sound there for precisely the reason it is broken for Ember Data. The rule is not "identity-keyed caching is bad"; it is **"match your memoization to which way your data layer moves."**',
         },
         {
             kind: "p",
@@ -279,8 +305,49 @@ personUpdates = useSubscription(this, () => [
                 "**It is not the paint path.** `getCellContent` is still an O(1) array lookup, and the blit rules of chapter 9 are unaffected. What repeats is `toCell` — a plain function you wrote — once per row per tick.",
                 "**At moderate row counts, stop here.** A full re-projection of a few hundred rows is cheap next to the network round trip that caused it, and the code you get is the simple version above with nothing to maintain.",
                 "**At large row counts with a high-frequency subscription, reconcile.** Feed the Apollo result into tracked models keyed by `id` — the `PersonRow` / `reconcile` pattern shown earlier in this chapter for polling is the same pattern, and Apollo makes it *cheaper*. Keep the raw entity on the view-model and an early `if (raw === vm.raw) return vm;` skips an unchanged row exactly, with no field comparison at all — the `sameProfile`-style field guards above exist because *most* clients reallocate identical nested objects, and Apollo's result caching is precisely the case where they don't.",
-                "**Where the crossover sits depends on your rows × columns × tick rate**, and on how much work your `toCell` does. No figure is given here because none has been measured; profile your own grid before adding the reconcile layer.",
+                "**Where the crossover sits depends on your rows × columns × tick rate**, and on how much work your `toCell` does. The demo below makes the *ratio* observable, but no timing figure is given here because none has been taken; profile your own grid before adding the reconcile layer.",
             ],
+        },
+        {
+            kind: "p",
+            text: "**None of that is asserted — it is running in the app.** The **Apollo (faked)** tab drives two grids from one subscription that changes *one field on one entity* per tick, and counts `toCell` calls on each. The grid fed `query.data.people` directly reports **200 rows re-projected of 200**; the grid fed reconciled tracked view models reports **1**. Both grids show the same data and do the same projection work; the only difference is what the `records` array's identity does. The tab also counts, element by element, what the cache write did to object identity: **one new entity, 199 siblings still `===`, and a new containing array anyway** — that asymmetry is the whole mechanism in one line. (`@apollo/client` and `glimmer-apollo` are deliberately not dependencies of this workspace; the tab uses a local fake whose header lists exactly which Apollo semantics it reproduces and which it does not.)",
+        },
+        {
+            kind: "p",
+            text: "Here is the reconcile layer that produces the `1`, lifted from that demo. Against Apollo it is *smaller* than the polling version earlier in this chapter, and for the reason the table above gives: an unchanged entity is the same object, so the whole view model is one `@tracked` field plus an identity guard, with no per-field comparisons to write and none to get wrong.",
+        },
+        {
+            kind: "code",
+            text: `class PersonRow {
+  @tracked raw;                       // the Apollo entity, replaced wholesale — one tracked write
+  constructor(raw) { this.id = raw.id; this.raw = raw; }
+
+  // The exact test, not an approximation: Apollo only allocates a new object when something in it
+  // actually changed. Against a client that reallocates identical objects this misses, and you are
+  // back to comparing the fields you display (\`sameProfile\`, earlier in this chapter).
+  apply = raw => { if (this.raw !== raw) this.raw = raw; };
+}
+
+const toCell = (row, col) => personCell(row.raw, col);   // same projection, read through \`raw\`
+
+reconcile = incoming => {
+  let membershipChanged = incoming.length !== this.rows.length;
+  const next = incoming.map((raw, i) => {
+    let vm = this.#byId.get(raw.id);
+    if (vm === undefined) { vm = new PersonRow(raw); this.#byId.set(raw.id, vm); membershipChanged = true; }
+    else vm.apply(raw);
+    if (this.rows[i] !== vm) membershipChanged = true;
+    return vm;
+  });
+  // Keep the SAME array when membership and order are unchanged — this is the load-bearing half. A
+  // fresh array identity rebuilds every per-row cache and throws away exactly the incrementality the
+  // guard above just bought.
+  this.rows = membershipChanged ? next : this.rows;
+};`,
+        },
+        {
+            kind: "note",
+            text: "**Reconcile where a tracked write is legal.** The fold above must not run inside a getter: it reads and then writes tracked state, which is what Ember's backtracking-rerender assertion exists to catch. Run it from wherever the new result arrives — `glimmer-apollo`'s `onComplete`, a cache subscription, your own callback — all of which are outside a render. The demo does it in the cache callback for exactly this reason.",
         },
         {
             kind: "p",
