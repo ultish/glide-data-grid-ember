@@ -45,7 +45,10 @@ export type {
     RowMarkerKind,
     CellsForSelectionCallback,
     TrailingRowOptions,
+    RowAppendedResult,
+    ColumnAppendedResult,
 } from "../-private/grid-host-controller.ts";
+import type { RowAppendedResult, ColumnAppendedResult } from "../-private/grid-host-controller.ts";
 
 import { getCellRenderer as defaultGetCellRenderer } from "../rendering/cells/index.ts";
 import { createCombinedCellRenderer } from "../rendering/extra-cells/index.ts";
@@ -75,15 +78,94 @@ import type {
     GroupHeaderClickedEventArgs,
     CellActivatedEventArgs,
     CellActivationBehavior,
+    ScrollToParams,
 } from "../rendering/index.ts";
 
-/** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
+/**
+ * The imperative surface, handed to `@onReady` once the grid exists and also yielded as
+ * `api` from the component's block. Port of source's `DataEditorRef` (9f).
+ *
+ * **Shape decision, settled 9f (2026-08-09).** It stays a plain, flat, reference-stable bag of bound
+ * methods rather than becoming a class the consumer constructs and passes in. The alternative
+ * inverts construction -- the object would have to exist before the grid, and every method would
+ * need a "not attached yet" state -- which buys nothing: the grid already hands the same object out
+ * *twice*, through `@onReady` for a consumer who wants to stash it and through the yielded block for
+ * one who only needs it in the template. That block form is the Ember-idiomatic "controller the
+ * consumer holds", so adding a third mechanism would be two ways to do one thing. Source's ref is
+ * flat too, at nine methods.
+ *
+ * **Every column index here is in consumer space** -- column `0` is your first column, never the
+ * row-marker column, in both directions. The same rule as `@onCellsEdited` and the context-menu
+ * callbacks.
+ */
 export interface GlideDataGridApi {
     readonly updateCells: (cells: readonly { cell: Item }[]) => void;
 
+    // --- 9f: the rest of source's `DataEditorRef` -------------------------------------------------
+
+    /** Focus the grid, so keyboard navigation works without clicking it first. */
+    readonly focus: () => void;
+    /**
+     * Screen-space (client) bounds of a cell, or of a column header when `row` is omitted, or of the
+     * entire scrollable content when both are omitted. `undefined` if the target is scrolled out of
+     * the drawn region or does not exist.
+     *
+     * Client coordinates, so it can position a tooltip or popover directly.
+     */
+    readonly getBounds: (col?: number, row?: number) => Rectangle | undefined;
+    /**
+     * Scroll a cell into view, the minimum distance by default.
+     *
+     * `hAlign`/`vAlign` pin it to an edge or centre it instead; `paddingX`/`paddingY` add slack;
+     * `dir` restricts which axes may move; `behavior: "smooth"` animates.
+     *
+     * **Narrower than source in one way:** source also accepts `{amount, unit: "px"}` in place of a
+     * column or row index. That form is not ported -- its upstream implementation mixes client and
+     * content coordinates in a way this port would have to guess at, and `@scrollOffsetX`/`Y` already
+     * cover px positioning. Widening the parameter later is not a breaking change.
+     */
+    readonly scrollTo: (col: number, row: number, params?: ScrollToParams & { behavior?: ScrollBehavior }) => void;
+    /**
+     * Re-measure the given columns against their currently-visible cells and report the results
+     * through `@onColumnResize`, exactly as dragging a resize handle would.
+     *
+     * **Notification only.** You own the columns array; nothing changes width until you apply it. Does
+     * nothing without an `@onColumnResize`.
+     */
+    readonly remeasureColumns: (cols: Iterable<number>) => void;
+    /**
+     * The `GridMouseEventArgs` a pointer at these *client* coordinates would produce, with no pointer
+     * event having happened -- the same hit test `@onItemHovered` reports through. For hit-testing a
+     * drop target, or a synthetic pointer.
+     */
+    readonly getMouseArgsForPosition: (
+        clientX: number,
+        clientY: number,
+        ev?: MouseEvent
+    ) => GridMouseEventArgs | undefined;
+    /**
+     * Append a row programmatically, then select `col` in it and (unless `openOverlay` is `false`)
+     * open its editor. The programmatic half of `@onRowAppended`, which is still what actually adds
+     * the row.
+     *
+     * Resolves once the focus has landed. It has to be async: your row count is tracked state that
+     * has not flushed when `@onRowAppended` returns, so the grid polls for it to grow (with backoff,
+     * giving up after ~500ms) before focusing anything. Return `"top"` or a row index from
+     * `@onRowAppended` if the new row did not go on the end.
+     */
+    readonly appendRow: (col: number, openOverlay?: boolean, behavior?: ScrollBehavior) => Promise<void>;
+    /** The column equivalent of {@link GlideDataGridApi.appendRow}, driving `@onColumnAppended`. */
+    readonly appendColumn: (row: number, openOverlay?: boolean) => Promise<void>;
+    /**
+     * Synthesise a user interaction. Source takes five event names; this port implements `"delete"`
+     * only -- see `GridHostController.emit` for why the other four are not simple exposures of
+     * anything that exists here. The union is deliberately narrow so adding them later is not a
+     * breaking change.
+     */
+    readonly emit: (event: "delete") => void;
+
     // Search (Phase 9e). These are what `<GlideSearchBar>` drives; a consumer building their own
-    // search UI uses the same five methods. Note the API object stays a plain bag of bound methods
-    // -- 9f flags that this shape gets awkward as it grows, and that decision is still open.
+    // search UI uses the same five methods.
     readonly openSearch: () => void;
     readonly closeSearch: () => void;
     readonly setSearchValue: (value: string) => void;
@@ -218,7 +300,9 @@ export interface GlideDataGridSignature {
         /** Tint / hint text / "+" icon for that row (Phase 9g). Cosmetic only; see
          *  `TrailingRowOptions` for the two of source's fields this port deliberately omits. */
         trailingRowOptions?: TrailingRowOptions;
-        onRowAppended?: () => void;
+        /** Return `"top"` or a row index if the new row did not go on the end -- only
+         *  `GlideDataGridApi.appendRow` reads it, and returning nothing is fine. */
+        onRowAppended?: () => RowAppendedResult | Promise<RowAppendedResult> | void;
 
         // Theming (Phase 6). `@theme` above is the global overlay on the base theme; this is the
         // per-row overlay, applied after a column's `themeOverride` and before a cell's. See
@@ -322,8 +406,10 @@ export interface GlideDataGridSignature {
         onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
         onCellActivated?: (cell: Item, event: CellActivatedEventArgs) => void;
         onFinishedEditing?: (newValue: GridCell | undefined, movement: Item) => void;
-        /** Tab in an editor on the last column. Setting it is what enables that gesture. */
-        onColumnAppended?: () => void;
+        /** Tab in an editor on the last column. Setting it is what enables that gesture. Return
+         *  `"left"` or a column index if the new column did not go on the end -- only
+         *  `GlideDataGridApi.appendColumn` reads it. */
+        onColumnAppended?: () => ColumnAppendedResult | Promise<ColumnAppendedResult> | void;
         /** When a pointer click activates a cell: `"second-click"` (default), `"single-click"` or
          *  `"double-click"`. A cell's own `activationBehaviorOverride` wins over this. */
         cellActivationBehavior?: CellActivationBehavior;
@@ -518,8 +604,20 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
             });
             this.controller = controller;
             registerDestructor(this, () => controller.destroy());
+            // Built once and never rebuilt: the consumer is expected to stash this from `@onReady`,
+            // and `<GlideSearchBar>` holds it across rerenders too.
             const api: GlideDataGridApi = {
                 updateCells: (cells: readonly { cell: Item }[]) => controller.updateCells(cells),
+                focus: () => controller.focus(),
+                getBounds: (col?: number, row?: number) => controller.getBounds(col, row),
+                scrollTo: (col, row, params) => controller.scrollTo(col, row, params),
+                remeasureColumns: (cols: Iterable<number>) => controller.remeasureColumns(cols),
+                getMouseArgsForPosition: (clientX: number, clientY: number, ev?: MouseEvent) =>
+                    controller.getMouseArgsForPosition(clientX, clientY, ev),
+                appendRow: (col: number, openOverlay?: boolean, behavior?: ScrollBehavior) =>
+                    controller.appendRow(col, openOverlay, behavior),
+                appendColumn: (row: number, openOverlay?: boolean) => controller.appendColumn(row, openOverlay),
+                emit: (event: "delete") => controller.emit(event),
                 openSearch: () => controller.openSearch(),
                 closeSearch: () => controller.closeSearch(),
                 setSearchValue: (value: string) => controller.setSearchValue(value),

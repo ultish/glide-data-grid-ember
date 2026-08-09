@@ -229,8 +229,18 @@ const ACTIVATION_BEHAVIORS: readonly CellActivationBehavior[] = ["second-click",
 // `rowMarkerTheme` becomes the marker column's `themeOverride` (columns feed `computeCanBlit`), and
 // `trailingRowOptions` is part of the mangled-cell-content cache key.
 const ROW_MARKER_THEME: Partial<Theme> = { bgCell: "#eef4ff", textDark: "#0d5bd1" };
-const PLAIN_TRAILING_ROW: TrailingRowOptions = { hint: "Add row" };
-const TINTED_TRAILING_ROW: TrailingRowOptions = { hint: "Add row", tint: true, addIcon: "headerRowID" };
+// `targetColumn` (9f) says which column's editor opens in the newly-appended row, whichever column
+// was clicked. Column 1 is the Name column, which is the one you actually want to type into --
+// clicking the trailing row under "Avatar" and landing in an image editor is the case this exists
+// for. It only means anything now that `appendRow`'s focus flow exists; it was deferred in 9g
+// precisely because without it the option would have compiled and done nothing.
+const PLAIN_TRAILING_ROW: TrailingRowOptions = { hint: "Add row", targetColumn: 1 };
+const TINTED_TRAILING_ROW: TrailingRowOptions = {
+    hint: "Add row",
+    tint: true,
+    addIcon: "headerRowID",
+    targetColumn: 1,
+};
 
 export default class DemoGrid extends Component {
     constructor(...args: ConstructorParameters<typeof Component>) {
@@ -871,8 +881,83 @@ export default class DemoGrid extends Component {
     // Phase 4d: `demoGetCellContent` is a pure function of `[col, row]` (no upper bound baked in),
     // so simply widening `rows` is enough for the newly-appended row to render real (generated)
     // content immediately -- no separate "seed the new row's data" step needed for this demo.
-    handleRowAppended = (): void => {
-        this.rows = this.rows + 1;
+    //
+    // 9f: the returned index is what `api.appendRow()` focuses. Returning it explicitly (rather than
+    // `undefined`, which means "on the end" and would land in the same place here) is what exercises
+    // the numeric branch of `RowAppendedResult`.
+    handleRowAppended = (): number => {
+        const index = this.rows;
+        this.rows = index + 1;
+        return index;
+    };
+
+    // --- Phase 9f: the imperative API ------------------------------------------------------------
+    //
+    // Every one of these is a method on the object `@onReady` hands over. They are buttons rather
+    // than a written-down recipe for this project's standard reason: an API surface nothing calls is
+    // unverified code, and `api.appendRow`'s poll-then-focus flow in particular cannot be checked by
+    // reading it.
+
+    /** Whatever the last API call reported back, for the methods that return something. */
+    @tracked lastApiResult: string | undefined;
+
+    apiFocus = (): void => {
+        this.gridApi?.focus();
+        this.lastApiResult = "focus() — arrow keys now move the selection";
+    };
+
+    /** Deep into the grid on both axes, centred, so the alignment options are visibly doing work. */
+    apiScrollTo = (): void => {
+        this.gridApi?.scrollTo(8, 500, { hAlign: "center", vAlign: "center", behavior: "smooth" });
+        this.lastApiResult = "scrollTo(8, 500) centred, smooth";
+    };
+
+    /** Client coordinates, so this is directly usable for positioning a popover. */
+    apiGetBounds = (): void => {
+        const cell = this.gridApi?.getBounds(0, 0);
+        const all = this.gridApi?.getBounds();
+        this.lastApiResult =
+            cell === undefined
+                ? "getBounds(0,0) — undefined (scrolled out of view)"
+                : `getBounds(0,0) = ${Math.round(cell.x)},${Math.round(cell.y)} ${Math.round(cell.width)}x${Math.round(cell.height)}` +
+                  ` · content ${Math.round(all?.width ?? 0)}x${Math.round(all?.height ?? 0)}`;
+    };
+
+    /** Feeds straight back into `@onColumnResize`, which is what actually applies the width -- the
+     *  grid only measures and reports, exactly like a resize drag. */
+    apiRemeasure = (): void => {
+        const targets = [0, 1, 2, 3, 4];
+        this.gridApi?.remeasureColumns(targets);
+        this.lastApiResult = `remeasureColumns([${targets.join(", ")}]) — widths applied via @onColumnResize`;
+    };
+
+    apiAppendRow = (): void => {
+        void this.gridApi?.appendRow(1).then(() => {
+            this.lastApiResult = `appendRow(1) — row ${this.rows - 1} focused, editor open`;
+        });
+    };
+
+    apiAppendColumn = (): void => {
+        void this.gridApi?.appendColumn(0).then(() => {
+            this.lastApiResult = `appendColumn(0) — column ${this.columns.length - 1} focused`;
+        });
+    };
+
+    apiEmitDelete = (): void => {
+        this.gridApi?.emit("delete");
+        this.lastApiResult = "emit('delete') — same path as the Delete key";
+    };
+
+    /** The centre of the grid element, hit-tested with no pointer event at all. */
+    apiHitTest = (): void => {
+        const root = this.gridApi?.getRootElement();
+        if (root === undefined) return;
+        const rect = root.getBoundingClientRect();
+        const hit = this.gridApi?.getMouseArgsForPosition(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        this.lastApiResult =
+            hit === undefined
+                ? "getMouseArgsForPosition — undefined"
+                : `getMouseArgsForPosition(centre) = ${hit.kind} ${hit.location[0]},${hit.location[1]}`;
     };
 
     <template>
@@ -955,6 +1040,36 @@ export default class DemoGrid extends Component {
                 </button>
             </div>
 
+            {{! Phase 9f: the imperative API. Separate row because these are *calls*, not settings --
+                nothing here is a mode the grid stays in. }}
+            <div class="gdg-full__controls">
+                <span class="gdg-full__hint" style="align-self: center;">Imperative API:</span>
+                <button type="button" class="gdg-full__toggle" data-test-api-focus {{on "click" this.apiFocus}}>
+                    focus()
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-scroll-to {{on "click" this.apiScrollTo}}>
+                    scrollTo(8, 500) centred
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-get-bounds {{on "click" this.apiGetBounds}}>
+                    getBounds()
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-remeasure {{on "click" this.apiRemeasure}}>
+                    remeasureColumns(0-4)
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-append-row {{on "click" this.apiAppendRow}}>
+                    appendRow(1)
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-append-column {{on "click" this.apiAppendColumn}}>
+                    appendColumn(0)
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-hit-test {{on "click" this.apiHitTest}}>
+                    getMouseArgsForPosition(centre)
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-api-emit-delete {{on "click" this.apiEmitDelete}}>
+                    emit('delete')
+                </button>
+            </div>
+
             {{! Notification-only args, rendered so they are observable rather than merely wired. }}
             <div class="gdg-full__status">
                 <span>Selection: <b data-test-selection-summary>{{this.selectionSummary}}</b></span>
@@ -964,6 +1079,7 @@ export default class DemoGrid extends Component {
                 {{! Phase 9g: an edit that is silently refused is indistinguishable from a broken
                     grid, so every guard decision is reported. }}
                 {{#if this.lastGuard}}<span>Guard: <b data-test-last-guard>{{this.lastGuard}}</b></span>{{/if}}
+                {{#if this.lastApiResult}}<span>API: <b data-test-last-api-result>{{this.lastApiResult}}</b></span>{{/if}}
                 <span>Click: <b data-test-last-click>{{this.lastClick}}</b></span>
                 <span>Activated: <b data-test-last-activation>{{this.lastActivation}}</b></span>
                 <span>Edit end: <b data-test-last-edit-finish>{{this.lastEditFinish}}</b></span>

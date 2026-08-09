@@ -65,7 +65,9 @@ import { copyHeaderRow } from "../rendering/copy-paste.ts";
 import { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "../rendering/click-behavior.ts";
 import { computeGroupHeaderSelection } from "../rendering/group-header-selection.ts";
 import { remAdjustDimensions, measureRemSize, type RemAdjustableDimensions } from "../rendering/rem-adjuster.ts";
-import { sizeColumns, applyColumnGrow } from "../rendering/column-sizer.ts";
+import { sizeColumns, applyColumnGrow, measureColumn } from "../rendering/column-sizer.ts";
+import { computeScrollDelta, type ScrollToParams } from "../rendering/scroll-to.ts";
+import { resolveNewRowTarget } from "../rendering/new-row-target.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import type {
     DrawGridArg,
@@ -181,7 +183,29 @@ export interface TrailingRowOptions {
     /** Header-icon name drawn in place of the built-in "+" glyph. Must exist in the sprite set
      *  (the built-ins, plus anything added via `headerIcons`). */
     readonly addIcon?: string;
+    /**
+     * Which column's editor to open in the appended row, instead of the one that was clicked.
+     * Either a consumer-space column index or one of the objects from `columns` (matched by
+     * identity, so it survives reordering).
+     *
+     * A column's own `trailingRowOptions.targetColumn` overrides this for that column, as with
+     * `hint`/`addIcon`. Mirrors source's `getCustomNewRowTargetColumn` (`data-editor.tsx:1795`).
+     *
+     * **Only meaningful because 9f's `appendRow()` exists** -- it was deferred in 9g for exactly
+     * that reason. The trailing row's click/Enter now runs through the same focus flow the API
+     * method does, which is also what source does (`:1913`, `:3303`).
+     */
+    readonly targetColumn?: number | GridColumn;
 }
+
+/**
+ * Where `onRowAppended` put the new row, for `GlideDataGridApi.appendRow` to focus. `"bottom"` and
+ * `undefined` mean the same thing. Source's inline union (`data-editor.tsx:1695`).
+ */
+export type RowAppendedResult = "top" | "bottom" | number | undefined;
+
+/** The column equivalent of {@link RowAppendedResult}. `"right"` and `undefined` mean the same. */
+export type ColumnAppendedResult = "left" | "right" | number | undefined;
 
 export interface GridHostArgs {
     readonly columns: readonly GridColumn[];
@@ -410,8 +434,14 @@ export interface GridHostArgs {
      * every other edit-adjacent callback on this interface, **`GridHostController` does not mutate
      * `rows`/any backing data store itself** -- the consumer must increase its own row count (and
      * make `getCellContent` return real data for the new row) for a new row to actually appear.
+     *
+     * **The return value only matters to 9f's `appendRow()`**, which needs to know which row to
+     * focus. `"bottom"` (or returning nothing) means the new row went on the end, `"top"` means
+     * index 0, and a number is an explicit index. Mirrors source's
+     * `RowAppendedResult` (`data-editor.tsx:1693-1701`); the keyboard/click gesture ignores it,
+     * so an existing `() => void` handler stays valid.
      */
-    readonly onRowAppended?: () => void;
+    readonly onRowAppended?: () => RowAppendedResult | Promise<RowAppendedResult> | void;
 
     // --- Phase 6: theming ------------------------------------------------------------------------
     /**
@@ -734,11 +764,12 @@ export interface GridHostArgs {
      * and, like `onRowAppended`, the consumer owns the columns array, so nothing appears until they
      * add one.
      *
-     * **Narrower than source.** Source also exposes `appendColumn` on its imperative ref and awaits
-     * a returned position to decide where to focus; the ref is 9f and the awaited-position dance
-     * needs it, so this port ships the keyboard half only and ignores any returned value.
+     * **The return value only matters to 9f's `appendColumn()`**, which needs to know which column
+     * to focus: `"right"` (or nothing) means the end, `"left"` means index 0, a number is an
+     * explicit index. Mirrors source's `ColumnAppendedResult`. The Tab gesture ignores it, so an
+     * existing `() => void` handler stays valid.
      */
-    readonly onColumnAppended?: () => void;
+    readonly onColumnAppended?: () => ColumnAppendedResult | Promise<ColumnAppendedResult> | void;
 
     /**
      * When a pointer click activates a cell. `"second-click"` (the default, and this port's only
@@ -895,7 +926,7 @@ interface ResolvedGridHostArgs {
 
     readonly showTrailingBlankRow: boolean;
     readonly trailingRowOptions: TrailingRowOptions | undefined;
-    readonly onRowAppended: (() => void) | undefined;
+    readonly onRowAppended: (() => RowAppendedResult | Promise<RowAppendedResult> | void) | undefined;
 
     readonly getRowThemeOverride: GetRowThemeCallback | undefined;
 
@@ -933,7 +964,9 @@ interface ResolvedGridHostArgs {
     readonly onGroupHeaderClicked: ((colIndex: number, event: GroupHeaderClickedEventArgs) => void) | undefined;
     readonly onCellActivated: ((cell: Item, event: CellActivatedEventArgs) => void) | undefined;
     readonly onFinishedEditing: ((newValue: GridCell | undefined, movement: Item) => void) | undefined;
-    readonly onColumnAppended: (() => void) | undefined;
+    readonly onColumnAppended:
+        | (() => ColumnAppendedResult | Promise<ColumnAppendedResult> | void)
+        | undefined;
     readonly cellActivationBehavior: CellActivationBehavior;
 
     readonly editOnType: boolean;
@@ -2795,56 +2828,73 @@ export class GridHostController {
         const onItemHovered = args.onItemHovered;
         if (onItemHovered === undefined) return;
 
-        const base = {
-            shiftKey: ev.shiftKey,
-            ctrlKey: ev.ctrlKey,
-            metaKey: ev.metaKey,
-            // Touch is 9c, deferred — see PHASES.md. `touchMode` is hardcoded `false` throughout
-            // this controller, so reporting `false` here is consistent rather than a guess.
-            isTouch: false,
-            isEdge: false,
-            button: ev.button,
-            buttons: ev.buttons,
-            scrollEdge: NO_SCROLL_EDGE,
-        } as const;
+        onItemHovered(
+            this.buildMouseEventArgs(args, item, {
+                shiftKey: ev.shiftKey,
+                ctrlKey: ev.ctrlKey,
+                metaKey: ev.metaKey,
+                // Touch is 9c, deferred — see PHASES.md. `touchMode` is hardcoded `false` throughout
+                // this controller, so reporting `false` here is consistent rather than a guess.
+                isTouch: false,
+                isEdge: false,
+                button: ev.button,
+                buttons: ev.buttons,
+                scrollEdge: NO_SCROLL_EDGE,
+                localX: x,
+                localY: y,
+            })
+        );
+    }
+
+    /**
+     * Builds a `GridMouseEventArgs` for a hit target. Shared by `@onItemHovered` and 9f's
+     * `getMouseArgsForPosition`, which must agree -- a consumer comparing the two is exactly the
+     * kind of thing this API exists for, and two separate constructions would drift.
+     *
+     * `item` is MANGLED and `location` comes out in CONSUMER space, mirroring
+     * `data-editor.tsx:2808`/`:4104`. A hover over the row-marker column reports `-1` rather than
+     * being suppressed, as source does.
+     */
+    private buildMouseEventArgs(
+        args: ResolvedGridHostArgs,
+        item: Item | undefined,
+        base: Omit<BaseGridMouseEventArgs, "isLongTouch"> & { readonly localX: number; readonly localY: number }
+    ): GridMouseEventArgs {
+        const { localX, localY, ...common } = base;
 
         if (item === undefined) {
-            onItemHovered({
-                ...base,
+            return {
+                ...common,
                 kind: outOfBoundsKind,
                 location: [0, 0],
                 isMaybeScrollbar: false,
                 region: [OutOfBoundsRegionAxis.Center, OutOfBoundsRegionAxis.Center],
-            });
-            return;
+            };
         }
 
         const [mangledCol, row] = item;
         const bounds = this.computeCellRect(args, mangledCol, row);
         const col = mangledCol - args.rowMarkerOffset;
-        const localEventX = x - bounds.x;
-        const localEventY = y - bounds.y;
+        const localEventX = localX - bounds.x;
+        const localEventY = localY - bounds.y;
 
         if (row === -1 || row === -2) {
             // `resolveMouseHit` encodes the column header as row -1 and the group header as -2.
             const group = args.columns[col]?.group ?? "";
-            onItemHovered(
-                row === -2
-                    ? { ...base, kind: groupHeaderKind, location: [col, -2], bounds, group, localEventX, localEventY }
-                    : { ...base, kind: headerKind, location: [col, -1], bounds, group, localEventX, localEventY }
-            );
-            return;
+            return row === -2
+                ? { ...common, kind: groupHeaderKind, location: [col, -2], bounds, group, localEventX, localEventY }
+                : { ...common, kind: headerKind, location: [col, -1], bounds, group, localEventX, localEventY };
         }
 
-        onItemHovered({
-            ...base,
+        return {
+            ...common,
             kind: "cell",
             location: [col, row],
             bounds,
             isFillHandle: this.overFillHandle,
             localEventX,
             localEventY,
-        });
+        };
     }
 
     // --- Phase 9g: click notifications ------------------------------------------------------------
@@ -3184,10 +3234,20 @@ export class GridHostController {
     // (`data-grid.tsx:516-660`), minus the `rect.width/width` DPI-scale correction that the
     // existing `onMouseMove` hover code also doesn't apply (kept consistent with it).
     private resolveMouseHit(args: ResolvedGridHostArgs, ev: MouseEvent): MouseHit {
+        return this.resolveHitAtPoint(args, ev.clientX, ev.clientY, ev);
+    }
+
+    /**
+     * The same hit test, from a bare pair of *client* coordinates. 9f's `getMouseArgsForPosition`
+     * needs this, and source separates them the same way (`data-grid.tsx:516`, which takes
+     * `posX`/`posY` and an *optional* event -- every internal caller passes one, the ref method does
+     * not).
+     */
+    private resolveHitAtPoint(args: ResolvedGridHostArgs, clientX: number, clientY: number, ev?: MouseEvent): MouseHit {
         const { mappedColumns } = this.computeMangledLayout(args);
         const rect = this.root.getBoundingClientRect();
-        const x = ev.clientX - rect.left;
-        const y = ev.clientY - rect.top;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
 
         const effectiveColumns = getEffectiveColumns(
             mappedColumns,
@@ -3210,11 +3270,12 @@ export class GridHostController {
             0
         );
 
-        const shiftKey = ev.shiftKey;
-        const ctrlKey = ev.ctrlKey;
-        const metaKey = ev.metaKey;
-        const isDoubleClick = ev.detail >= 2;
-        const { button, buttons } = ev;
+        const shiftKey = ev?.shiftKey ?? false;
+        const ctrlKey = ev?.ctrlKey ?? false;
+        const metaKey = ev?.metaKey ?? false;
+        const isDoubleClick = (ev?.detail ?? 0) >= 2;
+        const button = ev?.button ?? 0;
+        const buttons = ev?.buttons ?? 0;
 
         if (col === -1 || row === undefined || x < 0 || y < 0 || x > this.width || y > this.height) {
             const location: Item = [
@@ -3760,8 +3821,12 @@ export class GridHostController {
         // 1913`, "void appendRow(...)" with no preceding `setCurrent`). Deliberately does NOT go
         // through `activateCell`'s second-click-to-activate gating -- this is a real behavioral
         // difference from every other cell kind, matching source's own single-click-appends UX.
+        //
+        // 9f: goes through `appendRow` rather than firing `onRowAppended` bare, which is what source
+        // does and what makes `trailingRowOptions.targetColumn` mean anything. The visible change is
+        // that the new row's editor now opens, as it always has upstream.
         if (args.showTrailingBlankRow && row === args.rows) {
-            args.onRowAppended?.();
+            void this.appendRow(this.resolveNewRowTargetColumn(args, col));
             return;
         }
 
@@ -4165,7 +4230,9 @@ export class GridHostController {
         }
     ): void {
         if (cellContent.kind === InnerGridCellKind.NewRow) {
-            args.onRowAppended?.();
+            // Same flow as the click path above, mirroring source's own two call sites
+            // (`data-editor.tsx:1913` and `:3303`, both `appendRow(customTargetColumn ?? col)`).
+            void this.appendRow(this.resolveNewRowTargetColumn(args, mangledLocation[0]));
             return;
         }
         if (isInnerOnlyCellKind(cellContent.kind)) return;
@@ -5090,52 +5157,356 @@ export class GridHostController {
         return this.searchSnapshot(this.resolveArgs());
     }
 
-    // Simplified stand-in for source's `scrollTo` (see PORTING-NOTES.md -- easing/behavior options,
-    // frozen-trailing-rows, and DPI/CSS-scale correction are all not ported). Scrolls just enough
-    // that the given cell's bounds (computed the same way hover/click hit-testing does) become
-    // fully visible within the non-frozen/non-header viewport, doing nothing if it already is.
-    private scrollCellIntoView(args: ResolvedGridHostArgs, col: number, row: number): void {
+    // --- Phase 9f: the imperative API surface -----------------------------------------------------
+    //
+    // Port of source's `DataEditorRef` (`data-editor.tsx:715-760`, implemented at `:3996-4118`).
+    // `<GlideDataGrid>` re-exports each of these on the `GlideDataGridApi` object it hands to
+    // `@onReady` and yields; see that interface for the consumer-facing docs.
+    //
+    // **Every column index crossing this boundary is in CONSUMER space** -- these methods add
+    // `rowMarkerOffset` on the way in and subtract it on the way out, exactly as source does at the
+    // same boundary (`:3999`, `:4023`, `:4088`, `:4104`). That is the whole reason they live here
+    // rather than being called through from the component: the conversion has to happen once, in the
+    // place that knows the offset.
+
+    /** Focuses the grid, so keyboard navigation works without a click first. */
+    public focus(): void {
+        if (this.destroyed) return;
+        this.root.focus();
+    }
+
+    /**
+     * Screen-space (client) bounds of a cell, header, or -- with no arguments -- the whole scrollable
+     * content. `undefined` when the target does not exist or is scrolled out of the drawn region.
+     *
+     * Client space rather than root-relative because the point of it is positioning something
+     * outside the grid (a tooltip, a popover), which is what source uses it for too
+     * (`data-grid.tsx:494-495` adds the canvas rect before returning).
+     */
+    public getBounds(col?: number, row?: number): Rectangle | undefined {
+        if (this.destroyed) return undefined;
+        const rootRect = this.root.getBoundingClientRect();
+
+        if (col === undefined && row === undefined) {
+            // The whole scroll surface, including the parts scrolled out of view -- so a negative
+            // origin is expected and correct. Source computes the same thing from its scroller
+            // (`data-editor.tsx:4014-4021`).
+            return {
+                x: rootRect.x - this.scrollerEl.scrollLeft,
+                y: rootRect.y - this.scrollerEl.scrollTop,
+                width: this.scrollerEl.scrollWidth,
+                height: this.scrollerEl.scrollHeight,
+            };
+        }
+
+        const args = this.resolveArgs();
+        const { mappedColumns } = this.computeMangledLayout(args);
+        const mangledCol = (col ?? 0) + args.rowMarkerOffset;
+        // Source defaults the row to `-1`, the column header -- `getBounds(col)` with one argument
+        // means "where is that column's header", which is what a header popover needs.
+        const targetRow = row ?? -1;
+        if (mangledCol < 0 || mangledCol >= mappedColumns.length) return undefined;
+        if (targetRow < -2 || targetRow >= this.effectiveRows(args)) return undefined;
+
+        const rect = this.computeCellRect(args, mangledCol, targetRow);
+        if (rect.width === 0 || rect.height === 0) return undefined;
+        return { x: rect.x + rootRect.x, y: rect.y + rootRect.y, width: rect.width, height: rect.height };
+    }
+
+    /**
+     * Scrolls a cell into view. `col`/`row` are in consumer space.
+     *
+     * `params` covers source's `dir`/`paddingX`/`paddingY`/`hAlign`/`vAlign`; `behavior` is
+     * `"smooth"` or `"auto"`. Source's `{amount, unit: "px"}` column/row form is **not ported** --
+     * see `GlideDataGridApi.scrollTo`.
+     */
+    public scrollTo(col: number, row: number, params?: ScrollToParams & { behavior?: ScrollBehavior }): void {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+        if (params?.behavior === "smooth") {
+            // `scrollCellIntoView` accumulates onto `scrollLeft`/`scrollTop`, which is an instant
+            // jump. Smooth needs the one-shot `scrollTo({behavior})` call instead, so the delta is
+            // computed the same way and then applied differently.
+            this.scrollToSmooth(args, col + args.rowMarkerOffset, row, params);
+            return;
+        }
+        this.scrollCellIntoView(args, col + args.rowMarkerOffset, row, params);
+    }
+
+    private scrollToSmooth(
+        args: ResolvedGridHostArgs,
+        mangledCol: number,
+        row: number,
+        params: ScrollToParams
+    ): void {
+        const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        if (mangledCol < 0 || mangledCol >= mappedColumns.length || row < 0 || row >= this.effectiveRows(args)) return;
+        const target = this.computeCellRect(args, mangledCol, row);
+        if (target.width === 0 || target.height === 0) return;
+        const delta = computeScrollDelta(
+            {
+                target,
+                width: this.width,
+                height: this.height,
+                frozenWidth: getStickyWidth(mappedColumns),
+                headerHeight: this.totalHeaderHeight(args),
+            },
+            { ...params, targetColumnIsFrozen: mangledCol < freezeColumns }
+        );
+        if (delta.x === 0 && delta.y === 0) return;
+        this.scrollerEl.scrollTo({
+            left: this.scrollerEl.scrollLeft + delta.x,
+            top: this.scrollerEl.scrollTop + delta.y,
+            behavior: "smooth",
+        });
+    }
+
+    /**
+     * Re-measures the given columns from their currently-visible cells and reports the result
+     * through `onColumnResize`, exactly as a user-driven resize would. Consumer-space indices.
+     *
+     * **Notification only** -- like every other resize path in this port, the consumer owns the
+     * columns array and nothing changes until they apply the new width. Silently does nothing
+     * without an `onColumnResize`, matching source (`normalSizeColumn`, `data-editor.tsx:2195`).
+     */
+    public remeasureColumns(cols: Iterable<number>): void {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+        const onColumnResize = args.onColumnResize;
+        if (onColumnResize === undefined) return;
+
+        const ctx = this.canvasEl.getContext("2d");
+        if (ctx === null) return;
+
+        const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        const visible = this.computeVisibleRegion(args, mappedColumns, freezeColumns);
+        const theme = this.mergedTheme(args);
+        // Source samples the visible rows only (`visibleRegionRef`), not the whole grid -- measuring
+        // a million rows on demand is not something an API call may do.
+        const height = Math.min(visible.height, args.rows - visible.y);
+
+        for (const col of cols) {
+            const column = args.columns[col];
+            if (column === undefined) continue;
+            const sample =
+                height > 0 ? this.cellsForSelectionSync(args, { x: col, y: visible.y, width: 1, height }) : [];
+            if (sample === undefined) continue; // consumer answered asynchronously; nothing to measure
+            // `measureColumn` indexes each sampled row by column index, and the sample above is one
+            // column wide, so the index within it is always 0 -- not `col`.
+            const previousFont = ctx.font;
+            ctx.font = theme.baseFontFull;
+            const width = measureColumn(ctx, theme, column, 0, sample, args.getCellRenderer, {
+                minColumnWidth: args.minColumnWidth,
+                maxColumnWidth: args.maxColumnWidth,
+                removeOutliers: false,
+            });
+            ctx.font = previousFont;
+            onColumnResize(column, width, col, width);
+        }
+    }
+
+    /**
+     * The `GridMouseEventArgs` a pointer at the given *client* coordinates would produce, without
+     * any pointer event having happened. Exposes the hit test hover/click already run through.
+     * `undefined` only if the grid has been torn down.
+     */
+    public getMouseArgsForPosition(clientX: number, clientY: number, ev?: MouseEvent): GridMouseEventArgs | undefined {
+        if (this.destroyed) return undefined;
+        const args = this.resolveArgs();
+        const hit = this.resolveHitAtPoint(args, clientX, clientY, ev);
+        const item: Item | undefined = hit.kind === "out-of-bounds" ? undefined : hit.location;
+        return this.buildMouseEventArgs(args, item, {
+            shiftKey: hit.shiftKey,
+            ctrlKey: hit.ctrlKey,
+            metaKey: hit.metaKey,
+            isTouch: false,
+            isEdge: false,
+            button: hit.button,
+            buttons: hit.buttons,
+            scrollEdge: NO_SCROLL_EDGE,
+            localX: hit.localX,
+            localY: hit.localY,
+        });
+    }
+
+    /**
+     * Programmatically appends a row, then focuses (and optionally opens the editor on) `col` in it.
+     * Consumer-space column.
+     *
+     * Resolves once the focus has been placed, or once it has given up. The append itself is the
+     * consumer's -- `onRowAppended` is what actually adds the row -- so this polls for `rows` to grow
+     * before focusing anything, with source's backoff (`data-editor.tsx:1703-1712`). It is the only
+     * shape that can work: the consumer's tracked state has not flushed when `onRowAppended` returns.
+     */
+    public async appendRow(col: number, openOverlay = true, behavior?: ScrollBehavior): Promise<void> {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+        const mangledCol = col + args.rowMarkerOffset;
+        // A column that opts out of the trailing row opts out of being appended into, same guard
+        // source applies first (`:1690`).
+        const { mappedColumns } = this.computeMangledLayout(args);
+        if (mappedColumns[mangledCol]?.trailingRowOptions?.disabled === true) return;
+
+        const rowsBefore = args.rows;
+        const placement = await args.onRowAppended?.();
+        const landedAt = await this.waitForGrowth(() => this.resolveArgs().rows, rowsBefore);
+        if (landedAt === undefined) return;
+
+        const row = typeof placement === "number" ? placement : placement === "top" ? 0 : rowsBefore;
+        this.focusAppended(mangledCol, row, openOverlay, behavior);
+    }
+
+    /**
+     * The column half of {@link appendRow}: fires `onColumnAppended`, waits for the consumer's
+     * columns array to actually grow, then focuses `row` in the new column.
+     */
+    public async appendColumn(row: number, openOverlay = true): Promise<void> {
+        if (this.destroyed) return;
+        const colsBefore = this.resolveArgs().columns.length;
+        const placement = await this.resolveArgs().onColumnAppended?.();
+        const landedAt = await this.waitForGrowth(() => this.resolveArgs().columns.length, colsBefore);
+        if (landedAt === undefined) return;
+
+        const args = this.resolveArgs();
+        const col = typeof placement === "number" ? placement : placement === "left" ? 0 : colsBefore;
+        this.focusAppended(col + args.rowMarkerOffset, row, openOverlay, undefined);
+    }
+
+    /**
+     * Waits for `read()` to exceed `before`, with source's escalating backoff (`50 + backoff * 2`,
+     * giving up past 500ms). Resolves with the new value, or `undefined` if it never grew.
+     *
+     * This exists because an append is *asynchronous by construction* in both projects: the grid
+     * only notifies, the consumer owns the data, and their state update lands whenever their
+     * framework gets to it. Polling is source's answer and it is the right one here too -- Ember
+     * gives no "the consumer has finished reacting" hook either.
+     */
+    private waitForGrowth(read: () => number, before: number): Promise<number | undefined> {
+        return new Promise(resolve => {
+            let backoff = 0;
+            const check = (): void => {
+                if (this.destroyed) {
+                    resolve(undefined);
+                    return;
+                }
+                const now = read();
+                if (now > before) {
+                    resolve(now);
+                    return;
+                }
+                if (backoff >= 500) {
+                    resolve(undefined);
+                    return;
+                }
+                backoff = 50 + backoff * 2;
+                window.setTimeout(check, backoff);
+            };
+            check();
+        });
+    }
+
+    /**
+     * Which consumer-space column the trailing blank row should focus when activated at
+     * `mangledCol`. Port of source's `getCustomNewRowTargetColumn` (`data-editor.tsx:1795-1815`):
+     * the clicked column's own `trailingRowOptions.targetColumn` wins over the grid-level one, and a
+     * `GridColumn` object is resolved by identity against `columns` so it survives reordering.
+     *
+     * Falls back to the clicked column. Note source resolves this in mangled space and this returns
+     * consumer space -- `appendRow` takes consumer space, so the conversion belongs here.
+     */
+    private resolveNewRowTargetColumn(args: ResolvedGridHostArgs, mangledCol: number): number {
+        return resolveNewRowTarget(
+            args.columns,
+            args.trailingRowOptions?.targetColumn,
+            mangledCol - args.rowMarkerOffset
+        );
+    }
+
+    /** Shared tail of `appendRow`/`appendColumn`: scroll it into view, select it, optionally open
+     *  its editor. `mangledCol` is mangled; `row` is a row index. */
+    private focusAppended(mangledCol: number, row: number, openOverlay: boolean, behavior?: ScrollBehavior): void {
+        const args = this.resolveArgs();
+        this.scrollTo(mangledCol - args.rowMarkerOffset, row, behavior === undefined ? undefined : { behavior });
+        this.applyMangledSelection(
+            args,
+            setCurrentSelection(
+                this.mangledSelection(args),
+                { cell: [mangledCol, row], range: { x: mangledCol, y: row, width: 1, height: 1 } },
+                false,
+                false,
+                "edit",
+                this.selectionOptions(args)
+            ).selection
+        );
+        if (!openOverlay) return;
+        const cellContent = this.mangledGetCellContent(args)([mangledCol, row]);
+        if (isInnerOnlyCellKind(cellContent.kind)) return;
+        const cell = cellContent as GridCell;
+        if (!cell.allowOverlay || !isReadWriteCell(cell) || cell.readonly === true) return;
+        // Source defers a frame so the scroll it just requested has a chance to land before the
+        // overlay measures the cell it is positioning itself over (`data-editor.tsx:1733-1735`).
+        window.setTimeout(() => {
+            if (this.destroyed) return;
+            const liveArgs = this.resolveArgs();
+            this.activateCell(liveArgs, [mangledCol, row], this.mangledGetCellContent(liveArgs)([mangledCol, row]), {
+                highlight: true,
+                activation: { inputType: "keyboard", key: "Enter" },
+            });
+        }, 0);
+    }
+
+    /**
+     * Synthesises a user interaction. Source's `emit` takes five event names; this port implements
+     * **`"delete"`** only, and the union is narrow on purpose so adding the rest later is not a
+     * breaking change. The other four are not simple exposures:
+     *
+     * - `"copy"`/`"paste"` -- this port's clipboard handlers require a live `ClipboardEvent`, because
+     *   `clipboardData.setData` stops working once a `copy` handler has awaited (the deliberate
+     *   divergence recorded in 9g). Source's eventless path goes through the async Clipboard API,
+     *   which this port does not use anywhere.
+     * - `"fill-right"`/`"fill-down"` -- source synthesises Ctrl+R/Ctrl+D keydowns, and **this port
+     *   has no such keybindings** (9h's keybinding backlog). Adding them here would be implementing
+     *   the feature under an API method's name, not exposing it.
+     */
+    public emit(event: "delete"): void {
+        if (this.destroyed) return;
+        if (event === "delete") {
+            this.deleteSelection(this.resolveArgs());
+        }
+    }
+
+    /**
+     * Scrolls the minimum distance that makes a cell fully visible, doing nothing if it already is.
+     * Internal callers (keyboard nav, `appendRow`) use this; `scrollTo` below is the public 9f
+     * entry point and adds padding/alignment on top.
+     *
+     * `col` is MANGLED (the row-marker column is index 0 when markers are on), matching every other
+     * internal caller of `computeBounds`. `scrollTo` converts.
+     */
+    private scrollCellIntoView(args: ResolvedGridHostArgs, col: number, row: number, params?: ScrollToParams): void {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
         if (col < 0 || col >= mappedColumns.length || row < 0 || row >= this.effectiveRows(args)) return;
 
-        const bounds = computeBounds(
-            col,
-            row,
-            this.width,
-            this.height,
-            this.groupHeaderHeight(args),
-            this.totalHeaderHeight(args),
-            this.cellXOffset,
-            this.cellYOffset,
-            this.translateX,
-            this.translateY,
-            this.effectiveRows(args),
-            freezeColumns,
-            0,
-            mappedColumns,
-            args.rowHeight
+        const target = this.computeCellRect(args, col, row);
+        // A cell that is scrolled entirely out of the drawn region gets a zero-size rect back;
+        // scrolling to it would land on the origin, so source bails (`data-editor.tsx:1547`).
+        if (target.width === 0 || target.height === 0) return;
+
+        const delta = computeScrollDelta(
+            {
+                target,
+                width: this.width,
+                height: this.height,
+                frozenWidth: getStickyWidth(mappedColumns),
+                headerHeight: this.totalHeaderHeight(args),
+            },
+            { ...params, targetColumnIsFrozen: col < freezeColumns }
         );
 
-        let deltaX = 0;
-        if (col >= freezeColumns) {
-            const frozenWidth = getStickyWidth(mappedColumns);
-            if (bounds.x < frozenWidth) {
-                deltaX = bounds.x - frozenWidth;
-            } else if (bounds.x + bounds.width > this.width) {
-                deltaX = bounds.x + bounds.width - this.width;
-            }
-        }
-
-        let deltaY = 0;
-        const totalHeaderHeight = this.totalHeaderHeight(args);
-        if (bounds.y < totalHeaderHeight) {
-            deltaY = bounds.y - totalHeaderHeight;
-        } else if (bounds.y + bounds.height > this.height) {
-            deltaY = bounds.y + bounds.height - this.height;
-        }
-
-        if (deltaX !== 0) this.scrollerEl.scrollLeft += deltaX;
-        if (deltaY !== 0) this.scrollerEl.scrollTop += deltaY;
+        // Assign only a moving axis: writing `scrollLeft`/`scrollTop` at all cancels a smooth scroll
+        // already in flight, so a no-op write is not actually a no-op.
+        if (delta.x !== 0) this.scrollerEl.scrollLeft += delta.x;
+        if (delta.y !== 0) this.scrollerEl.scrollTop += delta.y;
     }
 
     // --- copy/cut/paste (Phase 3c) -----------------------------------------------------------------

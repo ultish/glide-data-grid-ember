@@ -141,6 +141,16 @@ export type { RemAdjustableDimensions } from "./rem-adjuster.ts";
 // exported because they are pure, tested, and the definition of what this addon calls a "click".
 export { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "./click-behavior.ts";
 export type { ClickActivationArgs } from "./click-behavior.ts";
+// The imperative API's pure halves (Phase 9f). `computeScrollDelta` is what
+// `GlideDataGridApi.scrollTo` is built on -- `ScrollToParams` in particular is part of that public
+// signature, so it has to be reachable from here.
+export { computeScrollDelta } from "./scroll-to.ts";
+export type { ScrollAlign, ScrollDirection, ScrollToParams, ScrollToViewport } from "./scroll-to.ts";
+export { resolveNewRowTarget } from "./new-row-target.ts";
+export type { NewRowTarget } from "./new-row-target.ts";
+
+// Group-header click selection (Phase 7b/9f). The one selection in the grid a consumer can suppress
+// from a click callback, because it is applied on mouseup rather than mousedown.
 export { computeGroupHeaderSpan, computeGroupHeaderSelection } from "./group-header-selection.ts";
 export type {
     GroupedColumnLike,
