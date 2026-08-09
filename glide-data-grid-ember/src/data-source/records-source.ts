@@ -48,15 +48,26 @@
 // such a record has no way to change: the only thing that could change what it projects to is a new
 // `records` array (or new `columns`/`toCell`), and all three rebuild the caches from scratch.
 //
-// Corollary -- **this is NOT the `WeakMap` anti-pattern DATA.md warns about.** DATA.md's tuning
-// notes say "don't memoize rows in a `WeakMap` keyed on the record object", because a normalized
-// cache (Apollo et al.) mutates entities in place: the record's identity doesn't change, so an
+// Corollary -- **this is NOT the `WeakMap` anti-pattern the tuning notes warn about.** Those notes
+// say "don't memoize rows in a `WeakMap` keyed on the record object", because a store that mutates
+// entities **in place** -- Ember Data, and any normalized store built the same way -- leaves the
+// record's identity unchanged while its contents change, so an
 // identity-keyed cache of plain *values* silently serves stale rows. The distinction is what is
 // cached, not what it is keyed on. A plain value has nothing to invalidate it. A tracked
 // `createCache` is invalidated **by that very in-place mutation** -- the mutation dirties the tag
 // the cache consumed -- so keying on the record is safe precisely in the case that breaks the naive
 // version. (This module's outer key is the records *array*, and the per-row caches are positional,
 // but the same reasoning is what makes it sound.)
+//
+// **Apollo Client 3 is the opposite case, and was named wrongly here until 2026-08-09.** Its
+// `InMemoryCache` is *immutable*: a change produces a new object, and unchanged entities keep
+// referential equality (result caching, field-level dependency tracking). So identity there is a
+// reliable change signal rather than a misleading one, and the anti-pattern above does not apply.
+// The practical consequence for this module runs the other way: because the containing array is new
+// on every cache update, `cachesReusable` is false and **every** row re-projects, even when one
+// field changed. That is a cost, not a correctness problem, and it is off the paint path. An opt-in
+// record-keyed row cache would fix it; nobody has measured that it hurts yet. See the guide's
+// "Ember Data, GraphQL, and Apollo" chapter, which documents the trade-off consumer-side.
 //
 // -------------------------------------------------------------------------------------------
 // IDENTITY STABILITY -- read `column-sort.ts`'s header and PORTING-NOTES.md standing lesson #1.
