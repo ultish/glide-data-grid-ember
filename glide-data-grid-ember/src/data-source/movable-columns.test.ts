@@ -25,7 +25,7 @@ const COLUMNS: readonly GridColumn[] = [
 // One distinct value per column so a mis-mapped column is unambiguous.
 const VALUES = ["nameValue", "scoreValue", "cityValue"];
 
-/** A fresh `getCellContent`, because it is the decorator's cache key. */
+/** A fresh `getCellContent`, as a data source may replace it when its records change. */
 function makeGetCellContent(): (cell: Item) => GridCell {
     return ([col]: Item): GridCell => {
         const data = VALUES[col] ?? "";
@@ -293,6 +293,28 @@ describe("withMovableColumns — identity stability (protects the blit fast path
         const b = withMovableColumns({ columns: COLUMNS, getCellContent, order: ["city", "name", "score"] });
         expect(b.columns).toBe(a.columns);
         expect(b.getCellContent).toBe(a.getCellContent);
+    });
+
+    it("keeps columns stable when the data source replaces getCellContent", () => {
+        const order = ["city", "name", "score"];
+        const first = (item: Item): GridCell => ({
+            kind: GridCellKind.Text,
+            data: `first-${item[0]}`,
+            displayData: `first-${item[0]}`,
+            allowOverlay: true,
+        });
+        const second = (item: Item): GridCell => ({
+            kind: GridCellKind.Text,
+            data: `second-${item[0]}`,
+            displayData: `second-${item[0]}`,
+            allowOverlay: true,
+        });
+        const a = withMovableColumns({ columns: COLUMNS, getCellContent: first, order });
+        const b = withMovableColumns({ columns: COLUMNS, getCellContent: second, order });
+
+        expect(b.columns).toBe(a.columns);
+        expect(b.getCellContent).not.toBe(a.getCellContent);
+        expect(textOf(b.getCellContent([0, 0]))).toBe("second-2");
     });
 
     it("keeps columns and getCellContent stable when ONLY a callback identity changes", () => {

@@ -178,6 +178,11 @@ export class UndoRedo {
         return this.redoHistory.length > 0;
     }
 
+    /** True while an undo or redo is forwarding its edits to the wrapped source. */
+    get isReplaying(): boolean {
+        return this.applying;
+    }
+
     /** The same snapshot `onHistoryChanged` receives, for a consumer that mounts mid-session. */
     get state(): UndoRedoState {
         return {

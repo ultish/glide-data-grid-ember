@@ -221,6 +221,9 @@ export interface GlideDataGridSignature {
         groupHeaderHeight?: number;
         theme?: Partial<Theme>;
         freezeColumns?: number;
+        verticalBorder?: (col: number) => boolean;
+        resizeIndicator?: "full" | "header" | "none";
+        hyperWrapping?: boolean;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
@@ -498,6 +501,9 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         groupHeaderHeight: this.args.groupHeaderHeight,
         theme: this.args.theme,
         freezeColumns: this.args.freezeColumns,
+        verticalBorder: this.args.verticalBorder,
+        resizeIndicator: this.args.resizeIndicator,
+        hyperWrapping: this.args.hyperWrapping,
         getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,

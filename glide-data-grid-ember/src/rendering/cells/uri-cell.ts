@@ -146,14 +146,8 @@ export const uriCellRenderer: InternalCellRenderer<UriCell> = {
 // `CellEditorHandle.element` must stay a single stable node for the overlay host's lifetime, so
 // the toggle can't just return a different element.
 //
-// Simplification vs source: source's `editMode` also considers a `forceEditMode` prop (set by the
-// cell's `provideEditor` when `cell.hoverEffect && cell.onClickUri` are both set, i.e. "this uri
-// looks like a real hyperlink affordance, so open editing immediately rather than showing the
-// clickable-link preview"). This port's `CellEditorProps` has no `forceEditMode` field (see
-// PORTING-NOTES.md's Phase 4a section on the contract) -- `editMode` here is seeded from
-// `uri === ""` only, matching the other half of source's condition. A cell with `hoverEffect`/
-// `onClickUri` set will still open showing the link preview first (one extra click to edit) rather
-// than jumping straight to edit mode; noted as a minor, low-risk simplification.
+// Keyboard activation supplies `forceEditMode`, so edit-on-type and Enter open directly in the
+// textarea; pointer activation keeps the link preview first, matching source's interaction.
 function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
 
@@ -239,7 +233,7 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
         container.appendChild(growingEntry.element);
     }
 
-    if (!readonly && currentValue.data === "") {
+    if (!readonly && (currentValue.data === "" || p.forceEditMode === true)) {
         renderEdit();
     } else {
         renderPreview();

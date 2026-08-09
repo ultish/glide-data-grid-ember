@@ -335,6 +335,8 @@ const FILLER_VALUES = [
     "Referral",
 ] as const;
 
+const WRAPPING_SAMPLE = "Wrapped text\ndemo content";
+
 // Phase 4a: varies cell kind by column so text/number/boolean/row-id editing can all be exercised
 // in the browser -- col 0 is a row-id (readonly), col 1 a number, col 2 a boolean. Phase 4b adds
 // col 3 (uri, editable link) and col 4 (markdown, editable + rendered preview). Phase 4d adds col 5
@@ -706,6 +708,19 @@ export function demoGetCellContent(item: Item): GridCell {
                 kind: "article-cell",
                 markdown,
             },
+        };
+    }
+
+    // One real wrapping cell keeps the Full grid demo's `hyperWrapping` option observable. The
+    // other plain-text cells intentionally remain non-wrapping so their truncation behavior stays
+    // visible too.
+    if (col === 21) {
+        return {
+            kind: GridCellKind.Text,
+            data: WRAPPING_SAMPLE,
+            displayData: WRAPPING_SAMPLE,
+            allowOverlay: true,
+            allowWrapping: true,
         };
     }
 

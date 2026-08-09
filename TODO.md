@@ -18,7 +18,7 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-09:** `main` is pushed, GitHub Pages is deployed and working. 840 vitest tests
+**State as of 2026-08-09:** `main` is pushed, GitHub Pages is deployed and working. 842 vitest tests
 pass. Phases 0–11 are done; what is left is the backlog below.
 
 ### Commands
@@ -109,7 +109,7 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 ## 2. Quick wins — diagnosed, small, do these first
 
-### 2.1 `withMovableColumns` memoizes on the wrong key — `S`
+### 2.1 `withMovableColumns` memoizes on the wrong key — DONE (2026-08-09)
 
 `src/data-source/movable-columns.ts:237` keys its cache `WeakMap<GetCellContentFn, CacheEntry>` — on
 the incoming `getCellContent`. But `recordsSource` deliberately returns a **fresh `getCellContent`
@@ -122,7 +122,7 @@ exactly the composition it exists for**.
 **Fix:** key on `columns` + the order key; treat `getCellContent` as an input to wrap, not as cache
 identity. Add a test asserting the returned `columns` array keeps its identity across a data change.
 
-### 2.2 `UndoRedo` has no "am I replaying?" signal — `S`
+### 2.2 `UndoRedo` has no "am I replaying?" signal — DONE (2026-08-09)
 
 `src/data-source/undo-redo.ts`. A consumer's `onCellEdited` that persists, logs or marks a record
 dirty cannot distinguish an undo from a user edit — so an undo re-persists and a redo double-counts.
@@ -132,7 +132,7 @@ outside.
 **Fix:** a public `isReplaying` flag, or a second argument on the edit callback. Matters the moment
 anyone wires undo to a real backend.
 
-### 2.3 `verticalBorder` is hardcoded — `S`
+### 2.3 `verticalBorder` is hardcoded — DONE (2026-08-09)
 
 `ALWAYS_VERTICAL_BORDER` at `grid-host-controller.ts:1011` (used in the `DrawGridArg` build); its note says "this port always
 draws every vertical gridline (no per-column control)". Source takes
@@ -141,20 +141,20 @@ draws every vertical gridline (no per-column control)". Source takes
 **Watch out:** the value is `computeCanBlit`-identity-compared, so expose it via a memoized wrapper,
 never an inline arrow. (Rule 1 above.)
 
-### 2.4 `resizeIndicator` is hardcoded — `S`
+### 2.4 `resizeIndicator` is hardcoded — DONE (2026-08-09)
 
 `"none"` at `grid-host-controller.ts:2304`. Source: `"full" | "header" | "none"`, and the render
 engine this port already contains draws it. One arg + one passthrough.
 
-### 2.5 `hyperWrapping` — `S`
+### 2.5 `hyperWrapping` — DONE (2026-08-09)
 
 Hardcoded `false` at `grid-host-controller.ts:2274`. The render engine **already honours it**
 (`rendering/render/data-grid-lib.ts:592`). A one-literal unlock; source story is `WrappingText`.
 
-### 2.6 `emit` — the last unported imperative method — `S`, low value
+### 2.6 `emit` — the last unported imperative method — DONE (already implemented)
 
-9f landed 7 of 8. `emit` synthesises user interactions and is mainly a testing affordance. Skip
-unless wanted.
+`emit("delete")` is already exposed by the public API, forwarded by the controller, and exercised by
+the demo. No additional work was needed.
 
 ---
 
@@ -281,9 +281,19 @@ configured in this repo** — `eslint-plugin-unicorn` is not a dependency and th
 bring it in. The count came from misreading eslint's "Definition for rule was not found" messages as
 violations.)
 
-### 5.2 First npm publish
+### 5.2 Browser-confirmed demo fixes — DONE (2026-08-09)
 
-- Addon version is still `0.0.0` — pick a real first version.
+- Column reorder keeps the displayed values correct after refresh and edits.
+- The moved column remains selected instead of leaving the highlight on the column that replaced it.
+- Column resizing works for headers and sub-headers, with a visible resize cursor/indicator.
+- The full-grid demo visibly exercises alternating vertical borders, wrapped text, and the Notes
+  column's Markdown editor.
+- Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
+  character.
+
+### 5.3 First npm publish — DONE (2026-08-09)
+
+- Addon version `0.1.7` is committed and tagged as `v0.1.7`.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.

@@ -217,6 +217,12 @@ export interface GridHostArgs {
     readonly theme?: Partial<Theme>;
     readonly freezeColumns?: number;
     readonly getCellRenderer: GetCellRendererCallback;
+    /** Controls which vertical gridlines are drawn. @defaultValue all columns. */
+    readonly verticalBorder?: (col: number) => boolean;
+    /** Controls the resize indicator presentation. @defaultValue "none" */
+    readonly resizeIndicator?: "full" | "header" | "none";
+    /** Enables wrapping text beyond the normal cell boundary. @defaultValue false */
+    readonly hyperWrapping?: boolean;
     /**
      * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
      * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
@@ -889,6 +895,9 @@ interface ResolvedGridHostArgs {
     readonly theme: Partial<Theme> | undefined;
     readonly freezeColumns: number;
     readonly getCellRenderer: GetCellRendererCallback;
+    readonly verticalBorder: (col: number) => boolean;
+    readonly resizeIndicator: "full" | "header" | "none";
+    readonly hyperWrapping: boolean;
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
@@ -1322,6 +1331,9 @@ export class GridHostController {
     // Whether the pointer is currently hovering the fill handle -- cursor feedback only (source's
     // `overFill`).
     private overFillHandle = false;
+    // Header-edge hover state used for the source-compatible resize cursor. The actual resize
+    // gesture is still gated by the callbacks in `hitTestColumnResizeEdge`.
+    private overResizeEdge = false;
 
     // Autoscroll-while-dragging (Phase 9h), shared by drag-extend, row reorder and fill drag.
     private readonly autoscroller: Autoscroller;
@@ -1647,6 +1659,9 @@ export class GridHostController {
             theme,
             freezeColumns: args.freezeColumns ?? 0,
             getCellRenderer: args.getCellRenderer,
+            verticalBorder: args.verticalBorder ?? ALWAYS_VERTICAL_BORDER,
+            resizeIndicator: args.resizeIndicator ?? "none",
+            hyperWrapping: args.hyperWrapping ?? false,
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
@@ -2246,10 +2261,9 @@ export class GridHostController {
             // trailing row alone, or nothing (`data-editor.tsx:3960-3966`).
             disabledRows: this.disabledRows(args),
             rowHeight: args.rowHeight,
-            // Module-scope constant, NOT an inline arrow: `computeCanBlit` compares
-            // `verticalBorder` by identity (`render/data-grid-render.blit.ts:246`), so a fresh
-            // closure per draw silently disabled the scroll blit fast path. See ALWAYS_VERTICAL_BORDER.
-            verticalBorder: ALWAYS_VERTICAL_BORDER,
+            // `computeCanBlit` compares this callback by identity. The default is module-scoped;
+            // consumers should likewise pass a stable callback when customizing it.
+            verticalBorder: args.verticalBorder,
             isResizing: this.resizeState !== undefined,
             resizeCol: this.resizeState?.col,
             isFocused: this.isFocused,
@@ -2266,7 +2280,7 @@ export class GridHostController {
             fillHandle: args.fillHandle ? DEFAULT_FILL_HANDLE : false,
             freezeTrailingRows: 0,
             hasAppendRow: args.showTrailingBlankRow,
-            hyperWrapping: false,
+            hyperWrapping: args.hyperWrapping,
             rows: this.effectiveRows(args),
             getCellContent: this.mangledGetCellContent(args),
             overrideCursor: cursor => {
@@ -2296,7 +2310,7 @@ export class GridHostController {
             renderStateProvider: this.renderStateProvider,
             getCellRenderer: args.getCellRenderer,
             minimumCellWidth: 10,
-            resizeIndicator: "none",
+            resizeIndicator: args.resizeIndicator,
         };
 
         if (damage === undefined) {
@@ -2414,7 +2428,8 @@ export class GridHostController {
     // funnel through this one writer.
     private applyCursor(): void {
         const crosshair = this.fillState !== undefined || this.overFillHandle;
-        this.scrollerEl.style.cursor = crosshair ? "crosshair" : (this.cursorOverride ?? "");
+        const resizing = this.resizeState !== undefined || this.overResizeEdge;
+        this.scrollerEl.style.cursor = crosshair ? "crosshair" : resizing ? "col-resize" : (this.cursorOverride ?? "");
     }
 
     // --- Phase 8: visible-region reporting ---------------------------------------------------------
@@ -2618,6 +2633,16 @@ export class GridHostController {
             this.translateY,
             0
         );
+
+        const resizeHoverColumn =
+            this.resizeState === undefined && row !== undefined && row <= -1
+                ? this.hitTestColumnResizeEdge(args, col, row, x)
+                : undefined;
+        const nextOverResizeEdge = resizeHoverColumn !== undefined;
+        if (nextOverResizeEdge !== this.overResizeEdge) {
+            this.overResizeEdge = nextOverResizeEdge;
+            this.applyCursor();
+        }
 
         // Column resize (Phase 3d): live width computation on every tick, matching source's
         // continuous `onColumnResize` firing (not just at drag-end) -- see `data-grid-dnd.tsx`.
@@ -3393,30 +3418,47 @@ export class GridHostController {
     // space `computeBounds` returns. Resize is only reachable when at least one of the three
     // resize callbacks is configured (mirrors source's `canResize` gate) and never on the
     // row-marker column (mirrors source excluding `col === 0` marker-column resize).
-    private hitTestColumnResizeEdge(args: ResolvedGridHostArgs, col: number, localX: number): boolean {
-        if ((args.onColumnResize ?? args.onColumnResizeEnd ?? args.onColumnResizeStart) === undefined) return false;
-        if (args.hasRowMarkers && col === 0) return false;
+    private hitTestColumnResizeEdge(
+        args: ResolvedGridHostArgs,
+        col: number,
+        row: number,
+        localX: number
+    ): number | undefined {
+        if ((args.onColumnResize ?? args.onColumnResizeEnd ?? args.onColumnResizeStart) === undefined) return undefined;
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        const boundsFor = (columnIndex: number): Rectangle =>
+            computeBounds(
+                columnIndex,
+                row,
+                this.width,
+                this.height,
+                this.groupHeaderHeight(args),
+                this.totalHeaderHeight(args),
+                this.cellXOffset,
+                this.cellYOffset,
+                this.translateX,
+                this.translateY,
+                this.effectiveRows(args),
+                freezeColumns,
+                0,
+                mappedColumns,
+                args.rowHeight
+            );
+
         const column = mappedColumns[col];
-        if (column === undefined) return false;
-        const bounds = computeBounds(
-            col,
-            -1,
-            this.width,
-            this.height,
-            this.groupHeaderHeight(args),
-            this.totalHeaderHeight(args),
-            this.cellXOffset,
-            this.cellYOffset,
-            this.translateX,
-            this.translateY,
-            this.effectiveRows(args),
-            freezeColumns,
-            0,
-            mappedColumns,
-            args.rowHeight
-        );
-        return localX >= bounds.x + bounds.width - RESIZE_EDGE_PX && localX <= bounds.x + bounds.width;
+        if (column !== undefined && !(args.hasRowMarkers && col === 0)) {
+            const bounds = boundsFor(col);
+            if (localX >= bounds.x + bounds.width - RESIZE_EDGE_PX && localX <= bounds.x + bounds.width) return col;
+
+            // `getColumnIndexForX` resolves a boundary to the column on its right. The source
+            // checks the left edge too and reports the preceding column as the resize target.
+            const previousCol = col - 1;
+            if (previousCol >= 0 && !(args.hasRowMarkers && previousCol === 0)) {
+                const previousBounds = boundsFor(previousCol);
+                if (localX >= previousBounds.x && localX <= previousBounds.x + RESIZE_EDGE_PX) return previousCol;
+            }
+        }
+        return undefined;
     }
 
     private readonly onFocus = (): void => {
@@ -3509,29 +3551,22 @@ export class GridHostController {
         const hit = this.resolveMouseHit(args, ev);
         const isMultiKey = browserIsOSX.value ? ev.metaKey : ev.ctrlKey;
 
-        // Header-menu-glyph click is exclusive with ordinary header-click selection dispatch --
-        // mirrors source's `onPointerDown` short-circuit when `isOverHeaderElement(...) !==
-        // undefined` (`data-grid.tsx:1101-1105`): the actual `onHeaderMenuClick` firing happens on
-        // mouseup/click instead (`onMouseUp` below), this just remembers the candidate column and
-        // skips everything else.
+        // Header resize and menu clicks are exclusive with ordinary header-click selection
+        // dispatch. Resize gets first priority, matching source's DND wrapper; otherwise a menu
+        // glyph at the same right edge would consume the resize gesture.
         if (hit.kind === "header") {
-            const menuBounds = this.hitTestHeaderMenu(args, hit.location[0], hit.localX, hit.localY);
-            if (menuBounds !== undefined) {
-                this.pendingHeaderMenuClick = hit.location[0];
-                return;
-            }
-
             // Column resize (Phase 3d): mousedown on a header's resize-edge starts a resize drag
             // and is exclusive with normal header-click selection/reorder, exactly like the
             // menu-glyph check above -- mirrors source's `onMouseDownImpl`
             // (`data-grid-dnd.tsx`), which returns immediately after recording resize state.
-            if (this.hitTestColumnResizeEdge(args, hit.location[0], hit.localX)) {
+            const resizeCol = this.hitTestColumnResizeEdge(args, hit.location[0], hit.location[1], hit.localX);
+            if (resizeCol !== undefined) {
                 const { mappedColumns } = this.computeMangledLayout(args);
-                const column = mappedColumns[hit.location[0]];
+                const column = mappedColumns[resizeCol];
                 if (column !== undefined) {
-                    const realCol = hit.location[0] - args.rowMarkerOffset;
+                    const realCol = resizeCol - args.rowMarkerOffset;
                     this.resizeState = {
-                        col: hit.location[0],
+                        col: resizeCol,
                         startClientX: ev.clientX,
                         startWidth: column.width,
                         lastWidth: column.width,
@@ -3547,6 +3582,12 @@ export class GridHostController {
                     }
                     this.scheduleFullRedraw();
                 }
+                return;
+            }
+
+            const menuBounds = this.hitTestHeaderMenu(args, hit.location[0], hit.localX, hit.localY);
+            if (menuBounds !== undefined) {
+                this.pendingHeaderMenuClick = hit.location[0];
                 return;
             }
         }
@@ -3701,6 +3742,22 @@ export class GridHostController {
             const args = this.resolveArgs();
             if (ds.active && !ds.vetoed && ds.dropCol !== ds.srcCol) {
                 args.onColumnMoved?.(ds.srcCol - args.rowMarkerOffset, ds.dropCol - args.rowMarkerOffset);
+                // Moving a column changes which column occupies each displayed index. Keep the
+                // moved column selected, matching source's `setSelectedColumns(endIndex, ... )`
+                // after it forwards `onColumnMoved`; otherwise the highlight stays at the old
+                // index and appears to jump onto the column that replaced it.
+                if (args.columnSelect !== "none") {
+                    this.applyMangledSelection(
+                        args,
+                        writerSetSelectedColumns(
+                            this.mangledSelection(args),
+                            CompactSelection.fromSingleSelection(ds.dropCol),
+                            undefined,
+                            true,
+                            this.selectionOptions(args)
+                        )
+                    );
+                }
             }
             this.scheduleFullRedraw();
             return;
@@ -4288,10 +4345,16 @@ export class GridHostController {
             }
         }
 
-        this.openOverlay(args, mangledLocation, content, opts.highlight);
+        this.openOverlay(args, mangledLocation, content, opts.highlight, opts.activation.inputType === "keyboard");
     }
 
-    private openOverlay(args: ResolvedGridHostArgs, mangledLocation: Item, cell: GridCell, highlight: boolean): void {
+    private openOverlay(
+        args: ResolvedGridHostArgs,
+        mangledLocation: Item,
+        cell: GridCell,
+        highlight: boolean,
+        focusImmediately = false
+    ): void {
         if (this.overlayState !== undefined) {
             this.finishOverlay(args, this.overlayState.currentCell, [0, 0]);
         }
@@ -4360,6 +4423,7 @@ export class GridHostController {
         const handle = editorFn({
             value: cell,
             isHighlighted: highlight,
+            forceEditMode: focusImmediately,
             theme,
             validatedSelection: undefined,
             onChange: newValue => {
@@ -4411,20 +4475,17 @@ export class GridHostController {
         // `IntersectionObserver` would never fire for it.
         state.stopStayOnScreen = this.setupStayOnScreen(container);
 
-        // Deferred, not called synchronously here (Phase 4a bug found via browser testing): this
-        // method runs inside a native mouse-event handler, and the activating gesture's remaining
-        // events haven't been dispatched yet -- Chrome delivers them to whatever element
-        // now sits under the pointer, which after `appendChild` above is this editor's freshly-
-        // focused textarea, and its default caret-placement-from-click-point handling on that
-        // `mouseup` was observed to silently collapse the `setSelectionRange(0, length)`
-        // select-all this call performs, right after it ran. Source doesn't hit this: React defers
-        // the equivalent `useEffect`-based focus/selection past the triggering event's full native
-        // dispatch (mousedown+mouseup+click all complete before React's commit phase runs its
-        // effects), which this imperative port has no equivalent scheduling point for -- deferring
-        // via `setTimeout` reproduces the same "after this gesture's native events are done" timing.
-        window.setTimeout(() => {
-            if (this.overlayState === state) handle.focus();
-        }, 0);
+        // Keyboard activation has no remaining pointer gesture that can steal the caret, so focus
+        // immediately. This is important for edit-on-type: the initial key seeds the editor, and
+        // the next typed character must already reach its textarea. Pointer activation remains
+        // deferred because the activating mouseup can otherwise collapse the editor's select-all.
+        if (focusImmediately) {
+            handle.focus();
+        } else {
+            window.setTimeout(() => {
+                if (this.overlayState === state) handle.focus();
+            }, 0);
+        }
 
         // Click-outside commits (mirrors source's `ClickOutsideContainer` -> `onClickOutside` ->
         // save, not cancel). Registered on the next tick rather than synchronously: this method is

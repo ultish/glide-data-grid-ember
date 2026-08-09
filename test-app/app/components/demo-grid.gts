@@ -94,6 +94,8 @@ import {
 //
 // Both callbacks are module-scope constants on purpose: a fresh arrow per render is the exact shape
 // that silently broke the blit path in Phase 6.
+const DEMO_VERTICAL_BORDER = (col: number): boolean => col % 2 === 0;
+
 const drawCellHook: DrawCellCallback = (args, drawContent) => {
     drawContent();
     const { ctx, rect, col, row } = args;
@@ -200,6 +202,14 @@ function buildDemoColumns(): readonly GridColumn[] {
         if (i === AUTO_SIZED_COLUMN) return common satisfies AutoGridColumn;
         return { ...common, width: isSizedGridColumn(column) ? column.width : 120 } satisfies SizedGridColumn;
     });
+}
+
+/** Maps a displayed demo column back to the natural index used by `demoGetCellContent`. */
+function naturalDemoColumnIndex(column: GridColumn | undefined, fallback: number): number {
+    const id = column?.id;
+    if (id === undefined) return fallback;
+    const natural = demoColumns.findIndex(candidate => candidate.id === id);
+    return natural === -1 ? fallback : natural;
 }
 
 // Cycled by the "Row markers" control. `"none"` is included on purpose: it is the default, and it
@@ -436,7 +446,8 @@ export default class DemoGrid extends Component {
 
     getCellContent = (item: Item): GridCell => {
         const row = this.sourceRow(item[1]);
-        return this.edits.get(`${item[0]},${row}`) ?? demoGetCellContent([item[0], row]);
+        const col = naturalDemoColumnIndex(this.columns[item[0]], item[0]);
+        return this.edits.get(`${col},${row}`) ?? demoGetCellContent([col, row]);
     };
 
     handleColumnResize = (_column: GridColumn, newSize: number, colIndex: number): void => {
@@ -460,7 +471,10 @@ export default class DemoGrid extends Component {
         // column's `${value}%` label being the one that bites. See its doc comment for why that sync
         // is the consumer's job for `range-cell` and the addon's job for `displayData`/`displayDate`.
         for (const edit of edits)
-            next.set(`${edit.location[0]},${this.sourceRow(edit.location[1])}`, normalizeEditedCell(edit.value));
+            next.set(
+                `${naturalDemoColumnIndex(this.columns[edit.location[0]], edit.location[0])},${this.sourceRow(edit.location[1])}`,
+                normalizeEditedCell(edit.value)
+            );
         this.edits = next;
     };
 
@@ -1329,6 +1343,9 @@ export default class DemoGrid extends Component {
                         also the only way `@onGroupHeaderContextMenu` is reachable. }}
                     @headerIcons={{this.headerIcons}}
                     @freezeColumns={{this.freezeColumns}}
+                    @verticalBorder={{DEMO_VERTICAL_BORDER}}
+                    @resizeIndicator="full"
+                    @hyperWrapping={{true}}
                     @onColumnResize={{this.handleColumnResize}}
                     @onColumnMoved={{this.handleColumnMoved}}
                     @onColumnProposeMove={{this.handleColumnProposeMove}}

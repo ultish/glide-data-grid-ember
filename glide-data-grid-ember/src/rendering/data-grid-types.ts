@@ -401,6 +401,8 @@ export interface CellEditorProps<T extends InnerGridCell> {
     readonly value: T;
     /** `true` = select-all-on-focus (overwrite-by-typing UX); `false` = caret placed at the end. */
     readonly isHighlighted: boolean;
+    /** Opens preview/edit-toggle editors directly in edit mode for keyboard activation. */
+    readonly forceEditMode?: boolean;
     /** The realized theme in effect for this cell (post `mergeAndRealizeTheme`). Not part of
      * source's editor props (source's editors read `ThemeContext` via `useTheme()` instead).
      *
