@@ -4857,3 +4857,56 @@ to**: faking it would advertise a feature the addon does not have. The column is
 Worth generalising, since this demo exists to prove the addon: **a demo that fakes a capability is
 worse than one that omits it** — 10a's whole premise is that the demo is what tells you which
 features really work.
+
+## 9g, and the selection coordinate change — browser-verified 2026-08-09
+
+### The `@onSelectionChanged` coordinate fix is confirmed in a browser
+
+The change that made every consumer-facing callback speak the same column space (see "Queue items
+1–6") was the riskiest thing in the tree: a mangled and an unmangled `GridSelection` are the *same*
+type, so a missed conversion neither fails to compile nor throws — it silently operates on the
+adjacent column, and only when row markers are on. Verified in `<DemoGrid>` with **row markers on**:
+
+| Action | Reported | Why it proves something |
+|---|---|---|
+| click the first real column | `cell 0,0` | the old bug reported `cell 1,0` |
+| click the Notes column | `cell 4,2` **and the column note read "Markdown cell"** | a *semantic* check — a wrong offset would describe a neighbouring column |
+| click a column header | `1 col(s)`, `col 1, header` | column-selection path, not just the current cell |
+| select-all | `200000 row(s)`, hover `col -1` | `-1` **is** the row-marker column after subtraction, so the conversion is demonstrably running |
+| drag-select | `range 4x5 at 0,0` | ranges convert too, and the 9g mouseup rework didn't break drag |
+
+`@onItemHovered` agreeing with `@onSelectionChanged` on every one of these is the strongest single
+piece of evidence, because the two are independently implemented: two numbers matching by accident is
+far less likely than one number looking plausible.
+
+**Method note worth keeping.** The column-note check was the most valuable assertion and was free —
+`<DemoGrid>` already looked a note up *by column index*, so a coordinate error would have printed the
+wrong cell type. **When verifying a coordinate change, find an assertion that is semantic rather than
+numeric**; "the note says Markdown and I clicked the markdown column" cannot pass by coincidence the
+way "it printed 4" can.
+
+### The 9g click callbacks: needing to argue you improved on source is the tell
+
+`onCellClicked`/`onHeaderClicked`/`onGroupHeaderClicked` first shipped firing on **mousedown**, with a
+comment claiming `preventDefault()` suppressed "the renderer's `onClick`, the selection change and
+activation — the same three things source's `isPrevented` suppresses". **Source suppresses two.**
+Selection already ran in `onMouseDown` (`data-editor.tsx:2126`) long before the callback fires from
+`onMouseUp` (`:2370`), so `preventDefault()` there cannot suppress selection and was never meant to.
+
+The contract was inferred from the prop declaration instead of from the code that guards the call.
+Cost: **a drag-select fired a spurious click**, because source's `isValidClick`
+(`lastMouseDownCol === col && lastMouseDownRow === row`) is exactly what distinguishes a click from a
+drag, and firing on mousedown discards it.
+
+Reworking it surfaced **two more defects from the same misreading** — `onHeaderClicked` fired for the
+row-marker column (source guards `if (clickLocation < 0) return`), and activation checked only "is
+this cell selected *now*", which is trivially true on a first click because that click's own mousedown
+just selected it (source requires selected **before and after** the press).
+
+> **Standing lesson, and it generalises past this port: on a full-parity port, needing a paragraph to
+> argue a divergence is *better* than upstream is itself the signal to go back and read source.** The
+> justification paragraph is the tell. One wrong reading produced three defects, all of which
+> compiled, and all of which looked deliberate.
+
+Corollary for reviewers: read the **guard conditions** around a call, not the prop's type or name.
+`onCellClicked` fires where `isValidClick` says so; nothing about the declaration reveals that.

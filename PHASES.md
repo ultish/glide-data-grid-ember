@@ -84,7 +84,7 @@ canvas layout, scroll mechanism, DrawGridArg field defaults, etc.) — do not re
 | 8 | Async/streaming data + the data-source layer | **Done, browser-verified, committed** (8a `withColumnSort` write path + 8b `recordsSource`; 8c the streaming `updateCells()` demo; 8d the 1,000-row incremental proof + `object-scan` example; 8e `onVisibleRegionChanged` + `AsyncRecordsSource` + two real addon defects + the verification pass. **Those letters match `PORTING-NOTES.md`'s section headers** — go there for the implementation record) |
 | 9 | Backlog — deferred features (**not auto-scheduled**; 15 grouped items 9a–9o, see detail below) | Not scheduled |
 | 10 | Fully-featured demo + consumer cookbook (**schedulable work, not a gap list**) | **Done, browser-verified, committed** (10a `<DemoGrid>` covers every shipped arg; 10b the cookbook is a live page in the test-app, not a `.md`; plus a user-facing README and one real auto-sizing defect) |
-| 11 | Ember integration **guide**, separate from the cookbook (see detail below) | **Not started** — added 2026-08-09 |
+| 11 | Ember integration **guide**, separate from the cookbook (see detail below) | **Done, committed** (11 ordered chapters in `test-app/app/utils/guide/`, `<DocsPage>` shared with the cookbook, chapter 4 shrunk 33.6k→5.7k chars into a symptom index; covers Ember Data, GraphQL and Apollo Client 4) |
 
 (This table mirrors the TaskCreate/TaskList task tracker used in-session — if that's unavailable
 in a fresh session, this table is the source of truth; recreate the tracked tasks from it if
@@ -739,6 +739,40 @@ settled in Phase 8** (a decorator that remaps the read path must also remap the 
 Phase 8 brief above and `PORTING-NOTES.md`'s Phase 8a/8b section). That contract was settled
 *specifically* so these three wouldn't each re-derive it — don't hand-translate, and don't blanket-
 translate every callback either (`onSelectionChanged` reporting displayed rows is correct).
+
+### 9g — STATUS: DONE 2026-08-09 (26 props, browser-verified)
+
+Landed in five commits: the 5 selection blending/mode args; `editOnType`, `trapFocus`,
+`drawFocusRing`, `cellActivationBehavior` (all three values — Phase 4a had only `second-click`);
+`validateCell`, `coercePasteValue`, `copyHeaders`, `onDelete`; the click/activation notifications;
+`trailingRowOptions` (tint/hint/addIcon + per-column layering), `rowMarkerStartIndex`,
+`rowMarkerTheme`, `scrollOffsetX/Y`, `scaleToRem`, `width`/`height`. 13 new `<DemoGrid>` toggles.
+
+41 of the new tests came from **extracting three pure modules out of the controller**
+(`rendering/paste-coercion.ts`, `validate-cell.ts`, `rem-adjuster.ts`) — the controller cannot be
+imported by vitest, so extraction is the only way that logic is testable at all. Worth repeating for
+any future controller work.
+
+**Three items deferred, each a trap of the `freezeTrailingRows` kind — all would have compiled and
+done nothing:**
+
+- `onGroupHeaderRenamed` is **not a callback**. Source implements it by injecting a "Rename" entry
+  into `getGroupDetails(...).actions` (unported — `TBD.md` N9) and opening an inline input over the
+  group band: a *second overlay host*. `M`, belongs with N9/9j.
+- `trailingRowOptions.sticky` is `freezeTrailingRows` wearing a hat (source adds 1 to it).
+- `trailingRowOptions.targetColumn` only means anything with source's `appendRow(col)` focus flow, i.e. 9f.
+
+`className` is **not applicable** — the component splats `...attributes`. `onColumnAppended` shipped
+narrower than source (keyboard half only; source's other half polls for the new column to serve the
+9f ref).
+
+**One divergence remains, documented on the arg:** `preventDefault()` on `@onGroupHeaderClicked`
+suppresses group-header selection in source, which selects group headers on mouseup. This port
+selects them on mousedown alongside ordinary headers (Phase 7b never split the paths), so there is
+nothing left to gate. **That is a Phase 7b issue, not a 9g one** — fix it there if it ever matters.
+
+See PORTING-NOTES.md for the mousedown-vs-mouseup defect this phase produced and the standing lesson
+it earned.
 
 ### 9k — Performance backlog
 
