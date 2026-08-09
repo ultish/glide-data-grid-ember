@@ -100,7 +100,13 @@ import type {
     ScrollEdge,
     GridMouseEventArgs,
     SelectionBlending,
+    CellClickedEventArgs,
+    HeaderClickedEventArgs,
+    GroupHeaderClickedEventArgs,
+    CellActivatedEventArgs,
+    CellActivationBehavior,
 } from "../rendering/index.ts";
+import type { BaseGridMouseEventArgs } from "../rendering/index.ts";
 import {
     headerKind,
     groupHeaderKind,
@@ -602,6 +608,72 @@ export interface GridHostArgs {
      */
     readonly onDelete?: (selection: GridSelection) => boolean | GridSelection;
 
+    // --- Phase 9g: click / activation notifications ----------------------------------------------
+    //
+    // **One divergence applies to all three click callbacks, and it is worth reading once.** Source
+    // fires them on *mouseup*, after checking that the mousedown landed on the same target. This
+    // port dispatches all of its selection logic on *mousedown* (a structural difference dating to
+    // Phase 3a), so these fire there too. Two consequences:
+    //
+    //   * `preventDefault()` genuinely works -- it suppresses the renderer's `onClick`, the
+    //     selection change and any activation, exactly as source's does. That is the reason for
+    //     choosing mousedown: a `preventDefault` that silently did nothing would be a far worse
+    //     trap than an early event.
+    //   * The initial press of a drag-select counts as a click. Source would not report that one.
+
+    /**
+     * A click on a data cell, fired **before** the selection changes so `preventDefault()` can
+     * suppress it. `cell` is in your own coordinate space; a click on the row-marker column reports
+     * `-1`, as source does. Mirrors source's `onCellClicked`.
+     */
+    readonly onCellClicked?: (cell: Item, event: CellClickedEventArgs) => void;
+
+    /** A click on a column header, same contract as {@link onCellClicked}. `preventDefault()`
+     *  suppresses column selection. Mirrors source's `onHeaderClicked`. */
+    readonly onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
+
+    /** A click on a column *group* header (the band above the headers, when `column.group` is set).
+     *  Mirrors source's `onGroupHeaderClicked`. */
+    readonly onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
+
+    /**
+     * A cell was activated -- Enter, a printable character (when `editOnType` is on), or a click
+     * matching {@link cellActivationBehavior}. Fires just before the editor opens (or, for a
+     * boolean cell, before it toggles), so it is the hook for "opened an editor" telemetry.
+     * Mirrors source's `onCellActivated`. Never fires for the trailing blank row, which appends
+     * instead.
+     */
+    readonly onCellActivated?: (cell: Item, event: CellActivatedEventArgs) => void;
+
+    /**
+     * Editing finished, whether or not anything changed -- committed value (or `undefined` for a
+     * cancel) plus the cursor movement the editor asked for (`[0,1]` Enter, `[±1,0]` Tab, `[0,0]`
+     * Escape/click-outside). Mirrors source's `onFinishedEditing`.
+     */
+    readonly onFinishedEditing?: (newValue: GridCell | undefined, movement: Item) => void;
+
+    /**
+     * Tab pressed in an editor on the **last** column, i.e. "make me another column". Setting it is
+     * what enables that gesture at all, mirroring source's `onColumnAppended !== undefined` gate --
+     * and, like `onRowAppended`, the consumer owns the columns array, so nothing appears until they
+     * add one.
+     *
+     * **Narrower than source.** Source also exposes `appendColumn` on its imperative ref and awaits
+     * a returned position to decide where to focus; the ref is 9f and the awaited-position dance
+     * needs it, so this port ships the keyboard half only and ignores any returned value.
+     */
+    readonly onColumnAppended?: () => void;
+
+    /**
+     * When a pointer click activates a cell. `"second-click"` (the default, and this port's only
+     * behaviour before 9g) activates a click on the already-selected cell; `"single-click"`
+     * activates any click; `"double-click"` requires a genuine double-click on the selected cell.
+     * A cell's own `activationBehaviorOverride` wins over this. Mirrors source's
+     * `cellActivationBehavior`.
+     * @defaultValue "second-click"
+     */
+    readonly cellActivationBehavior?: CellActivationBehavior;
+
     // --- Phase 9g: editing behaviour flags -------------------------------------------------------
 
     /**
@@ -750,6 +822,14 @@ interface ResolvedGridHostArgs {
     readonly copyHeaders: boolean;
     readonly onDelete: ((selection: GridSelection) => boolean | GridSelection) | undefined;
 
+    readonly onCellClicked: ((cell: Item, event: CellClickedEventArgs) => void) | undefined;
+    readonly onHeaderClicked: ((colIndex: number, event: HeaderClickedEventArgs) => void) | undefined;
+    readonly onGroupHeaderClicked: ((colIndex: number, event: GroupHeaderClickedEventArgs) => void) | undefined;
+    readonly onCellActivated: ((cell: Item, event: CellActivatedEventArgs) => void) | undefined;
+    readonly onFinishedEditing: ((newValue: GridCell | undefined, movement: Item) => void) | undefined;
+    readonly onColumnAppended: (() => void) | undefined;
+    readonly cellActivationBehavior: CellActivationBehavior;
+
     readonly editOnType: boolean;
     readonly trapFocus: boolean;
     readonly drawFocusRing: boolean | "no-editor";
@@ -877,6 +957,13 @@ interface MouseHit {
     readonly shiftKey: boolean;
     readonly ctrlKey: boolean;
     readonly metaKey: boolean;
+    // 9g: `MouseEvent.detail` counts clicks in the current sequence, so the second mousedown of a
+    // double-click already reports 2 -- which is what `cellActivationBehavior: "double-click"`
+    // needs, and it needs it at mousedown time (this port dispatches selection there, not on
+    // mouseup like source).
+    readonly isDoubleClick: boolean;
+    readonly button: number;
+    readonly buttons: number;
     // Best-effort guard against an out-of-bounds click on the native scrollbar clearing the
     // selection (mirrors `data-grid.tsx`'s `isMaybeScrollbar`); only meaningful when `kind ===
     // "out-of-bounds"`.
@@ -1425,6 +1512,14 @@ export class GridHostController {
             coercePasteValue: args.coercePasteValue,
             copyHeaders: args.copyHeaders === true,
             onDelete: args.onDelete,
+
+            onCellClicked: args.onCellClicked,
+            onHeaderClicked: args.onHeaderClicked,
+            onGroupHeaderClicked: args.onGroupHeaderClicked,
+            onCellActivated: args.onCellActivated,
+            onFinishedEditing: args.onFinishedEditing,
+            onColumnAppended: args.onColumnAppended,
+            cellActivationBehavior: args.cellActivationBehavior ?? "second-click",
 
             editOnType: args.editOnType ?? true,
             trapFocus: args.trapFocus === true,
@@ -2510,6 +2605,98 @@ export class GridHostController {
         });
     }
 
+    // --- Phase 9g: click notifications ------------------------------------------------------------
+    //
+    // See `GridHostArgs.onCellClicked` for the one divergence that applies to all three: these fire
+    // on mousedown, not mouseup, because that is where this port dispatches selection -- which is
+    // precisely what makes their `preventDefault()` able to suppress anything.
+
+    /** The fields every click event shares with a hover event. Kept in one place so the two paths
+     *  cannot drift. */
+    private clickEventBase(hit: MouseHit): Omit<BaseGridMouseEventArgs, "isLongTouch"> {
+        return {
+            shiftKey: hit.shiftKey,
+            ctrlKey: hit.ctrlKey,
+            metaKey: hit.metaKey,
+            // Touch is 9c, deferred -- `touchMode` is hardcoded `false` throughout this controller.
+            isTouch: false,
+            isDoubleClick: hit.isDoubleClick,
+            isEdge: false,
+            button: hit.button,
+            buttons: hit.buttons,
+            scrollEdge: NO_SCROLL_EDGE,
+        };
+    }
+
+    /** Fires `onCellClicked`. Returns `true` if the consumer called `preventDefault()`, in which
+     *  case the caller must skip the renderer's `onClick`, the selection change and activation --
+     *  the same three things source's `isPrevented` suppresses. */
+    private emitCellClicked(args: ResolvedGridHostArgs, hit: MouseHit): boolean {
+        const callback = args.onCellClicked;
+        if (callback === undefined) return false;
+        const [mangledCol, row] = hit.location;
+        const location: Item = [mangledCol - args.rowMarkerOffset, row];
+        const bounds = this.computeCellRect(args, mangledCol, row);
+        let prevented = false;
+        callback(location, {
+            ...this.clickEventBase(hit),
+            kind: "cell",
+            // Consumer space, matching the first argument. Source leaves `event.location` *mangled*
+            // here while unmangling the `cell` argument beside it -- an inconsistency this port
+            // deliberately does not reproduce, since every other coordinate it hands out is
+            // consumer space.
+            location,
+            bounds,
+            isFillHandle: this.overFillHandle,
+            localEventX: hit.localX - bounds.x,
+            localEventY: hit.localY - bounds.y,
+            preventDefault: () => {
+                prevented = true;
+            },
+        });
+        return prevented;
+    }
+
+    /** Fires `onHeaderClicked` or `onGroupHeaderClicked` depending on which band was hit (row `-1`
+     *  vs `-2`). Returns `true` if the consumer prevented the default column-selection handling. */
+    private emitHeaderClicked(args: ResolvedGridHostArgs, hit: MouseHit): boolean {
+        const isGroup = hit.location[1] === -2;
+        const callback = isGroup ? args.onGroupHeaderClicked : args.onHeaderClicked;
+        if (callback === undefined) return false;
+        const [mangledCol] = hit.location;
+        const col = mangledCol - args.rowMarkerOffset;
+        const bounds = this.computeCellRect(args, mangledCol, hit.location[1]);
+        const group = args.columns[col]?.group ?? "";
+        let prevented = false;
+        const preventDefault = (): void => {
+            prevented = true;
+        };
+        const common = {
+            ...this.clickEventBase(hit),
+            bounds,
+            group,
+            localEventX: hit.localX - bounds.x,
+            localEventY: hit.localY - bounds.y,
+            preventDefault,
+        };
+        if (isGroup) {
+            args.onGroupHeaderClicked?.(col, { ...common, kind: groupHeaderKind, location: [col, -2] });
+        } else {
+            args.onHeaderClicked?.(col, { ...common, kind: headerKind, location: [col, -1] });
+        }
+        return prevented;
+    }
+
+    /** Fires `onCellActivated`. `mangledLocation` is converted to consumer space here, the single
+     *  place this event is emitted from. */
+    private emitCellActivated(
+        args: ResolvedGridHostArgs,
+        mangledLocation: Item,
+        activation: CellActivatedEventArgs
+    ): void {
+        args.onCellActivated?.([mangledLocation[0] - args.rowMarkerOffset, mangledLocation[1]], activation);
+    }
+
     // --- Phase 9h: shared drag plumbing (drag-extend / row reorder / fill) -------------------------
 
     /** True while any pointer drag this class tracks per-cell is in flight. Resize/column-reorder are
@@ -2693,6 +2880,8 @@ export class GridHostController {
         const shiftKey = ev.shiftKey;
         const ctrlKey = ev.ctrlKey;
         const metaKey = ev.metaKey;
+        const isDoubleClick = ev.detail >= 2;
+        const { button, buttons } = ev;
 
         if (col === -1 || row === undefined || x < 0 || y < 0 || x > this.width || y > this.height) {
             const location: Item = [
@@ -2714,6 +2903,9 @@ export class GridHostController {
                 shiftKey,
                 ctrlKey,
                 metaKey,
+                isDoubleClick,
+                button,
+                buttons,
                 isMaybeScrollbar,
             };
         }
@@ -2726,6 +2918,9 @@ export class GridHostController {
                 shiftKey,
                 ctrlKey,
                 metaKey,
+                isDoubleClick,
+                button,
+                buttons,
                 isMaybeScrollbar: false,
             };
         }
@@ -2737,6 +2932,9 @@ export class GridHostController {
             shiftKey,
             ctrlKey,
             metaKey,
+            isDoubleClick,
+            button,
+            buttons,
             isMaybeScrollbar: false,
         };
     }
@@ -3119,6 +3317,11 @@ export class GridHostController {
         const [col, row] = hit.location;
         this.lastSelectedCol = undefined;
 
+        // 9g. Fired for every cell click including the row-marker column (which reports col `-1`)
+        // and the trailing blank row, matching source, and *before* anything else happens so
+        // `preventDefault()` can suppress all of it.
+        if (this.emitCellClicked(args, hit)) return;
+
         if (args.hasRowMarkers && col === 0) {
             // Row-marker column click (`data-editor.tsx:1853-1911`). Phase 4d: no-op on the
             // trailing blank row -- there's no marker cell there (`mangledGetCellContent` returns a
@@ -3261,14 +3464,27 @@ export class GridHostController {
             }
         }
 
-        if (cellCol === col && cellRow === row) {
-            // Click landed on the already-selected cell -- activate it (Phase 4a). This port only
-            // supports source's `cellActivationBehavior: "second-click"` (the default, see
-            // PORTING-NOTES.md's Phase 4a section for why the other two modes aren't ported): ANY
-            // click on an already-selected cell activates, no double-click timing needed -- a
-            // double-click's second mousedown already satisfies "click on the already-selected
-            // cell" on its own, so it's covered by this same branch without extra bookkeeping.
-            this.activateCell(args, hit.location, cellContent, { highlight: true });
+        // 9g: all three of source's activation behaviours, where Phase 4a only had `"second-click"`.
+        // A cell's own `activationBehaviorOverride` wins over the grid-wide setting, as in source.
+        const behavior = (cellContent as GridCell).activationBehaviorOverride ?? args.cellActivationBehavior;
+        const isOnSelectedCell = cellCol === col && cellRow === row;
+        // `"second-click"` needs no double-click timing: a double-click's *second* mousedown already
+        // satisfies "click on the already-selected cell". `"double-click"` is the stricter form that
+        // additionally requires `MouseEvent.detail >= 2`.
+        const shouldActivate =
+            behavior === "single-click" || (isOnSelectedCell && (behavior === "second-click" || hit.isDoubleClick));
+        const activation: CellActivatedEventArgs = {
+            inputType: "pointer",
+            pointerActivation: hit.isDoubleClick ? "double-click" : behavior,
+            pointerType: "mouse",
+        };
+
+        if (isOnSelectedCell) {
+            // The selection is already exactly this cell, so there is nothing to change either way;
+            // the only question was whether to activate.
+            if (shouldActivate) {
+                this.activateCell(args, hit.location, cellContent, { highlight: true, activation });
+            }
             return;
         }
 
@@ -3298,6 +3514,11 @@ export class GridHostController {
             this.applyMangledSelection(args, result.selection);
         }
         this.lastSelectedRow = undefined;
+        // `"single-click"` activates a cell that was not previously selected, so this runs *after*
+        // the selection above -- the editor must open over the cell that is now current.
+        if (shouldActivate) {
+            this.activateCell(args, hit.location, cellContent, { highlight: true, activation });
+        }
     }
 
     // Port of `handleSelect`'s `args.kind === "header"` branch (`data-editor.tsx:1994-2047`).
@@ -3306,6 +3527,11 @@ export class GridHostController {
         // space. The row half (the select-all checkbox below) does not -- rows carry no column
         // coordinate -- and deliberately stays on `this.selection`/`applySelection`.
         const [col] = hit.location;
+
+        // 9g. Same contract as `onCellClicked`: fired first, and `preventDefault()` suppresses the
+        // column-selection handling below. Row `-2` routes to `onGroupHeaderClicked` instead.
+        if (this.emitHeaderClicked(args, hit)) return;
+
         const mangledSelection = this.mangledSelection(args);
         const selectedColumns = mangledSelection.columns;
         const selectedRows = this.selection.rows;
@@ -3548,7 +3774,13 @@ export class GridHostController {
         args: ResolvedGridHostArgs,
         mangledLocation: Item,
         cellContent: InnerGridCell,
-        opts: { readonly highlight: boolean; readonly initialValue?: string }
+        opts: {
+            readonly highlight: boolean;
+            readonly initialValue?: string;
+            /** 9g: what to report through `onCellActivated`. Every activation trigger describes
+             *  itself, so the event is built where the trigger is known rather than inferred here. */
+            readonly activation: CellActivatedEventArgs;
+        }
     ): void {
         if (cellContent.kind === InnerGridCellKind.NewRow) {
             args.onRowAppended?.();
@@ -3556,6 +3788,11 @@ export class GridHostController {
         }
         if (isInnerOnlyCellKind(cellContent.kind)) return;
         const cell = cellContent as GridCell;
+
+        // 9g. Fired for a real activation only -- never for the trailing blank row (which appends
+        // instead, handled above) and never for a marker cell. Mirrors source, which emits it right
+        // before `reselect()`, i.e. before the boolean toggle *and* before the overlay opens.
+        this.emitCellActivated(args, mangledLocation, opts.activation);
 
         // Boolean cells never open the overlay -- toggled directly, matches source's `reselect()`
         // `c.kind === GridCellKind.Boolean` branch exactly (bypasses `setOverlaySimple` entirely).
@@ -3846,8 +4083,25 @@ export class GridHostController {
         this.root.focus();
         if (movement[0] !== 0 || movement[1] !== 0) {
             const [mCol, mRow] = state.mangledLocation;
-            this.moveActiveCell(args, mCol + movement[0], mRow + movement[1]);
+            // 9g: Tab off the *last* column with `onColumnAppended` configured means "make me
+            // another column" rather than "move right into a wall" -- source's `isEditingLastCol &&
+            // movX === 1 && onColumnAppended !== undefined` branch (`data-editor.tsx:3111`). The
+            // consumer owns the columns array, so nothing moves until they add one; source resolves
+            // that by polling for the new column, which needs the imperative ref (9f) this port
+            // does not have yet, so the port stops at the notification.
+            const { mappedColumns } = this.computeMangledLayout(args);
+            const isEditingLastCol = mCol === mappedColumns.length - 1 && committed !== undefined;
+            if (isEditingLastCol && movement[0] === 1 && args.onColumnAppended !== undefined) {
+                args.onColumnAppended();
+            } else {
+                this.moveActiveCell(args, mCol + movement[0], mRow + movement[1]);
+            }
         }
+
+        // 9g. Fires whether or not anything was committed, and after the cursor has moved -- source
+        // puts it at the very end of `onFinishEditing` for the same reason (`data-editor.tsx:3125`).
+        // `newValue` is the *committed* value, so a `validateCell` rejection reports `undefined`.
+        args.onFinishedEditing?.(committed, [movement[0], movement[1]]);
     }
 
     // Delete/Backspace: clears every read-write cell in the current selection. Prefers each cell's
@@ -3972,7 +4226,10 @@ export class GridHostController {
 
             if (ev.key === "Enter" && !primary && !ev.altKey) {
                 const cellContent = this.mangledGetCellContent(activationArgs)(mangledLocation);
-                this.activateCell(activationArgs, mangledLocation, cellContent, { highlight: true });
+                this.activateCell(activationArgs, mangledLocation, cellContent, {
+                    highlight: true,
+                    activation: { inputType: "keyboard", key: ev.key },
+                });
                 ev.preventDefault();
                 ev.stopPropagation();
                 return;
@@ -4001,6 +4258,7 @@ export class GridHostController {
                     this.activateCell(activationArgs, mangledLocation, cellContent, {
                         highlight: false,
                         initialValue: ev.key,
+                        activation: { inputType: "keyboard", key: ev.key },
                     });
                     ev.preventDefault();
                     ev.stopPropagation();

@@ -74,6 +74,8 @@ import {
     type SelectionBlending,
     type ValidateCellCallback,
     type CoercePasteValueCallback,
+    type CellActivatedEventArgs,
+    type CellActivationBehavior,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -216,6 +218,10 @@ const FOCUS_RING_MODES: readonly (boolean | "no-editor")[] = [true, "no-editor",
 // 9g: `onDelete`'s three return shapes, one per cycle position -- `undefined` (no callback at all),
 // `false` (veto) and a replacement `GridSelection` (delete something else instead).
 const DELETE_MODES = ["normal", "veto", "whole-column"] as const;
+
+// 9g. Only `"second-click"` existed before -- `"single-click"` opens the editor on the very first
+// click, `"double-click"` needs a real double-click on the already-selected cell.
+const ACTIVATION_BEHAVIORS: readonly CellActivationBehavior[] = ["second-click", "single-click", "double-click"];
 
 export default class DemoGrid extends Component {
     constructor(...args: ConstructorParameters<typeof Component>) {
@@ -618,6 +624,58 @@ export default class DemoGrid extends Component {
         };
     }
 
+    // --- Phase 9g: the click / activation notifications ------------------------------------------
+    // Pure notifications, so they go where every other notification-only arg in this demo goes: a
+    // status line. `cellActivationBehavior` gets a cycling control because its three values are
+    // mutually exclusive and the difference (does one click open the editor, or two?) is only
+    // observable by trying it.
+    @tracked lastClick = "—";
+    @tracked lastActivation = "—";
+    @tracked lastEditFinish = "—";
+    @tracked activationBehaviorIndex = 0;
+
+    get cellActivationBehavior(): CellActivationBehavior {
+        return ACTIVATION_BEHAVIORS[this.activationBehaviorIndex] ?? "second-click";
+    }
+
+    cycleActivationBehavior = (): void => {
+        this.activationBehaviorIndex = (this.activationBehaviorIndex + 1) % ACTIVATION_BEHAVIORS.length;
+    };
+
+    handleCellClicked = (cell: Item): void => {
+        // Calling `event.preventDefault()` here would suppress the selection change, the renderer's
+        // own `onClick` and any activation -- the whole click. This demo only reports.
+        this.lastClick = `cell ${cell[0]},${cell[1]}`;
+    };
+
+    handleHeaderClicked = (col: number): void => {
+        this.lastClick = `header ${col}`;
+    };
+
+    handleGroupHeaderClicked = (col: number): void => {
+        this.lastClick = `group header over col ${col}`;
+    };
+
+    handleCellActivated = (cell: Item, event: CellActivatedEventArgs): void => {
+        const how = event.inputType === "keyboard" ? `key ${event.key}` : event.pointerActivation;
+        this.lastActivation = `${cell[0]},${cell[1]} via ${how}`;
+    };
+
+    handleFinishedEditing = (newValue: GridCell | undefined, movement: Item): void => {
+        this.lastEditFinish = `${newValue === undefined ? "cancelled" : "committed"}, moved ${movement[0]},${movement[1]}`;
+    };
+
+    /** Tab off the last column. The grid only notifies -- the columns array is this component's, so
+     *  a column only appears because this handler adds one. */
+    handleColumnAppended = (): void => {
+        const index = this.columns.length;
+        this.columns = [
+            ...this.columns,
+            { id: `col-${index}`, title: `New ${index}`, width: 120, hasMenu: true } satisfies SizedGridColumn,
+        ];
+        this.lastActivity = `onColumnAppended added column ${index}`;
+    };
+
     /** All three of source's return shapes, one per cycle position: `true` (normal), `false` (veto),
      *  and a replacement `GridSelection` -- here the whole column under the active cell, which is
      *  the "delete columns, not cells" case this arg exists for. */
@@ -799,6 +857,9 @@ export default class DemoGrid extends Component {
                 <button type="button" class="gdg-full__toggle" data-test-delete-mode-toggle {{on "click" this.cycleDeleteMode}}>
                     Delete: <b>{{this.deleteMode}}</b>
                 </button>
+                <button type="button" class="gdg-full__toggle" data-test-activation-behavior-toggle {{on "click" this.cycleActivationBehavior}}>
+                    Activate on: <b>{{this.cellActivationBehavior}}</b>
+                </button>
             </div>
 
             {{! Notification-only args, rendered so they are observable rather than merely wired. }}
@@ -810,6 +871,9 @@ export default class DemoGrid extends Component {
                 {{! Phase 9g: an edit that is silently refused is indistinguishable from a broken
                     grid, so every guard decision is reported. }}
                 {{#if this.lastGuard}}<span>Guard: <b data-test-last-guard>{{this.lastGuard}}</b></span>{{/if}}
+                <span>Click: <b data-test-last-click>{{this.lastClick}}</b></span>
+                <span>Activated: <b data-test-last-activation>{{this.lastActivation}}</b></span>
+                <span>Edit end: <b data-test-last-edit-finish>{{this.lastEditFinish}}</b></span>
                 {{! Cell-carried callbacks (button / uri / links) have no other way to be seen. }}
                 <span class="gdg-full__hint">
                     Drag a row by its marker to reorder &middot; drag the selection's corner handle to fill
@@ -911,6 +975,13 @@ export default class DemoGrid extends Component {
                     @coercePasteValue={{this.coercePasteValue}}
                     @copyHeaders={{this.copyHeaders}}
                     @onDelete={{this.onDelete}}
+                    @cellActivationBehavior={{this.cellActivationBehavior}}
+                    @onCellClicked={{this.handleCellClicked}}
+                    @onHeaderClicked={{this.handleHeaderClicked}}
+                    @onGroupHeaderClicked={{this.handleGroupHeaderClicked}}
+                    @onCellActivated={{this.handleCellActivated}}
+                    @onFinishedEditing={{this.handleFinishedEditing}}
+                    @onColumnAppended={{this.handleColumnAppended}}
                     @onRowMoved={{this.onRowMovedIfAvailable}}
                     @fillHandle={{this.useFillHandle}}
                     @allowedFillDirections={{this.allowedFillDirections}}

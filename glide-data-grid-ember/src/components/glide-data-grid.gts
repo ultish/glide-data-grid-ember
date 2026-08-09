@@ -67,6 +67,11 @@ import type {
     SelectionBlending,
     ValidateCellCallback,
     CoercePasteValueCallback,
+    CellClickedEventArgs,
+    HeaderClickedEventArgs,
+    GroupHeaderClickedEventArgs,
+    CellActivatedEventArgs,
+    CellActivationBehavior,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -277,6 +282,21 @@ export interface GlideDataGridSignature {
         copyHeaders?: boolean;
         onDelete?: (selection: GridSelection) => boolean | GridSelection;
 
+        // Click / activation notifications (Phase 9g). All three click callbacks fire on
+        // **mousedown**, not mouseup -- which is what makes their `preventDefault()` able to
+        // suppress the selection change, the renderer's own `onClick` and any activation. See
+        // `GridHostArgs.onCellClicked` for the full note on that divergence from source.
+        onCellClicked?: (cell: Item, event: CellClickedEventArgs) => void;
+        onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
+        onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
+        onCellActivated?: (cell: Item, event: CellActivatedEventArgs) => void;
+        onFinishedEditing?: (newValue: GridCell | undefined, movement: Item) => void;
+        /** Tab in an editor on the last column. Setting it is what enables that gesture. */
+        onColumnAppended?: () => void;
+        /** When a pointer click activates a cell: `"second-click"` (default), `"single-click"` or
+         *  `"double-click"`. A cell's own `activationBehaviorOverride` wins over this. */
+        cellActivationBehavior?: CellActivationBehavior;
+
         // Editing behaviour (Phase 9g). `@editOnType` (default `true`) is what makes typing a
         // printable character over the selected cell open its editor seeded with that character;
         // `@trapFocus` (default `false`) stops an at-the-edge arrow key escaping to the next tab
@@ -391,6 +411,13 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         coercePasteValue: this.args.coercePasteValue,
         copyHeaders: this.args.copyHeaders,
         onDelete: this.args.onDelete,
+        onCellClicked: this.args.onCellClicked,
+        onHeaderClicked: this.args.onHeaderClicked,
+        onGroupHeaderClicked: this.args.onGroupHeaderClicked,
+        onCellActivated: this.args.onCellActivated,
+        onFinishedEditing: this.args.onFinishedEditing,
+        onColumnAppended: this.args.onColumnAppended,
+        cellActivationBehavior: this.args.cellActivationBehavior,
         editOnType: this.args.editOnType,
         trapFocus: this.args.trapFocus,
         drawFocusRing: this.args.drawFocusRing,

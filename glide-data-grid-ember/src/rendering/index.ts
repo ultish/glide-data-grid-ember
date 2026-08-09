@@ -58,6 +58,8 @@ export type {
     ProvideEditorComponent,
     CellEditorProps,
     CellEditorHandle,
+    // Phase 9g: `@cellActivationBehavior`'s union, and the per-cell override of the same name.
+    CellActivationBehavior,
 } from "./data-grid-types.ts";
 export {
     GridCellKind,
@@ -190,7 +192,15 @@ export type {
     GridMouseOutOfBoundsEventArgs,
     GridKeyEventArgs,
     CellActivatedEventArgs,
+    KeyboardCellActivatedEvent,
+    PointerCellActivatedEvent,
     FillPatternEventArgs,
+    // Phase 9g: the three click callbacks' event types. `PreventableEvent` is what distinguishes
+    // them from the plain `GridMouse*EventArgs` above -- they carry a working `preventDefault()`.
+    PreventableEvent,
+    CellClickedEventArgs,
+    HeaderClickedEventArgs,
+    GroupHeaderClickedEventArgs,
 } from "./event-args.ts";
 // Value exports, not types: these are the discriminants of the `GridMouseEventArgs` union, so a
 // consumer narrowing an `@onItemHovered` event needs them at runtime. Unexported until N2 landed,
