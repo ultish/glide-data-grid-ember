@@ -83,7 +83,8 @@ function buildDatePickerEditor(p: CellEditorProps<DatePickerCell>): CellEditorHa
         return { element: entry.element, focus: () => entry.focus(), destroy: () => entry.destroy() };
     }
 
-    const step = cellData.step !== undefined && !Number.isNaN(Number(cellData.step)) ? Number(cellData.step) : undefined;
+    const step =
+        cellData.step !== undefined && !Number.isNaN(Number(cellData.step)) ? Number(cellData.step) : undefined;
 
     // Convert timezone offset from minutes to milliseconds:
     const timezoneOffsetMs = cellData.timezoneOffset ? cellData.timezoneOffset * 60 * 1000 : 0;

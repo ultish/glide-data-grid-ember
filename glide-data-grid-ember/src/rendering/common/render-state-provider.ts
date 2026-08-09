@@ -67,13 +67,13 @@ export abstract class WindowingTrackerBase {
 }
 
 export class RenderStateProvider extends WindowingTrackerBase {
-    private cache: Map<number, any> = new Map();
+    private cache: Map<number, unknown> = new Map();
 
-    public setValue = (location: Item, state: any): void => {
+    public setValue = (location: Item, state: unknown): void => {
         this.cache.set(packColRowToNumber(location[0], location[1]), state);
     };
 
-    public getValue = (location: Item): any => {
+    public getValue = (location: Item): unknown => {
         return this.cache.get(packColRowToNumber(location[0], location[1]));
     };
 

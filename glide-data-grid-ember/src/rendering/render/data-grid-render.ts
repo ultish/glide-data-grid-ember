@@ -1,5 +1,3 @@
-/* eslint-disable sonarjs/no-duplicate-string */
-/* eslint-disable unicorn/no-for-loop */
 import { type Rectangle } from "../data-grid-types.ts";
 import { CellSet } from "../cell-set.ts";
 import { getEffectiveColumns, type MappedGridColumn, rectBottomRight } from "./data-grid-lib.ts";
@@ -465,7 +463,8 @@ export function drawGrid(arg: DrawGridArg, lastArg: DrawGridArg | undefined) {
             const selectionCurrent = selection.current;
 
             if (
-                (fillHandle !== false && fillHandle !== undefined) &&
+                fillHandle !== false &&
+                fillHandle !== undefined &&
                 drawFocus &&
                 selectionCurrent !== undefined &&
                 damage.has(rectBottomRight(selectionCurrent.range))

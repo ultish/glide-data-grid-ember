@@ -99,7 +99,8 @@ export function shiftSelection(input: GridSelection, offset: number): GridSelect
  * everything `shiftSelection` reads.
  */
 export class MangledSelectionCache {
-    private entry: { readonly src: GridSelection; readonly offset: number; readonly value: MangledSelection } | undefined;
+    private entry:
+        { readonly src: GridSelection; readonly offset: number; readonly value: MangledSelection } | undefined;
 
     public get(selection: ConsumerSelection, rowMarkerOffset: number): MangledSelection {
         const cached = this.entry;

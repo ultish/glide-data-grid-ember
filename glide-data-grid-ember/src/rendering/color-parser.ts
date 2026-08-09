@@ -261,7 +261,6 @@ export function parseToRgba(color: string): readonly [number, number, number, nu
 
     if (result === undefined) {
         if (process.env.NODE_ENV !== "production") {
-            // eslint-disable-next-line no-console
             console.warn("Could not parse color", color);
         }
         result = [0, 0, 0, 1];
@@ -343,7 +342,6 @@ export function interpolateColors(leftColor: string, rightColor: string, val: nu
 export function getLuminance(color: string): number {
     if (color === "transparent") return 0;
 
-    // eslint-disable-next-line unicorn/consistent-function-scoping
     function f(x: number) {
         const channel = x / 255;
         return channel <= 0.040_45 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);

@@ -4,7 +4,13 @@ This repo is a full-parity Ember v2 addon port of [glide-data-grid](https://gith
 (a React canvas data grid), source at `/Users/jxhui/Developer/glide-data-grid` on this machine.
 `.gts` components, Vite-based test-app, pnpm workspace.
 
-**Before doing anything else, read these two files in full:**
+**If you are here to work on remaining tasks, read `TODO.md` instead — it is self-contained.**
+`TODO.md` (337 lines) carries every outstanding item with its source citations, the five rules that
+cause real bugs here, and the working practices, specifically so the two large files below do not
+need loading. The files below are the historical record; go to them only when `TODO.md` points you
+at a section.
+
+**For deep history or to resume a phase cold, read these two files in full:**
 
 1. **`PHASES.md`** — the durable plan: original requirements, phase-by-phase scope, current status,
    standing execution rules, and explicit instructions for resuming cold.

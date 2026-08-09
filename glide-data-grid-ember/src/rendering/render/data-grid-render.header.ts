@@ -5,7 +5,7 @@ import type { HoverValues } from "../animation-manager.ts";
 import type { CellSet } from "../cell-set.ts";
 import { withAlpha } from "../color-parser.ts";
 import type { SpriteManager, SpriteVariant } from "../data-grid-sprites.ts";
-import { GridColumnMenuIcon, type DrawHeaderCallback, type GridSelection, type Rectangle } from "../data-grid-types.ts";
+import { type DrawHeaderCallback, type GridSelection, type Rectangle } from "../data-grid-types.ts";
 import {
     drawMenuDots,
     getMeasuredTextCache,
@@ -233,7 +233,6 @@ export function drawGroups(
 
                 ctx.globalAlpha = 0.6;
 
-                // eslint-disable-next-line prefer-const
                 const [mouseX, mouseY] = hovered?.[1] ?? [-1, -1];
                 for (let i = 0; i < group.actions.length; i++) {
                     const action = group.actions[i]!;
@@ -564,7 +563,7 @@ function drawHeaderInner(
             ctx.globalAlpha = 0.7;
         }
 
-        if (c.menuIcon === undefined || c.menuIcon === GridColumnMenuIcon.Triangle) {
+        if (c.menuIcon === undefined || c.menuIcon === "triangle") {
             // Draw the default triangle menu icon:
             ctx.beginPath();
             const triangleX = menuBounds.x + menuBounds.width / 2 - 5.5;
@@ -589,7 +588,7 @@ function drawHeaderInner(
             );
             ctx.fillStyle = fillStyle;
             ctx.fill();
-        } else if (c.menuIcon === GridColumnMenuIcon.Dots) {
+        } else if (c.menuIcon === "dots") {
             // Draw the three dots menu icon:
             ctx.beginPath();
             const dotsX = menuBounds.x + menuBounds.width / 2;

@@ -284,13 +284,7 @@ export function isReadWriteCell(cell: GridCell): cell is ReadWriteGridCell {
 
 /** @category Cells */
 export type GridCell =
-    | EditableGridCell
-    | BubbleCell
-    | RowIDCell
-    | LoadingCell
-    | ProtectedCell
-    | DrilldownCell
-    | CustomCell;
+    EditableGridCell | BubbleCell | RowIDCell | LoadingCell | ProtectedCell | DrilldownCell | CustomCell;
 
 type InnerOnlyGridCell = NewRowCell | MarkerCell;
 /** @category Cells */
@@ -485,7 +479,7 @@ export type ValidatedGridCell = EditableGridCell & {
 };
 
 /** @category Cells */
-export interface CustomCell<T extends {} = {}> extends BaseGridCell {
+export interface CustomCell<T extends object = object> extends BaseGridCell {
     readonly kind: GridCellKind.Custom;
     readonly data: T;
     readonly copyData: string;

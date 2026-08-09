@@ -5,4 +5,4 @@
 // (`@glint/environment-ember-loose` + `@glint/environment-ember-template-imports`), both of which
 // no longer exist -- v2 dropped the Ember Loose environment entirely and ships a single types entry
 // point instead. Harmless here: this addon has no `.hbs` files at all, only `.gts`.
-import '@glint/ember-tsc/types';
+import "@glint/ember-tsc/types";

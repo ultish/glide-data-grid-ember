@@ -49,7 +49,8 @@ export const dropdownCellRenderer: CustomRenderer<DropdownCell> = {
         }
         return true;
     },
-    measure: (ctx, cell, theme) => (cell.data.value ? ctx.measureText(cell.data.value).width : 0) + theme.cellHorizontalPadding * 2,
+    measure: (ctx, cell, theme) =>
+        (cell.data.value ? ctx.measureText(cell.data.value).width : 0) + theme.cellHorizontalPadding * 2,
     provideEditor: () => ({
         editor: p => buildDropdownEditor(p),
         disablePadding: true,
@@ -94,7 +95,10 @@ function buildDropdownEditor(p: CellEditorProps<DropdownCell>): CellEditorHandle
     }
 
     select.addEventListener("change", () => {
-        p.onFinishedEditing({ ...p.value, data: { ...p.value.data, value: select.value === "" ? undefined : select.value } });
+        p.onFinishedEditing({
+            ...p.value,
+            data: { ...p.value.data, value: select.value === "" ? undefined : select.value },
+        });
     });
 
     container.appendChild(select);

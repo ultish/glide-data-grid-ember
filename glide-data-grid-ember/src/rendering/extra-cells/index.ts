@@ -16,6 +16,8 @@ import { GridCellKind, type CustomCell, type InnerGridCell } from "../data-grid-
 import type { CellRenderer, CustomRenderer, GetCellRendererCallback } from "../cell-types.ts";
 
 // 5a
+/* The aggregate intentionally erases each renderer's distinct custom-cell payload. */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { sparklineCellRenderer } from "./sparkline-cell.ts";
 import { starCellRenderer } from "./star-cell.ts";
 import { rangeCellRenderer } from "./range-cell.ts";

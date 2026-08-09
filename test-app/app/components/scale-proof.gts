@@ -70,6 +70,8 @@ export default class ScaleProof extends Component {
         super(...args);
         markProjectionBaseline();
         // Runs after the first render, so this captures the cold sweep.
+        // ember/no-runloop: this delayed read must happen after the render pass.
+        // eslint-disable-next-line ember/no-runloop
         next(this, () => this.captureReport("Initial build (cold)"));
     }
 
@@ -118,6 +120,8 @@ export default class ScaleProof extends Component {
         markProjectionBaseline();
         const t0 = performance.now();
         mutate();
+        // ember/no-runloop: this delayed read must happen after the render pass.
+        // eslint-disable-next-line ember/no-runloop
         next(this, () => this.captureReport(label, performance.now() - t0));
     }
 
@@ -170,7 +174,9 @@ export default class ScaleProof extends Component {
     <template>
         <section style="display: flex; flex-direction: column; gap: 10px;">
             <h3 style="margin: 0; font: 600 15px system-ui;">
-                Scale proof — {{this.source.rows}} rows through
+                Scale proof —
+                {{this.source.rows}}
+                rows through
                 <code>recordsSource</code>
             </h3>
             <p style="margin: 0; font: 13px system-ui; color: #444; max-width: 80ch;">
@@ -182,10 +188,10 @@ export default class ScaleProof extends Component {
                 field re-projects
                 <em>one</em>
                 row rather than all
-                {{this.source.rows}}. The "City" and "Pets" columns are dug out of a nested
-                GraphQL-shaped payload with
-                <code>object-scan</code>, compiled once per column
-                (<strong data-test-scanner-compiles>{{this.scannerCompiles}}</strong>
+                {{this.source.rows}}. The "City" and "Pets" columns are dug out of a nested GraphQL-shaped payload with
+                <code>object-scan</code>, compiled once per column (<strong
+                    data-test-scanner-compiles
+                >{{this.scannerCompiles}}</strong>
                 compiles total, not one per cell) and evaluated inside
                 <code>toCell</code>
                 — never inside
@@ -207,16 +213,21 @@ export default class ScaleProof extends Component {
                         {{on "change" this.updateTargetRow}}
                     />
                 </div>
-                <button type="button" data-test-scale-edit {{on "click" this.editOneField}}>
+                <button class="btn btn-xs" type="button" data-test-scale-edit {{on "click" this.editOneField}}>
                     Edit one field
                 </button>
-                <button type="button" data-test-scale-add-pet {{on "click" this.addPetToRow}}>
+                <button class="btn btn-xs" type="button" data-test-scale-add-pet {{on "click" this.addPetToRow}}>
                     Add a pet (nested)
                 </button>
-                <button type="button" data-test-scale-noop {{on "click" this.rerenderOnly}}>
+                <button class="btn btn-xs" type="button" data-test-scale-noop {{on "click" this.rerenderOnly}}>
                     Re-render, touch nothing
                 </button>
-                <button type="button" data-test-scale-replace {{on "click" this.replaceRecordsArray}}>
+                <button
+                    class="btn btn-xs"
+                    type="button"
+                    data-test-scale-replace
+                    {{on "click" this.replaceRecordsArray}}
+                >
                     Replace records array (worst case)
                 </button>
                 <span style="color: #888;">re-renders: {{this.rerenderCount}}</span>

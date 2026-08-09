@@ -1,4 +1,3 @@
-/* eslint-disable unicorn/prefer-ternary */
 import { itemIsInRect } from "../render/data-grid-lib.ts";
 import type { FillHandleDirection, Rectangle } from "../data-grid-types.ts";
 
@@ -30,7 +29,6 @@ export function getClosestRect(
         allowedDirections === "horizontal" ? Number.MAX_SAFE_INTEGER : distanceToBottom
     );
 
-    // eslint-disable-next-line unicorn/prefer-switch
     if (minDistance === distanceToBottom) {
         return { x: rect.x, y: rect.y + rect.height, width: rect.width, height: py - rect.y - rect.height + 1 };
     } else if (minDistance === distanceToTop) {

@@ -87,10 +87,7 @@ export interface GridKeyEventArgs {
 
 /** @category Types */
 export type GridMouseEventArgs =
-    | GridMouseCellEventArgs
-    | GridMouseHeaderEventArgs
-    | GridMouseOutOfBoundsEventArgs
-    | GridMouseGroupHeaderEventArgs;
+    GridMouseCellEventArgs | GridMouseHeaderEventArgs | GridMouseOutOfBoundsEventArgs | GridMouseGroupHeaderEventArgs;
 
 export interface PreventableEvent {
     preventDefault: () => void;
@@ -104,7 +101,7 @@ export interface HeaderClickedEventArgs extends GridMouseHeaderEventArgs, Preven
 /** @category Types */
 export interface GroupHeaderClickedEventArgs extends GridMouseGroupHeaderEventArgs, PreventableEvent {}
 
-export interface BaseCellActivatedEvent {}
+export type BaseCellActivatedEvent = object;
 
 /** Keyboard-initiated activation */
 export interface KeyboardCellActivatedEvent extends BaseCellActivatedEvent {
@@ -120,9 +117,7 @@ export interface PointerCellActivatedEvent extends BaseCellActivatedEvent {
 }
 
 /** The public event type the grid emits */
-export type CellActivatedEventArgs =
-    | KeyboardCellActivatedEvent
-    | PointerCellActivatedEvent;
+export type CellActivatedEventArgs = KeyboardCellActivatedEvent | PointerCellActivatedEvent;
 
 export interface FillPatternEventArgs extends PreventableEvent {
     patternSource: Rectangle;

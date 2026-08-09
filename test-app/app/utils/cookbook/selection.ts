@@ -49,7 +49,10 @@ export const selectionSection: Section = {
             kind: "p",
             text: "`@onSelectionChanged` reports **displayed** rows. That is deliberate — it is what is visually selected. Contrast the *write* path under sorting, where displayed-space is a trap.",
         },
-        { kind: "p", text: "**Row reordering.** Setting `@onRowMoved` both enables the drag and draws the handle dots on the marker cells. It needs a marker column — that column is what you grab. The grid previews the move live and throws the preview away on drop, so you must reorder your data:" },
+        {
+            kind: "p",
+            text: "**Row reordering.** Setting `@onRowMoved` both enables the drag and draws the handle dots on the marker cells. It needs a marker column — that column is what you grab. The grid previews the move live and throws the preview away on drop, so you must reorder your data:",
+        },
         {
             kind: "code",
             text: `<GlideDataGrid @rowMarkers="both" @onRowMoved={{this.handleRowMoved}} ... />
@@ -61,7 +64,10 @@ handleRowMoved = (from, to) => {
   this.people = next;
 };`,
         },
-        { kind: "p", text: "**Fill handle.** Off by default. When on, dragging the small square at the selection's bottom-right corner tiles the selected pattern across the dragged region and reports the writes through `@onCellsEdited` — so the handler above is all you need." },
+        {
+            kind: "p",
+            text: "**Fill handle.** Off by default. When on, dragging the small square at the selection's bottom-right corner tiles the selected pattern across the dragged region and reports the writes through `@onCellsEdited` — so the handler above is all you need.",
+        },
         {
             kind: "code",
             text: `<GlideDataGrid
@@ -72,6 +78,9 @@ handleRowMoved = (from, to) => {
   ...
 />`,
         },
-        { kind: "p", text: "`@onFillPattern` fires first if you want to inspect the fill or `preventDefault()` it and do your own." },
+        {
+            kind: "p",
+            text: "`@onFillPattern` fires first if you want to inspect the fill or `preventDefault()` it and do your own.",
+        },
     ],
 };

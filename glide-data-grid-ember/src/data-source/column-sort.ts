@@ -58,12 +58,7 @@
 //     thrash the single cache entry and rebuild on each alternating call. That degrades to source's
 //     own behaviour rather than breaking; it is not worth a multi-entry cache.
 
-import {
-    GridCellKind,
-    type GridCell,
-    type GridColumn,
-    type Item,
-} from "../rendering/data-grid-types.ts";
+import { GridCellKind, type GridCell, type GridColumn, type Item } from "../rendering/data-grid-types.ts";
 
 type GetCellContentFn = (cell: Item) => GridCell;
 

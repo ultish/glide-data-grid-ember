@@ -49,7 +49,13 @@
 // to sweep every row to build its map, and by construction most rows here aren't loaded. Sort on the
 // server and hand back a different ordering instead.
 
-import { GridCellKind, type GridCell, type GridColumn, type Item, type Rectangle } from "../rendering/data-grid-types.ts";
+import {
+    GridCellKind,
+    type GridCell,
+    type GridColumn,
+    type Item,
+    type Rectangle,
+} from "../rendering/data-grid-types.ts";
 import type { CellEdit } from "./column-sort.ts";
 
 /** Inclusive-exclusive row range, `[startIndex, endIndex)`. Mirrors source's `Range`. */

@@ -9,13 +9,24 @@
 import { GridCellKind, type BaseGridCell, type Rectangle, type UriCell } from "../data-grid-types.ts";
 import type { CellEditorHandle, CellEditorProps } from "../data-grid-types.ts";
 import type { InternalCellRenderer } from "../cell-types.ts";
-import { drawTextCell, getMeasuredTextCache, getMiddleCenterBias, measureTextCached, prepTextCell } from "../render/data-grid-lib.ts";
+import {
+    drawTextCell,
+    getMeasuredTextCache,
+    getMiddleCenterBias,
+    measureTextCached,
+    prepTextCell,
+} from "../render/data-grid-lib.ts";
 import type { FullTheme } from "../theme.ts";
 import { pointInRect } from "../common/math.ts";
 import { GrowingEntry } from "../../-private/growing-entry.ts";
 import { createEditPencilIcon } from "../../-private/edit-icons.ts";
 
-function getTextRect(metrics: TextMetrics, rect: Rectangle, theme: FullTheme, contentAlign: BaseGridCell["contentAlign"]): Rectangle {
+function getTextRect(
+    metrics: TextMetrics,
+    rect: Rectangle,
+    theme: FullTheme,
+    contentAlign: BaseGridCell["contentAlign"]
+): Rectangle {
     let x = theme.cellHorizontalPadding;
     const y = rect.height / 2 - metrics.actualBoundingBoxAscent / 2;
     const width = metrics.width;
@@ -113,7 +124,8 @@ export const uriCellRenderer: InternalCellRenderer<UriCell> = {
         }
         return undefined;
     },
-    measure: (ctx, cell, theme) => ctx.measureText(cell.displayData ?? cell.data).width + theme.cellHorizontalPadding * 2,
+    measure: (ctx, cell, theme) =>
+        ctx.measureText(cell.displayData ?? cell.data).width + theme.cellHorizontalPadding * 2,
     // Deviation from source (`onDelete: c => ({...c, data: ""})`, `displayData` left stale): same
     // reasoning as `text-cell.ts`'s `onDelete` -- this port's `draw` above reads `cell.displayData
     // ?? cell.data`, so a cell with `displayData` set (a realistic case -- showing a friendly label
@@ -122,7 +134,9 @@ export const uriCellRenderer: InternalCellRenderer<UriCell> = {
     onDelete: c => ({ ...c, data: "", displayData: c.displayData === undefined ? undefined : "" }),
     provideEditor: () => p => buildUriEditor(p),
     onPaste: (toPaste, cell, details) =>
-        toPaste === cell.data ? undefined : { ...cell, data: toPaste, displayData: details.formattedString ?? cell.displayData },
+        toPaste === cell.data
+            ? undefined
+            : { ...cell, data: toPaste, displayData: details.formattedString ?? cell.displayData },
 };
 
 // Port of `UriOverlayEditor` (`internal/data-grid-overlay-editor/private/uri-overlay-editor.tsx`)

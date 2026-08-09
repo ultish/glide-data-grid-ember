@@ -12,7 +12,10 @@
 // DOM when swapping between preview/edit modes, so there is no update path to port.
 import { marked } from "marked";
 
-export function createMarkdownDiv(contents: string, createNode?: (content: string) => DocumentFragment): HTMLDivElement {
+export function createMarkdownDiv(
+    contents: string,
+    createNode?: (content: string) => DocumentFragment
+): HTMLDivElement {
     const container = document.createElement("div");
     // Source's `MarkdownContainer` (`markdown-container.tsx`), ported rule-for-rule as
     // `.gdg-markdown-div` in `components/glide-data-grid-editors.css`. That includes the three

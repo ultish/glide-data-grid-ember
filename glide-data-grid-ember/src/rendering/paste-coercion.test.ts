@@ -42,7 +42,11 @@ describe("pasteBufferToString", () => {
 
 describe("coercePasteCell — built-in kinds", () => {
     it("text takes the pasted string as both data and displayData", () => {
-        expect(coercePasteCell(textCell, buf("new"), noRenderer)).toEqual({ ...textCell, data: "new", displayData: "new" });
+        expect(coercePasteCell(textCell, buf("new"), noRenderer)).toEqual({
+            ...textCell,
+            data: "new",
+            displayData: "new",
+        });
     });
 
     it("number parses, keeping the pasted text as the display value", () => {

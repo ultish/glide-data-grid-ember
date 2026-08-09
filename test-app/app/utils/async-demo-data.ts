@@ -23,12 +23,40 @@ export interface EmployeeRecord {
 export const ASYNC_DEMO_ROWS = 100_000;
 
 const FIRST_NAMES = [
-    "Ada", "Grace", "Alan", "Katherine", "Margaret", "Radia", "Barbara", "Jean",
-    "Linus", "Dennis", "Ken", "Bjarne", "Guido", "Anders", "Yukihiro", "Rich",
+    "Ada",
+    "Grace",
+    "Alan",
+    "Katherine",
+    "Margaret",
+    "Radia",
+    "Barbara",
+    "Jean",
+    "Linus",
+    "Dennis",
+    "Ken",
+    "Bjarne",
+    "Guido",
+    "Anders",
+    "Yukihiro",
+    "Rich",
 ];
 const LAST_NAMES = [
-    "Lovelace", "Hopper", "Turing", "Johnson", "Hamilton", "Perlman", "Liskov", "Bartik",
-    "Torvalds", "Ritchie", "Thompson", "Stroustrup", "Rossum", "Hejlsberg", "Matsumoto", "Hickey",
+    "Lovelace",
+    "Hopper",
+    "Turing",
+    "Johnson",
+    "Hamilton",
+    "Perlman",
+    "Liskov",
+    "Bartik",
+    "Torvalds",
+    "Ritchie",
+    "Thompson",
+    "Stroustrup",
+    "Rossum",
+    "Hejlsberg",
+    "Matsumoto",
+    "Hickey",
 ];
 const TEAMS = ["Platform", "Growth", "Infra", "Design", "Data", "Support", "Security", "Mobile"];
 

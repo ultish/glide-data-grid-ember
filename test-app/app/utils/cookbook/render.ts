@@ -49,7 +49,7 @@ function getCellContent([col, row]) {
             items: [
                 "**`@rows` is a count, not data.** Nothing is materialised up front.",
                 "**`@getCellContent` receives `[column, row]`** — both zero-based, both in *your* coordinate space. Row markers, frozen columns and the trailing blank row are the grid's business; it never shifts your indices.",
-                "**The grid sizes itself to its container, and has no `width`/`height` args.** A container with no height renders a zero-height grid. This is the most common \"nothing appears\" cause.",
+                '**The grid sizes itself to its container, and has no `width`/`height` args.** A container with no height renders a zero-height grid. This is the most common "nothing appears" cause.',
                 "**The addon imports its own CSS.** There is no stylesheet to add and none to forget.",
             ],
         },

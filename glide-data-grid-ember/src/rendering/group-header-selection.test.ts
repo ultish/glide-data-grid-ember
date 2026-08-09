@@ -125,7 +125,11 @@ describe("computeGroupHeaderSelection", () => {
 
     test("columnSelectionMode 'multi' appends without any modifier key", () => {
         const res = computeGroupHeaderSelection(
-            baseInput({ col: 4, columnSelectionMode: "multi", selectedColumns: CompactSelection.fromSingleSelection([1, 4]) })
+            baseInput({
+                col: 4,
+                columnSelectionMode: "multi",
+                selectedColumns: CompactSelection.fromSingleSelection([1, 4]),
+            })
         );
         expect(res?.append).toEqual([4, 6]);
     });

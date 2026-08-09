@@ -22,7 +22,6 @@ class ImageWindowLoaderImpl extends WindowingTrackerBase implements ImageWindowL
         this.imageLoaded = imageLoaded;
     }
 
-    // eslint-disable-next-line unicorn/consistent-function-scoping
     private sendLoaded = throttle(() => {
         this.imageLoaded(new CellSet(this.loadedLocations));
         this.loadedLocations = [];
@@ -73,23 +72,25 @@ class ImageWindowLoaderImpl extends WindowingTrackerBase implements ImageWindowL
 
         const loadPromise = new Promise(r => img.addEventListener("load", () => r(null)));
         // use request animation time to avoid paying src set costs during draw calls
-        requestAnimationFrame(async () => {
-            try {
-                img.src = url;
-                await loadPromise;
-                await img.decode();
-                const toWrite = this.cache[key];
-                if (toWrite !== undefined && !canceled) {
-                    toWrite.img = img;
-                    for (const packed of toWrite.cells) {
-                        this.loadedLocations.push(unpackNumberToColRow(packed));
+        requestAnimationFrame(() => {
+            void (async () => {
+                try {
+                    img.src = url;
+                    await loadPromise;
+                    await img.decode();
+                    const toWrite = this.cache[key];
+                    if (toWrite !== undefined && !canceled) {
+                        toWrite.img = img;
+                        for (const packed of toWrite.cells) {
+                            this.loadedLocations.push(unpackNumberToColRow(packed));
+                        }
+                        loaded = true;
+                        this.sendLoaded();
                     }
-                    loaded = true;
-                    this.sendLoaded();
+                } catch {
+                    result.cancel();
                 }
-            } catch {
-                result.cancel();
-            }
+            })();
         });
         this.cache[key] = result;
     }

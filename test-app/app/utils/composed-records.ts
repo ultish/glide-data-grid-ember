@@ -142,7 +142,18 @@ export function applyStaffEdit(s: Staffer, col: number, value: GridCell): string
 const ROLES = ["Engineer", "Designer", "Analyst", "Manager", "Technician"];
 const TEAMS = ["Platform", "Growth", "Payments", "Insights", "Support"];
 const FIRST = ["Ada", "Grace", "Alan", "Katherine", "Linus", "Barbara", "Dennis", "Radia", "Ken", "Margaret"];
-const LAST = ["Lovelace", "Hopper", "Turing", "Johnson", "Torvalds", "Liskov", "Ritchie", "Perlman", "Thompson", "Hamilton"];
+const LAST = [
+    "Lovelace",
+    "Hopper",
+    "Turing",
+    "Johnson",
+    "Torvalds",
+    "Liskov",
+    "Ritchie",
+    "Perlman",
+    "Thompson",
+    "Hamilton",
+];
 
 /** A fresh, deterministic record set. Small on purpose — this demo is about coordinates, not scale. */
 export function buildStaff(): readonly Staffer[] {

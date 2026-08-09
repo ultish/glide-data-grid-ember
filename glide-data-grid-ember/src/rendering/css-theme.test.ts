@@ -9,7 +9,7 @@ import { describe, expect, test } from "vitest";
 import { themeOverlaysEqual } from "./css-theme.ts";
 import type { Theme } from "./theme.ts";
 
-const overlay = (o: Record<string, string>): Partial<Theme> => o as Partial<Theme>;
+const overlay = (o: Record<string, string>): Partial<Theme> => o;
 
 describe("themeOverlaysEqual", () => {
     test("two empty overlays are equal", () => {

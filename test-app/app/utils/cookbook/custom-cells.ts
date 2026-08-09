@@ -18,7 +18,10 @@ export const customCellsSection: Section = {
             kind: "p",
             text: "`allExtraCells` is a module-scope constant, which is the stable reference this arg wants. Import individual renderers instead if you only need a few.",
         },
-        { kind: "p", text: "**Writing your own.** A custom cell is a `GridCell` of kind `Custom` carrying whatever `data` you like, plus a `CustomRenderer` that claims it:" },
+        {
+            kind: "p",
+            text: "**Writing your own.** A custom cell is a `GridCell` of kind `Custom` carrying whatever `data` you like, plus a `CustomRenderer` that claims it:",
+        },
         {
             kind: "code",
             text: `import { GridCellKind } from "glide-data-grid-ember/rendering/index";

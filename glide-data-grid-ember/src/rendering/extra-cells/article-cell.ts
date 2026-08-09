@@ -125,7 +125,11 @@ export const articleCellRenderer: CustomRenderer<ArticleCell> = {
         }
 
         ctx.fillStyle = theme.textDark;
-        ctx.fillText(data, rect.x + theme.cellHorizontalPadding, rect.y + rect.height / 2 + getMiddleCenterBias(ctx, theme));
+        ctx.fillText(
+            data,
+            rect.x + theme.cellHorizontalPadding,
+            rect.y + rect.height / 2 + getMiddleCenterBias(ctx, theme)
+        );
     },
     provideEditor: () => ({
         editor: buildArticleEditor,

@@ -171,7 +171,7 @@ class PersonRow {
         // -- evidence --------------------------------------------------------------------------------
         {
             kind: "p",
-            text: "**Measured, not asserted.** The claim that one edit re-projects one row was measured in Chrome against the built addon, at 1,000 rows and 7 columns, by a projection that increments a counter on every call — so \"rows re-projected since the last action\" is a number on screen rather than an inference. It runs in the **Tracking proof demo** tab, in the *Scale proof* panel below the small table.",
+            text: '**Measured, not asserted.** The claim that one edit re-projects one row was measured in Chrome against the built addon, at 1,000 rows and 7 columns, by a projection that increments a counter on every call — so "rows re-projected since the last action" is a number on screen rather than an inference. It runs in the **Tracking proof demo** tab, in the *Scale proof* panel below the small table.',
         },
         {
             kind: "table",

@@ -20,7 +20,7 @@
 // Holds `@tracked columns` so resize/reorder round-trip visually -- `GridHostController` never
 // mutates column state itself (documented "consumer owns the data" contract in
 // `grid-host-controller.ts`), so a real consumer needs exactly this kind of tracked-state +
-// handler wiring to make resize/reorder actually stick. `ember-route-template`'s `Route(<template>)`
+// handler wiring to make resize/reorder actually stick. The route-template pattern
 // pattern (used in `application.gts`) has no backing class, hence this separate component.
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
@@ -833,7 +833,9 @@ export default class DemoGrid extends Component {
         this.selectedColumn = current === undefined ? undefined : current.cell[0];
         if (current !== undefined) {
             const r = current.range;
-            parts.push(r.width * r.height === 1 ? `cell ${r.x},${r.y}` : `range ${r.width}x${r.height} at ${r.x},${r.y}`);
+            parts.push(
+                r.width * r.height === 1 ? `cell ${r.x},${r.y}` : `range ${r.width}x${r.height} at ${r.x},${r.y}`
+            );
         }
         if (selection.rows.length > 0) parts.push(`${selection.rows.length} row(s)`);
         if (selection.columns.length > 0) parts.push(`${selection.columns.length} col(s)`);
@@ -966,76 +968,214 @@ export default class DemoGrid extends Component {
                 regression in any of these args visible without reading code. }}
             <div class="gdg-full__controls">
                 <button type="button" class="gdg-full__toggle" data-test-theme-toggle {{on "click" this.toggleTheme}}>
-                    Theme: <b>{{if this.isDark "dark" "light"}}</b>
+                    Theme:
+                    <b>{{if this.isDark "dark" "light"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-row-markers-toggle {{on "click" this.cycleRowMarkers}}>
-                    Row markers: <b>{{this.rowMarkers}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-row-markers-toggle
+                    {{on "click" this.cycleRowMarkers}}
+                >
+                    Row markers:
+                    <b>{{this.rowMarkers}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-range-select-toggle {{on "click" this.cycleRangeSelect}}>
-                    Range select: <b>{{this.rangeSelect}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-range-select-toggle
+                    {{on "click" this.cycleRangeSelect}}
+                >
+                    Range select:
+                    <b>{{this.rangeSelect}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-freeze-toggle {{on "click" this.toggleFreezeColumns}}>
-                    Frozen columns: <b>{{this.freezeColumns}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-freeze-toggle
+                    {{on "click" this.toggleFreezeColumns}}
+                >
+                    Frozen columns:
+                    <b>{{this.freezeColumns}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-fill-handle-toggle {{on "click" this.toggleFillHandle}}>
-                    Fill handle: <b>{{if this.useFillHandle "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-fill-handle-toggle
+                    {{on "click" this.toggleFillHandle}}
+                >
+                    Fill handle:
+                    <b>{{if this.useFillHandle "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-fill-direction-toggle {{on "click" this.cycleFillDirection}}>
-                    Fill axis: <b>{{this.allowedFillDirections}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-fill-direction-toggle
+                    {{on "click" this.cycleFillDirection}}
+                >
+                    Fill axis:
+                    <b>{{this.allowedFillDirections}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-draw-hooks-toggle {{on "click" this.toggleDrawHooks}}>
-                    Draw hooks: <b>{{if this.showDrawHooks "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-draw-hooks-toggle
+                    {{on "click" this.toggleDrawHooks}}
+                >
+                    Draw hooks:
+                    <b>{{if this.showDrawHooks "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-suppress-group-select-toggle {{on "click" this.toggleSuppressGroupHeaderSelect}}>
-                    Suppress group select: <b>{{if this.suppressGroupHeaderSelect "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-suppress-group-select-toggle
+                    {{on "click" this.toggleSuppressGroupHeaderSelect}}
+                >
+                    Suppress group select:
+                    <b>{{if this.suppressGroupHeaderSelect "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
-                    App-owned search: <b>{{if this.useExternalSearch "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-external-search-toggle
+                    {{on "click" this.toggleExternalSearch}}
+                >
+                    App-owned search:
+                    <b>{{if this.useExternalSearch "on" "off"}}</b>
                 </button>
                 {{! Phase 9g. }}
-                <button type="button" class="gdg-full__toggle" data-test-selection-blending-toggle {{on "click" this.cycleSelectionBlending}}>
-                    Selection blending: <b>{{this.selectionBlending}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-selection-blending-toggle
+                    {{on "click" this.cycleSelectionBlending}}
+                >
+                    Selection blending:
+                    <b>{{this.selectionBlending}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-selection-mode-toggle {{on "click" this.toggleSelectionMode}}>
-                    Selection mode: <b>{{this.selectionMode}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-selection-mode-toggle
+                    {{on "click" this.toggleSelectionMode}}
+                >
+                    Selection mode:
+                    <b>{{this.selectionMode}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-edit-on-type-toggle {{on "click" this.toggleEditOnType}}>
-                    Edit on type: <b>{{if this.editOnType "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-edit-on-type-toggle
+                    {{on "click" this.toggleEditOnType}}
+                >
+                    Edit on type:
+                    <b>{{if this.editOnType "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-trap-focus-toggle {{on "click" this.toggleTrapFocus}}>
-                    Trap focus: <b>{{if this.trapFocus "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-trap-focus-toggle
+                    {{on "click" this.toggleTrapFocus}}
+                >
+                    Trap focus:
+                    <b>{{if this.trapFocus "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-focus-ring-toggle {{on "click" this.cycleFocusRing}}>
-                    Focus ring: <b>{{this.focusRingLabel}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-focus-ring-toggle
+                    {{on "click" this.cycleFocusRing}}
+                >
+                    Focus ring:
+                    <b>{{this.focusRingLabel}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-validate-toggle {{on "click" this.toggleValidation}}>
-                    Validate edits: <b>{{if this.useValidation "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-validate-toggle
+                    {{on "click" this.toggleValidation}}
+                >
+                    Validate edits:
+                    <b>{{if this.useValidation "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-coerce-paste-toggle {{on "click" this.toggleCoercion}}>
-                    Coerce paste: <b>{{if this.useCoercion "UPPER" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-coerce-paste-toggle
+                    {{on "click" this.toggleCoercion}}
+                >
+                    Coerce paste:
+                    <b>{{if this.useCoercion "UPPER" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-copy-headers-toggle {{on "click" this.toggleCopyHeaders}}>
-                    Copy headers: <b>{{if this.copyHeaders "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-copy-headers-toggle
+                    {{on "click" this.toggleCopyHeaders}}
+                >
+                    Copy headers:
+                    <b>{{if this.copyHeaders "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-delete-mode-toggle {{on "click" this.cycleDeleteMode}}>
-                    Delete: <b>{{this.deleteMode}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-delete-mode-toggle
+                    {{on "click" this.cycleDeleteMode}}
+                >
+                    Delete:
+                    <b>{{this.deleteMode}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-activation-behavior-toggle {{on "click" this.cycleActivationBehavior}}>
-                    Activate on: <b>{{this.cellActivationBehavior}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-activation-behavior-toggle
+                    {{on "click" this.cycleActivationBehavior}}
+                >
+                    Activate on:
+                    <b>{{this.cellActivationBehavior}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-row-marker-start-toggle {{on "click" this.toggleRowMarkerStart}}>
-                    Row numbers from: <b>{{this.rowMarkerStartIndex}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-row-marker-start-toggle
+                    {{on "click" this.toggleRowMarkerStart}}
+                >
+                    Row numbers from:
+                    <b>{{this.rowMarkerStartIndex}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-row-marker-theme-toggle {{on "click" this.toggleRowMarkerTheme}}>
-                    Marker theme: <b>{{if this.useRowMarkerTheme "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-row-marker-theme-toggle
+                    {{on "click" this.toggleRowMarkerTheme}}
+                >
+                    Marker theme:
+                    <b>{{if this.useRowMarkerTheme "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-trailing-tint-toggle {{on "click" this.toggleTrailingRowTint}}>
-                    Trailing row: <b>{{if this.tintTrailingRow "tinted + icon" "plain"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-trailing-tint-toggle
+                    {{on "click" this.toggleTrailingRowTint}}
+                >
+                    Trailing row:
+                    <b>{{if this.tintTrailingRow "tinted + icon" "plain"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-scale-to-rem-toggle {{on "click" this.toggleScaleToRem}}>
-                    Scale to rem: <b>{{if this.scaleToRem "on" "off"}}</b>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-scale-to-rem-toggle
+                    {{on "click" this.toggleScaleToRem}}
+                >
+                    Scale to rem:
+                    <b>{{if this.scaleToRem "on" "off"}}</b>
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-scroll-offset {{on "click" this.scrollToRow50}}>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-scroll-offset
+                    {{on "click" this.scrollToRow50}}
+                >
                     Scroll to row 50
                 </button>
             </div>
@@ -1050,22 +1190,42 @@ export default class DemoGrid extends Component {
                 <button type="button" class="gdg-full__toggle" data-test-api-scroll-to {{on "click" this.apiScrollTo}}>
                     scrollTo(8, 500) centred
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-api-get-bounds {{on "click" this.apiGetBounds}}>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-api-get-bounds
+                    {{on "click" this.apiGetBounds}}
+                >
                     getBounds()
                 </button>
                 <button type="button" class="gdg-full__toggle" data-test-api-remeasure {{on "click" this.apiRemeasure}}>
                     remeasureColumns(0-4)
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-api-append-row {{on "click" this.apiAppendRow}}>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-api-append-row
+                    {{on "click" this.apiAppendRow}}
+                >
                     appendRow(1)
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-api-append-column {{on "click" this.apiAppendColumn}}>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-api-append-column
+                    {{on "click" this.apiAppendColumn}}
+                >
                     appendColumn(0)
                 </button>
                 <button type="button" class="gdg-full__toggle" data-test-api-hit-test {{on "click" this.apiHitTest}}>
                     getMouseArgsForPosition(centre)
                 </button>
-                <button type="button" class="gdg-full__toggle" data-test-api-emit-delete {{on "click" this.apiEmitDelete}}>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-api-emit-delete
+                    {{on "click" this.apiEmitDelete}}
+                >
                     emit('delete')
                 </button>
             </div>
@@ -1079,14 +1239,16 @@ export default class DemoGrid extends Component {
                 {{! Phase 9g: an edit that is silently refused is indistinguishable from a broken
                     grid, so every guard decision is reported. }}
                 {{#if this.lastGuard}}<span>Guard: <b data-test-last-guard>{{this.lastGuard}}</b></span>{{/if}}
-                {{#if this.lastApiResult}}<span>API: <b data-test-last-api-result>{{this.lastApiResult}}</b></span>{{/if}}
+                {{#if this.lastApiResult}}<span>API:
+                        <b data-test-last-api-result>{{this.lastApiResult}}</b></span>{{/if}}
                 <span>Click: <b data-test-last-click>{{this.lastClick}}</b></span>
                 <span>Activated: <b data-test-last-activation>{{this.lastActivation}}</b></span>
                 <span>Edit end: <b data-test-last-edit-finish>{{this.lastEditFinish}}</b></span>
                 {{! Cell-carried callbacks (button / uri / links) have no other way to be seen. }}
                 <span class="gdg-full__hint">
-                    Drag a row by its marker to reorder &middot; drag the selection's corner handle to fill
-                    &middot; right-click a cell, header or group header &middot; {{if this.isMac "Cmd" "Ctrl"}}+F to search
+                    Drag a row by its marker to reorder &middot; drag the selection's corner handle to fill &middot;
+                    right-click a cell, header or group header &middot;
+                    {{if this.isMac "Cmd" "Ctrl"}}+F to search
                 </span>
             </div>
 
@@ -1126,10 +1288,7 @@ export default class DemoGrid extends Component {
             {{#if this.useExternalSearch}}
                 {{! UI #2: an ordinary app-owned input, outside the grid entirely. Note there is no
                     addon component here at all -- just `setSearchValue` and the state snapshot. }}
-                <div
-                    style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px;"
-                    data-test-external-search
-                >
+                <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px;" data-test-external-search>
                     <label for="external-search">Search (app-owned input):</label>
                     <input
                         id="external-search"
@@ -1139,10 +1298,20 @@ export default class DemoGrid extends Component {
                         style="width: 260px;"
                         {{on "input" this.handleExternalSearchInput}}
                     />
-                    <button type="button" disabled={{unless this.hasSearchResults "disabled"}} {{on "click" this.searchPrev}}>
+                    <button
+                        class="btn btn-xs"
+                        type="button"
+                        disabled={{unless this.hasSearchResults "disabled"}}
+                        {{on "click" this.searchPrev}}
+                    >
                         Prev
                     </button>
-                    <button type="button" disabled={{unless this.hasSearchResults "disabled"}} {{on "click" this.searchNext}}>
+                    <button
+                        class="btn btn-xs"
+                        type="button"
+                        disabled={{unless this.hasSearchResults "disabled"}}
+                        {{on "click" this.searchNext}}
+                    >
                         Next
                     </button>
                     <span data-test-external-search-status>{{this.searchStatusText}}</span>
@@ -1229,12 +1398,7 @@ export default class DemoGrid extends Component {
                 {{#if this.headerMenu}}
                     {{! `bounds` is grid-root-relative, and this div is a child of the grid's own
                         (positioned) container -- so the coordinates need no translation. }}
-                    <div
-                        class="gdg-demo-sort-menu"
-                        role="menu"
-                        data-test-header-menu
-                        style={{this.headerMenuStyle}}
-                    >
+                    <div class="gdg-demo-sort-menu" role="menu" data-test-header-menu style={{this.headerMenuStyle}}>
                         <div class="gdg-demo-sort-menu__title">Column {{this.headerMenu.col}}</div>
                         <button type="button" class="gdg-demo-sort-menu__item" {{on "click" this.closeHeaderMenu}}>
                             Close
@@ -1245,12 +1409,7 @@ export default class DemoGrid extends Component {
 
             {{#if this.contextMenu}}
                 {{! Consumer-owned chrome, positioned from the event's viewport coordinates. }}
-                <div
-                    class="gdg-demo-sort-menu"
-                    role="menu"
-                    data-test-context-menu
-                    style={{this.contextMenuStyle}}
-                >
+                <div class="gdg-demo-sort-menu" role="menu" data-test-context-menu style={{this.contextMenuStyle}}>
                     <div class="gdg-demo-sort-menu__title">{{this.contextMenu.label}}</div>
                     <button
                         type="button"

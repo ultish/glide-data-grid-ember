@@ -12,7 +12,14 @@
 // byte-identical output on every reload.
 //
 // Column widths are fitted to their content for the same reason. If you add a column, size it.
-import { GridCellKind, type CustomCell, type GridCell, type GridColumn, type Item, type Theme } from "glide-data-grid-ember/rendering/index";
+import {
+    GridCellKind,
+    type CustomCell,
+    type GridCell,
+    type GridColumn,
+    type Item,
+    type Theme,
+} from "glide-data-grid-ember/rendering/index";
 import {
     FIRST_NAMES,
     LAST_NAMES,
@@ -135,10 +142,35 @@ const TYPED_COLUMNS: readonly { title: string; width: number; icon: string }[] =
 // Everything past the typed columns is ordinary text, but with plausible headings and values --
 // 29 columns of `R7C34` was the single biggest reason this demo read as placeholder art.
 const FILLER_COLUMNS = [
-    "Region", "Team", "Cost centre", "Office", "Timezone", "Manager", "Department", "Contract",
-    "Seniority", "Locale", "Badge", "Desk", "Shift", "Cohort", "Program", "Segment", "Channel",
-    "Tier", "Vendor", "Account", "Category", "Stage", "Priority", "Source", "Owner group",
-    "Workstream", "Portfolio", "Initiative", "Milestone",
+    "Region",
+    "Team",
+    "Cost centre",
+    "Office",
+    "Timezone",
+    "Manager",
+    "Department",
+    "Contract",
+    "Seniority",
+    "Locale",
+    "Badge",
+    "Desk",
+    "Shift",
+    "Cohort",
+    "Program",
+    "Segment",
+    "Channel",
+    "Tier",
+    "Vendor",
+    "Account",
+    "Category",
+    "Stage",
+    "Priority",
+    "Source",
+    "Owner group",
+    "Workstream",
+    "Portfolio",
+    "Initiative",
+    "Milestone",
 ] as const;
 
 export const demoColumns: readonly GridColumn[] = Array.from({ length: DEMO_COLUMN_COUNT }, (_, i) => {
@@ -265,10 +297,42 @@ const FILE_NAMES = ["Contracts", "Onboarding", "Reviews", "Payroll", "Equipment"
 // `salt` in `pickFrom` already keeps neighbouring columns from moving together, and the point is
 // that the table reads as data, not that every column is semantically correct.
 const FILLER_VALUES = [
-    "EMEA", "AMER", "APAC", "Platform", "Growth", "Core", "Research", "London", "Berlin", "Toronto",
-    "Sydney", "UTC+0", "UTC+1", "UTC-5", "UTC+10", "Permanent", "Contract", "Intern", "Tier 1",
-    "Tier 2", "Tier 3", "Active", "On hold", "Renewing", "Q1", "Q2", "Q3", "Q4", "Approved",
-    "Pending", "Draft", "Archived", "Internal", "Partner", "Direct", "Referral",
+    "EMEA",
+    "AMER",
+    "APAC",
+    "Platform",
+    "Growth",
+    "Core",
+    "Research",
+    "London",
+    "Berlin",
+    "Toronto",
+    "Sydney",
+    "UTC+0",
+    "UTC+1",
+    "UTC-5",
+    "UTC+10",
+    "Permanent",
+    "Contract",
+    "Intern",
+    "Tier 1",
+    "Tier 2",
+    "Tier 3",
+    "Active",
+    "On hold",
+    "Renewing",
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Approved",
+    "Pending",
+    "Draft",
+    "Archived",
+    "Internal",
+    "Partner",
+    "Direct",
+    "Referral",
 ] as const;
 
 // Phase 4a: varies cell kind by column so text/number/boolean/row-id editing can all be exercised
@@ -530,9 +594,17 @@ export function demoGetCellContent(item: Item): GridCell {
         const isDateTime = fieldHash(row, 24) % 2 === 1;
         const dayOfYear = fieldHash(row, 25) % 365;
         const date = new Date(
-            Date.UTC(2024, 0, 1 + dayOfYear, isDateTime ? fieldHash(row, 26) % 24 : 0, isDateTime ? fieldHash(row, 27) % 60 : 0)
+            Date.UTC(
+                2024,
+                0,
+                1 + dayOfYear,
+                isDateTime ? fieldHash(row, 26) % 24 : 0,
+                isDateTime ? fieldHash(row, 27) % 60 : 0
+            )
         );
-        const displayDate = isDateTime ? date.toISOString().slice(0, 16).replace("T", " ") : date.toISOString().slice(0, 10);
+        const displayDate = isDateTime
+            ? date.toISOString().slice(0, 16).replace("T", " ")
+            : date.toISOString().slice(0, 10);
         return {
             kind: GridCellKind.Custom,
             allowOverlay: true,
@@ -598,7 +670,9 @@ export function demoGetCellContent(item: Item): GridCell {
                 // over 200,000 rows, which a real collapse would have to break.
                 onClickOpener: (cell: CustomCell<{ kind: "tree-view-cell"; isOpen: boolean }>) => {
                     const nowOpen = !cell.data.isOpen;
-                    reportActivity(`${nowOpen ? "Expanded" : "Collapsed"} "${text}" (row ${row}) -- isOpen only, no rows hidden`);
+                    reportActivity(
+                        `${nowOpen ? "Expanded" : "Collapsed"} "${text}" (row ${row}) -- isOpen only, no rows hidden`
+                    );
                     return { ...cell, data: { ...cell.data, isOpen: nowOpen } };
                 },
             },
@@ -671,7 +745,7 @@ export function normalizeEditedCell(cell: GridCell): GridCell {
             ...cell,
             copyData: String(data.value),
             data: { ...data, label: `${data.value}%` },
-        } as GridCell;
+        };
     }
     return cell;
 }

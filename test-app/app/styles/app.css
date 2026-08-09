@@ -2,51 +2,54 @@
    The addon deliberately ships no menu UI -- it only fires `onHeaderMenuClick(col, bounds)` -- so
    this is consumer-side chrome, positioned against those canvas-space bounds. */
 .gdg-demo-sort-menu {
-  position: absolute;
-  z-index: 21;
-  padding: 4px;
-  font: 13px system-ui, -apple-system, sans-serif;
-  color: #313139;
-  background: #fff;
-  border: 1px solid #e1e2e5;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgb(24 25 34 / 18%);
+    position: absolute;
+    z-index: 21;
+    padding: 4px;
+    font:
+        13px system-ui,
+        -apple-system,
+        sans-serif;
+    color: #313139;
+    background: #fff;
+    border: 1px solid #e1e2e5;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgb(24 25 34 / 18%);
 }
 
 .gdg-demo-sort-menu__title {
-  padding: 4px 8px 6px;
-  overflow: hidden;
-  font-size: 11px;
-  font-weight: 600;
-  color: #97979d;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
+    padding: 4px 8px 6px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 600;
+    color: #97979d;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .gdg-demo-sort-menu__item {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  width: 100%;
-  padding: 6px 8px;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  background: none;
-  border: 0;
-  border-radius: 4px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    padding: 6px 8px;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    border-radius: 4px;
 }
 
 .gdg-demo-sort-menu__item:hover {
-  background: #f1f2f6;
+    background: #f1f2f6;
 }
 
 .gdg-demo-sort-menu__check {
-  display: inline-block;
-  width: 12px;
-  color: #4f5dff;
+    display: inline-block;
+    width: 12px;
+    color: #4f5dff;
 }
 
 /* Phase 8: the streaming / high-frequency update demo
@@ -65,344 +68,353 @@
    deliberately, so this demo keeps landing on a fractional height and stays the regression surface
    for that defect. If the grid ever goes black here again, that is what broke. */
 .gdg-streaming {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-  font: 13px system-ui, -apple-system, sans-serif;
-  color: #313139;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    font:
+        13px system-ui,
+        -apple-system,
+        sans-serif;
+    color: #313139;
 }
 
 .gdg-streaming__controls {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 10px;
-  align-items: center;
+    display: flex;
+    flex: 0 0 auto;
+    gap: 10px;
+    align-items: center;
 }
 
 .gdg-streaming__primary {
-  min-width: 108px;
-  padding: 5px 12px;
-  font: inherit;
-  font-weight: 600;
-  color: #fff;
-  cursor: pointer;
-  background: #4f5dff;
-  border: 0;
-  border-radius: 5px;
+    min-width: 108px;
+    padding: 5px 12px;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    background: #4f5dff;
+    border: 0;
+    border-radius: 5px;
 }
 
 .gdg-streaming__group {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
 }
 
 .gdg-streaming__group-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #97979d;
-  text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
+    color: #97979d;
+    text-transform: uppercase;
 }
 
 .gdg-streaming__rate {
-  padding: 4px 9px;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  background: #fff;
-  border: 1px solid #e1e2e5;
-  border-radius: 5px;
+    padding: 4px 9px;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #e1e2e5;
+    border-radius: 5px;
 }
 
 .gdg-streaming__rate.is-active {
-  color: #fff;
-  background: #313139;
-  border-color: #313139;
+    color: #fff;
+    background: #313139;
+    border-color: #313139;
 }
 
 .gdg-streaming__checkbox {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
+    display: inline-flex;
+    gap: 5px;
+    align-items: center;
 }
 
 .gdg-streaming__note {
-  font-size: 12px;
-  color: #97979d;
+    font-size: 12px;
+    color: #97979d;
 }
 
 .gdg-streaming__stats {
-  display: flex;
-  flex: 0 0 auto;
-  min-height: 0;
-  gap: 8px;
+    display: flex;
+    flex: 0 0 auto;
+    min-height: 0;
+    gap: 8px;
 }
 
 .gdg-streaming__stat {
-  display: flex;
-  flex: 1 1 150px;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 10px;
-  background: #f7f7fa;
-  border: 1px solid #e1e2e5;
-  border-radius: 6px;
+    display: flex;
+    flex: 1 1 150px;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 10px;
+    background: #f7f7fa;
+    border: 1px solid #e1e2e5;
+    border-radius: 6px;
 }
 
 .gdg-streaming__stat-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: #97979d;
-  text-transform: uppercase;
+    font-size: 10px;
+    font-weight: 600;
+    color: #97979d;
+    text-transform: uppercase;
 }
 
 .gdg-streaming__stat-value {
-  font-family: ui-monospace, "SF Mono", menlo, monospace;
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+    font-family: ui-monospace, "SF Mono", menlo, monospace;
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
 }
 
 .gdg-streaming__stat-sub {
-  font-size: 11px;
-  color: #97979d;
+    font-size: 11px;
+    color: #97979d;
 }
 
 .gdg-streaming__grid {
-  flex: 1 1 auto;
-  min-height: 0;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 /* Phase 10a: the fully-featured reference grid (`app/components/demo-grid.gts`). The toggle row is
    part of that demo's deliverable -- every mutually-exclusive `<GlideDataGrid>` arg is switched
    here, so a regression in any of them is visible without reading code. */
 .gdg-full {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-  font: 13px system-ui, -apple-system, sans-serif;
-  color: #313139;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    font:
+        13px system-ui,
+        -apple-system,
+        sans-serif;
+    color: #313139;
 }
 
 .gdg-full__controls {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
 }
 
 .gdg-full__toggle {
-  padding: 4px 9px;
-  font: inherit;
-  color: inherit;
-  white-space: nowrap;
-  cursor: pointer;
-  background: #fff;
-  border: 1px solid #e1e2e5;
-  border-radius: 5px;
+    padding: 4px 9px;
+    font: inherit;
+    color: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #e1e2e5;
+    border-radius: 5px;
 }
 
 .gdg-full__toggle:hover {
-  background: #f1f2f6;
+    background: #f1f2f6;
 }
 
 .gdg-full__toggle b {
-  font-variant-numeric: tabular-nums;
-  color: #4f5dff;
+    font-variant-numeric: tabular-nums;
+    color: #4f5dff;
 }
 
 .gdg-full__status {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 14px;
-  align-items: baseline;
-  font-size: 12px;
-  color: #97979d;
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: baseline;
+    font-size: 12px;
+    color: #97979d;
 }
 
 .gdg-full__status b {
-  font-family: ui-monospace, "SF Mono", menlo, monospace;
-  font-weight: 500;
-  color: #313139;
+    font-family: ui-monospace, "SF Mono", menlo, monospace;
+    font-weight: 500;
+    color: #313139;
 }
 
 .gdg-full__hint {
-  margin-left: auto;
+    margin-left: auto;
 }
 
 /* Positioning context for the header menu, which is placed from grid-root-relative bounds. */
 .gdg-full__grid {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 /* Phase 10b: the cookbook page (`app/components/cookbook-page.gts`). Deliberately plain, readable
    documentation styling -- this is the page a consumer lands on, so it should read like docs rather
    than like a demo harness. Scrolls independently of the tab strip above it. */
 .gdg-cookbook {
-  display: flex;
-  gap: 28px;
-  height: 100%;
-  min-height: 0;
-  font: 14px/1.6 system-ui, -apple-system, sans-serif;
-  color: #313139;
+    display: flex;
+    gap: 28px;
+    height: 100%;
+    min-height: 0;
+    font:
+        14px/1.6 system-ui,
+        -apple-system,
+        sans-serif;
+    color: #313139;
 }
 
 .gdg-cookbook__toc {
-  display: flex;
-  flex: 0 0 208px;
-  flex-direction: column;
-  gap: 2px;
-  padding-right: 16px;
-  overflow-y: auto;
-  border-right: 1px solid #e1e2e5;
+    display: flex;
+    flex: 0 0 208px;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 16px;
+    overflow-y: auto;
+    border-right: 1px solid #e1e2e5;
 }
 
 .gdg-cookbook__toc-title {
-  padding-bottom: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #97979d;
-  text-transform: uppercase;
+    padding-bottom: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #97979d;
+    text-transform: uppercase;
 }
 
 .gdg-cookbook__toc a {
-  padding: 3px 6px;
-  font-size: 13px;
-  color: #313139;
-  text-decoration: none;
-  border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 13px;
+    color: #313139;
+    text-decoration: none;
+    border-radius: 4px;
 }
 
 .gdg-cookbook__toc a:hover {
-  background: #f1f2f6;
+    background: #f1f2f6;
 }
 
 .gdg-cookbook__toc-note {
-  padding: 10px 6px 0;
-  margin-top: 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #97979d;
-  border-top: 1px solid #e1e2e5;
+    padding: 10px 6px 0;
+    margin-top: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #97979d;
+    border-top: 1px solid #e1e2e5;
 }
 
 .gdg-cookbook__body {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 860px;
-  padding-right: 24px;
-  padding-bottom: 64px;
-  overflow-y: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 860px;
+    padding-right: 24px;
+    padding-bottom: 64px;
+    overflow-y: auto;
 }
 
 .gdg-cookbook__intro h1 {
-  margin: 0 0 6px;
-  font-size: 24px;
-  font-weight: 650;
+    margin: 0 0 6px;
+    font-size: 24px;
+    font-weight: 650;
 }
 
 .gdg-cookbook__intro p {
-  margin: 0;
-  color: #63636b;
+    margin: 0;
+    color: #63636b;
 }
 
 .gdg-cookbook__section {
-  padding-top: 28px;
-  margin-top: 20px;
-  border-top: 1px solid #ececf0;
-  scroll-margin-top: 12px;
+    padding-top: 28px;
+    margin-top: 20px;
+    border-top: 1px solid #ececf0;
+    scroll-margin-top: 12px;
 }
 
 .gdg-cookbook__section h2 {
-  margin: 0 0 12px;
-  font-size: 17px;
-  font-weight: 650;
+    margin: 0 0 12px;
+    font-size: 17px;
+    font-weight: 650;
 }
 
 .gdg-cookbook__section p {
-  margin: 0 0 12px;
+    margin: 0 0 12px;
 }
 
 .gdg-cookbook__section ul {
-  padding-left: 22px;
-  margin: 0 0 12px;
-  /* Explicit because Tailwind's preflight resets `list-style` on every `ul`. */
-  list-style: disc outside;
+    padding-left: 22px;
+    margin: 0 0 12px;
+    /* Explicit because Tailwind's preflight resets `list-style` on every `ul`. */
+    list-style: disc outside;
 }
 
 .gdg-cookbook__section li {
-  margin-bottom: 5px;
+    margin-bottom: 5px;
 }
 
 .gdg-cookbook code {
-  padding: 1px 4px;
-  font-family: ui-monospace, "SF Mono", menlo, monospace;
-  font-size: 0.88em;
-  background: #f1f2f6;
-  border-radius: 3px;
+    padding: 1px 4px;
+    font-family: ui-monospace, "SF Mono", menlo, monospace;
+    font-size: 0.88em;
+    background: #f1f2f6;
+    border-radius: 3px;
 }
 
 .gdg-cookbook__code {
-  padding: 12px 14px;
-  margin: 0 0 14px;
-  overflow-x: auto;
-  font-size: 12.5px;
-  line-height: 1.55;
-  background: #f7f7fa;
-  border: 1px solid #e8e8ee;
-  border-radius: 7px;
+    padding: 12px 14px;
+    margin: 0 0 14px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.55;
+    background: #f7f7fa;
+    border: 1px solid #e8e8ee;
+    border-radius: 7px;
 }
 
 .gdg-cookbook__code code {
-  padding: 0;
-  font-size: inherit;
-  background: none;
+    padding: 0;
+    font-size: inherit;
+    background: none;
 }
 
 .gdg-cookbook__note {
-  padding: 10px 14px;
-  margin: 0 0 14px !important;
-  background: #fff8e6;
-  border-left: 3px solid #f0a202;
-  border-radius: 0 6px 6px 0;
+    padding: 10px 14px;
+    margin: 0 0 14px !important;
+    background: #fff8e6;
+    border-left: 3px solid #f0a202;
+    border-radius: 0 6px 6px 0;
 }
 
 .gdg-cookbook__table {
-  width: 100%;
-  margin: 0 0 14px;
-  font-size: 13px;
-  border-collapse: collapse;
+    width: 100%;
+    margin: 0 0 14px;
+    font-size: 13px;
+    border-collapse: collapse;
 }
 
 .gdg-cookbook__table th,
 .gdg-cookbook__table td {
-  padding: 6px 10px;
-  text-align: left;
-  border-bottom: 1px solid #ececf0;
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 1px solid #ececf0;
 }
 
 .gdg-cookbook__table th {
-  font-size: 11px;
-  color: #97979d;
-  text-transform: uppercase;
+    font-size: 11px;
+    color: #97979d;
+    text-transform: uppercase;
 }
 
 /* The live grid embedded in recipe 1. Fixed height on purpose: the grid sizes to its container,
    which is the very thing that recipe is making a point of. */
 .gdg-cookbook__live {
-  height: 220px;
-  margin: 0 0 6px;
-  border: 1px solid #e1e2e5;
-  border-radius: 7px;
+    height: 220px;
+    margin: 0 0 6px;
+    border: 1px solid #e1e2e5;
+    border-radius: 7px;
 }
 
 .gdg-cookbook__caption {
-  font-size: 12px;
-  color: #97979d;
+    font-size: 12px;
+    color: #97979d;
 }

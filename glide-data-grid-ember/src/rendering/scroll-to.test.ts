@@ -144,14 +144,14 @@ describe("dir, and the frozen-target guards", () => {
 
 describe("trailing frozen rows (threaded through, unused until freezeTrailingRows lands)", () => {
     test("a bottom inset shrinks the window from below", () => {
-        const d = computeScrollDelta(
-            viewport({ x: 300, y: 540, width: 150, height: 34 }, { trailingRowHeight: 100 })
-        );
+        const d = computeScrollDelta(viewport({ x: 300, y: 540, width: 150, height: 34 }, { trailingRowHeight: 100 }));
         // Window bottom is 600 - 100 = 500; cell ends at 574, so scroll down 74.
         expect(d.y).toBe(74);
     });
 
     test("omitting it is the same as zero", () => {
-        expect(computeScrollDelta(viewport(CELL, { trailingRowHeight: 0 }))).toEqual(computeScrollDelta(viewport(CELL)));
+        expect(computeScrollDelta(viewport(CELL, { trailingRowHeight: 0 }))).toEqual(
+            computeScrollDelta(viewport(CELL))
+        );
     });
 });

@@ -25,12 +25,7 @@ import { tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import GlideDataGrid, { type GlideDataGridApi } from "glide-data-grid-ember/components/glide-data-grid";
 import { AsyncRecordsSource } from "glide-data-grid-ember/data-source/index";
-import {
-    GridCellKind,
-    getCellRenderer,
-    type GridCell,
-    type GridColumn,
-} from "glide-data-grid-ember/rendering/index";
+import { GridCellKind, getCellRenderer, type GridCell, type GridColumn } from "glide-data-grid-ember/rendering/index";
 import { ASYNC_DEMO_ROWS, fetchPage, type EmployeeRecord } from "test-app/utils/async-demo-data";
 
 // Module scope: every one of these is handed to `<GlideDataGrid>` and must be identity-stable, or
@@ -175,8 +170,8 @@ export default class AsyncDemo extends Component {
                 <strong>{{ASYNC_DEMO_ROWS}}</strong>
                 rows that are not in memory. Scroll: pages of
                 {{PAGE_SIZE}}
-                load on demand, unloaded rows draw as loading placeholders, and each page that arrives
-                repaints only its own rows via
+                load on demand, unloaded rows draw as loading placeholders, and each page that arrives repaints only its
+                own rows via
                 <code>updateCells()</code>
                 — no full redraw, and no
                 <code>@tracked</code>
@@ -199,11 +194,21 @@ export default class AsyncDemo extends Component {
                     />
                     <span style="width: 52px;">{{this.latencyMs}}ms</span>
                 </label>
-                <span data-test-pages>Pages: <strong>{{this.pagesLoaded}}</strong> / {{this.pagesRequested}} requested</span>
-                <span data-test-inflight>In flight: <strong>{{this.inFlight}}</strong> (peak {{this.peakInFlight}}, cap {{MAX_CONCURRENCY}})</span>
-                <span data-test-rows-loaded>Rows loaded: <strong>{{this.rowsLoaded}}</strong> ({{this.loadedPercent}}%)</span>
+                <span data-test-pages>Pages:
+                    <strong>{{this.pagesLoaded}}</strong>
+                    /
+                    {{this.pagesRequested}}
+                    requested</span>
+                <span data-test-inflight>In flight:
+                    <strong>{{this.inFlight}}</strong>
+                    (peak
+                    {{this.peakInFlight}}, cap
+                    {{MAX_CONCURRENCY}})</span>
+                <span data-test-rows-loaded>Rows loaded:
+                    <strong>{{this.rowsLoaded}}</strong>
+                    ({{this.loadedPercent}}%)</span>
                 <span data-test-edits>Edits: <strong>{{this.edits}}</strong></span>
-                <button type="button" data-test-invalidate {{on "click" this.invalidate}}>
+                <button class="btn btn-xs" type="button" data-test-invalidate {{on "click" this.invalidate}}>
                     Invalidate (refetch)
                 </button>
             </div>

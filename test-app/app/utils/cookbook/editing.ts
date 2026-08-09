@@ -134,7 +134,7 @@ handleDelete = selection => {
         },
         {
             kind: "p",
-            text: "**When a click starts an edit.** `@cellActivationBehavior` is `\"second-click\"` by default (a click on the already-selected cell activates it); `\"single-click\"` activates any click, `\"double-click\"` requires a real double-click. A cell's own `activationBehaviorOverride` wins over the grid-wide setting. `@editOnType` (default `true`) is what makes typing a printable character over the selected cell open its editor seeded with that character — set it `false` to require an explicit Enter or activation click.",
+            text: '**When a click starts an edit.** `@cellActivationBehavior` is `"second-click"` by default (a click on the already-selected cell activates it); `"single-click"` activates any click, `"double-click"` requires a real double-click. A cell\'s own `activationBehaviorOverride` wins over the grid-wide setting. `@editOnType` (default `true`) is what makes typing a printable character over the selected cell open its editor seeded with that character — set it `false` to require an explicit Enter or activation click.',
         },
         {
             kind: "code",
@@ -153,7 +153,7 @@ handleDelete = selection => {
         {
             kind: "list",
             items: [
-                "`@trailingRowOptions` is cosmetic: `tint` shades the row as not-real-data, `hint` is the text in its first column (this port defaults it to `\"Add row\"`; pass `\"\"` for upstream's empty default), `addIcon` swaps the built-in `+` glyph for a named header icon.",
+                '`@trailingRowOptions` is cosmetic: `tint` shades the row as not-real-data, `hint` is the text in its first column (this port defaults it to `"Add row"`; pass `""` for upstream\'s empty default), `addIcon` swaps the built-in `+` glyph for a named header icon.',
                 "Upstream's `sticky` and `targetColumn` are deliberately **not** accepted — both would be silently inert here — so nothing you pass is quietly ignored.",
                 "A column's own `trailingRowOptions` overrides `hint`/`addIcon` for that column, and `disabled: true` blanks its trailing cell.",
                 "Build the object in a module constant or a `@cached` getter rather than inline in the template — the general identity-stability rule for grid args, spelled out in **Guide 9 — The identity rules**.",

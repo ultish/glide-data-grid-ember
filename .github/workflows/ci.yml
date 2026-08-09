@@ -60,14 +60,15 @@ jobs:
       fail-fast: false
       matrix:
         try-scenario:
-          # Peer is ember-source >= 6 (test-app default ~6.12 covered by Tests job)
+          # Peer is ember-source >= 6 (test-app default ~6.12 covered by Tests job).
+          # No embroider-safe/optimized: the test-app is already an @embroider/vite
+          # v2 app, so there is no classic pipeline for those to switch away from.
+          # See the comment in test-app/config/ember-try.js.
           - ember-lts-6.4
           - ember-lts-6.8
           - ember-release
           - ember-beta
           - ember-canary
-          - embroider-safe
-          - embroider-optimized
 
     steps:
       - uses: actions/checkout@v4

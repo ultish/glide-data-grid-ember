@@ -1,5 +1,3 @@
-/* eslint-disable sonarjs/no-duplicate-string */
-/* eslint-disable unicorn/no-for-loop */
 import {
     type GridSelection,
     type InnerGridCell,
@@ -508,7 +506,7 @@ export function drawCell(
     reusableRect.height = h;
 
     drawState[0] = renderStateProvider.getValue(allocatedItem);
-    drawState[1] = (val: any) => renderStateProvider.setValue(allocatedItem, val); //alloc
+    drawState[1] = (val: unknown) => renderStateProvider.setValue(allocatedItem, val); //alloc
 
     animationFrameRequested = false;
 

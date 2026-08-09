@@ -16,7 +16,7 @@ group: "Metrics", icon: "headerNumber", hasMenu: true },
         {
             kind: "list",
             items: [
-                "A column **with** `width` is fixed. A column **without** one is auto-sized: the grid measures a sample of its cells plus its own title, clamped by `@minColumnWidth` / `@maxColumnWidth` (default 50 / 500). There is no `width: \"auto\"`.",
+                'A column **with** `width` is fixed. A column **without** one is auto-sized: the grid measures a sample of its cells plus its own title, clamped by `@minColumnWidth` / `@maxColumnWidth` (default 50 / 500). There is no `width: "auto"`.',
                 "Auto-sizing works through each cell renderer's `measure()`, and most *custom* renderers don't have one — a custom-cell column falls back to a flat 150px.",
                 "`group` turns on the second header row. Grouping is automatic: set `group` on any column and the band appears.",
                 "`icon` draws a header glyph. The built-in set is the `GridColumnIcon` enum; add your own with `@headerIcons`.",
@@ -27,7 +27,7 @@ group: "Metrics", icon: "headerNumber", hasMenu: true },
         },
         {
             kind: "note",
-            text: "**`grow` is orthogonal to `width`, not an alternative to it.** A fixed-width column with `grow: 1` is a perfectly ordinary way to say \"take the slack\", and an auto-sized column without `grow` still ignores the leftover space. Because of that split, the resize callbacks report *two* sizes: `newSize` is the column's own width and `newSizeWithGrow` adds back the share it was given. Write `newSize` back into your `columns` array — writing `newSizeWithGrow` back would grow the column again on the next layout.",
+            text: '**`grow` is orthogonal to `width`, not an alternative to it.** A fixed-width column with `grow: 1` is a perfectly ordinary way to say "take the slack", and an auto-sized column without `grow` still ignores the leftover space. Because of that split, the resize callbacks report *two* sizes: `newSize` is the column\'s own width and `newSizeWithGrow` adds back the share it was given. Write `newSize` back into your `columns` array — writing `newSizeWithGrow` back would grow the column again on the next layout.',
         },
         {
             kind: "p",

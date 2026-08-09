@@ -1,3 +1,3 @@
-import loadConfigFromMeta from '@embroider/config-meta-loader';
+import loadConfigFromMeta from "@embroider/config-meta-loader";
 
-export default loadConfigFromMeta('test-app');
+export default loadConfigFromMeta("test-app");

@@ -12,7 +12,7 @@ export const editingSection: Section = {
     blocks: [
         {
             kind: "note",
-            text: "**The grid never mutates your data.** Not once, anywhere, for any cell type. Every write is a *notification*; applying it — and persisting it — is yours. This is the single contract that makes the rest of the addon predictable, and it is why there is no \"grid state\" to keep in sync with your models.",
+            text: '**The grid never mutates your data.** Not once, anywhere, for any cell type. Every write is a *notification*; applying it — and persisting it — is yours. This is the single contract that makes the rest of the addon predictable, and it is why there is no "grid state" to keep in sync with your models.',
         },
         {
             kind: "p",
@@ -38,7 +38,7 @@ export const editingSection: Section = {
 
         {
             kind: "p",
-            text: "**Without `recordsSource`**, `@onCellsEdited` hands you the raw batch and you do the same thing by hand — still writing to the model, never to a side table keyed on `\"col,row\"`:",
+            text: '**Without `recordsSource`**, `@onCellsEdited` hands you the raw batch and you do the same thing by hand — still writing to the model, never to a side table keyed on `"col,row"`:',
         },
         {
             kind: "code",

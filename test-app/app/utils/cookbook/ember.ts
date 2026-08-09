@@ -59,7 +59,11 @@ export const emberSection: Section = {
                     "a live Ember Data array (`peekAll`/`findAll`) handed straight to `recordsSource` — spread it",
                     "Guide 5",
                 ],
-                ["A new row doesn't show up at all", "an in-place `push` — the array identity never changed", "Guide 4"],
+                [
+                    "A new row doesn't show up at all",
+                    "an in-place `push` — the array identity never changed",
+                    "Guide 4",
+                ],
                 [
                     "Editing feels slow at a few thousand rows",
                     "`records` is derived from a `.map()`/`.filter()`, so every per-row cache resets on every change",

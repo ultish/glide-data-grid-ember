@@ -49,7 +49,9 @@ describe("getSearchTestString", () => {
     test("Boolean stringifies only a real boolean -- indeterminate/undefined are not searchable", () => {
         expect(getSearchTestString({ kind: GridCellKind.Boolean, data: true, allowOverlay: false })).toBe("true");
         expect(getSearchTestString({ kind: GridCellKind.Boolean, data: false, allowOverlay: false })).toBe("false");
-        expect(getSearchTestString({ kind: GridCellKind.Boolean, data: undefined, allowOverlay: false })).toBeUndefined();
+        expect(
+            getSearchTestString({ kind: GridCellKind.Boolean, data: undefined, allowOverlay: false })
+        ).toBeUndefined();
     });
 
     test("Image and Bubble join with a separator no query will contain", () => {
@@ -67,7 +69,7 @@ describe("getSearchTestString", () => {
                 data: { kind: "whatever" },
                 copyData: "findme",
                 allowOverlay: true,
-            } as GridCell)
+            })
         ).toBe("findme");
     });
 
@@ -196,7 +198,12 @@ async function runScan(
 
 describe("IncrementalSearch", () => {
     test("finds every match in a small table and reports full progress", async () => {
-        const { reports } = await runScan(20, 0, (col, row) => text(row === 7 && col === 1 ? "needle" : "hay"), "needle");
+        const { reports } = await runScan(
+            20,
+            0,
+            (col, row) => text(row === 7 && col === 1 ? "needle" : "hay"),
+            "needle"
+        );
         const last = reports.at(-1)!;
         expect(last.results).toEqual([[1, 7]]);
         expect(last.status).toEqual({ rowsSearched: 20, results: 1 });
@@ -299,9 +306,7 @@ describe("IncrementalSearch", () => {
             // The two queries deliberately match at *different* positions, so a leaked stale result
             // is distinguishable from the legitimate one rather than coinciding with it.
             fetchChunk: () =>
-                query === "first"
-                    ? new Promise<CellArray>(res => (resolveFirst = res))
-                    : [[text("second")]],
+                query === "first" ? new Promise<CellArray>(res => (resolveFirst = res)) : [[text("second")]],
             onProgress: results => reports.push(results),
             schedule: fn => {
                 pending = fn;

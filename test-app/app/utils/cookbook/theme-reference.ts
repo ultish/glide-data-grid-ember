@@ -58,12 +58,9 @@ export const themeReferenceSection: Section = {
                 ],
                 [
                     "`textMedium`",
-                    "secondary text — the \"add row\" hint, checkbox glyph outlines, sparkline labels, tree-view chrome, spinner",
+                    'secondary text — the "add row" hint, checkbox glyph outlines, sparkline labels, tree-view chrome, spinner',
                 ],
-                [
-                    "`textLight`",
-                    "de-emphasised text — row-ID cells, protected cells, sparkline axis labels",
-                ],
+                ["`textLight`", "de-emphasised text — row-ID cells, protected cells, sparkline axis labels"],
                 ["`textBubble`", "text inside bubble / drilldown / multi-select chips"],
                 ["`textHeader`", "column header title text"],
                 ["`textHeaderSelected`", "header title text when that column is selected"],
@@ -84,19 +81,13 @@ export const themeReferenceSection: Section = {
                     "the cell background. **Alpha-blended, not replaced, when overridden** — the one field the merge treats specially",
                 ],
                 ["`bgCellMedium`", "background for `Protected` cells; also the usual zebra-stripe target"],
-                [
-                    "`bgHeader`",
-                    "header background, and the background behind blank areas past the last row/column",
-                ],
+                ["`bgHeader`", "header background, and the background behind blank areas past the last row/column"],
                 ["`bgHeaderHasFocus`", "header background when the active cell is in that column"],
-                [
-                    "`bgHeaderHovered`",
-                    "header background on hover; also the \"add row\" affordance hover fill",
-                ],
+                ["`bgHeaderHovered`", 'header background on hover; also the "add row" affordance hover fill'],
                 ["`bgBubble`", "chip/pill fill in bubble, tags, multi-select and range cells"],
                 ["`bgBubbleSelected`", "chip fill when that cell is selected"],
                 ["`bgSearchResult`", "search-hit highlight. Drawn — search is implemented"],
-                ["`bgIconHeader`", "fill of header icon sprites, and the \"add row\" `+` icon"],
+                ["`bgIconHeader`", 'fill of header icon sprites, and the "add row" `+` icon'],
                 ["`fgIconHeader`", "foreground of header icon sprites"],
                 [
                     "`bgGroupHeader`, `bgGroupHeaderHovered` *(optional)*",
@@ -114,10 +105,7 @@ export const themeReferenceSection: Section = {
                     "`borderColor`",
                     "all gridlines (vertical, and horizontal when `horizontalBorderColor` is unset), header borders, highlight rings",
                 ],
-                [
-                    "`horizontalBorderColor` *(optional)*",
-                    "horizontal gridlines only; falls back to `borderColor`",
-                ],
+                ["`horizontalBorderColor` *(optional)*", "horizontal gridlines only; falls back to `borderColor`"],
                 [
                     "`headerBottomBorderColor` *(optional)*",
                     "the line under the header; falls back to `horizontalBorderColor`, then `borderColor`",
@@ -147,10 +135,7 @@ export const themeReferenceSection: Section = {
                 ["`bubbleHeight`", "height of chips in bubble / tags / multi-select cells"],
                 ["`bubblePadding`", "horizontal padding inside a chip"],
                 ["`bubbleMargin`", "gap between adjacent chips"],
-                [
-                    "`headerIconSize`",
-                    "size of a column's header icon sprite; also used by the header-menu hit test",
-                ],
+                ["`headerIconSize`", "size of a column's header icon sprite; also used by the header-menu hit test"],
                 ["`checkboxMaxSize`", "max drawn size of boolean-cell and row-marker checkboxes"],
                 ["`lineHeight`", "**unitless** multiplier for multi-line / wrapped text layout"],
                 [
@@ -168,16 +153,16 @@ export const themeReferenceSection: Section = {
                 ["`fontFamily`", "font stack for both canvas text and DOM editors"],
                 [
                     "`baseFontStyle`",
-                    "CSS font shorthand *minus the family*, for cell text — e.g. `\"13px\"` or `\"600 13px\"`",
+                    'CSS font shorthand *minus the family*, for cell text — e.g. `"13px"` or `"600 13px"`',
                 ],
-                ["`headerFontStyle`", "same, for header titles — e.g. `\"600 13px\"`"],
-                ["`markerFontStyle`", "same, for row-marker numbers — e.g. `\"9px\"`"],
-                ["`editorFontSize`", "font size for DOM overlay editors — a CSS length string, e.g. `\"13px\"`"],
+                ["`headerFontStyle`", 'same, for header titles — e.g. `"600 13px"`'],
+                ["`markerFontStyle`", 'same, for row-marker numbers — e.g. `"9px"`'],
+                ["`editorFontSize`", 'font size for DOM overlay editors — a CSS length string, e.g. `"13px"`'],
             ],
         },
         {
             kind: "p",
-            text: "`mergeAndRealizeTheme` derives `headerFontFull` / `baseFontFull` / `markerFontFull` — the `\"<style> <family>\"` strings actually assigned to `ctx.font` — from the three `*FontStyle` fields plus `fontFamily`. Those three live on `FullTheme`, not `Theme`: you never set them yourself, and overriding a `*FontStyle` or `fontFamily` at any level is enough.",
+            text: '`mergeAndRealizeTheme` derives `headerFontFull` / `baseFontFull` / `markerFontFull` — the `"<style> <family>"` strings actually assigned to `ctx.font` — from the three `*FontStyle` fields plus `fontFamily`. Those three live on `FullTheme`, not `Theme`: you never set them yourself, and overriding a `*FontStyle` or `fontFamily` at any level is enough.',
         },
 
         {
