@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-08-09
+
+### Fixed
+
+- Column reordering now keeps displayed values and edits mapped to the correct columns after data
+  refreshes.
+- The selected column remains selected after it is moved.
+- Column resizing works from header and sub-header edges, with the resize cursor and indicator
+  visible in the demo.
+- Markdown edit-on-type keeps the complete typed value in the Notes column.
+
+### Added
+
+- Exposed `verticalBorder`, `resizeIndicator`, and `hyperWrapping` grid options.
+- Added the `UndoRedo.isReplaying` signal for distinguishing replayed edits from user edits.
+- Expanded the demo to exercise alternating borders and wrapped text.
+
 ## [0.1.0] - 2026-08-09
 
 First public release — a full-parity Ember v2 addon port of
@@ -48,4 +65,5 @@ thousands stay smooth.
   and canary — i.e. through Ember 7.x.
 - Embroider or ember-auto-import v2.
 
+[0.1.7]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.7
 [0.1.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.0
