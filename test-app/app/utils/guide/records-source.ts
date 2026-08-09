@@ -163,7 +163,7 @@ class PersonRow {
             kind: "list",
             items: [
                 "**The eager read is O(rows)** even when every row is a cache hit. It is a walk of property reads, so it is cheap — but with hundreds of thousands of *in-memory* records and known-changed rows, moving those rows to `updateCells` (chapter 8) removes it. Keep the per-row memoization either way.",
-                "**Don't memoize rows in a `WeakMap` keyed on the record object.** It looks like an obvious win and is wrong for any normalized cache that mutates entities in place: the identity never changes, so the cache silently serves stale rows. `recordsSource` is *not* this — it caches a tracked computation, which that very mutation invalidates, rather than a plain value that has nothing to invalidate it. The distinction is *what* is cached, not what it is keyed on.",
+                "**Don't memoize rows in a `WeakMap` keyed on the record object.** It looks like an obvious win and is wrong for any normalized cache that mutates entities in place: the identity never changes, so the cache silently serves stale rows. `recordsSource` is *not* this — it caches a tracked computation, which that very mutation invalidates, rather than a plain value that has nothing to invalidate it. The distinction is *what* is cached, not what it is keyed on. (This is a rule about *mutable* stores. Apollo is not one — chapter 5's table says which way each store moves, and why the same technique is sound there.)",
                 "**A record class with no `@tracked` fields produces a permanently constant cache.** That is correct rather than stale: nothing about such a record can change without a new `records` array, which rebuilds everything.",
             ],
         },

@@ -69,6 +69,7 @@ import {
     type Highlight,
     type SpriteMap,
     type GridMouseEventArgs,
+    type SelectionBlending,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -198,6 +199,15 @@ function buildDemoColumns(): readonly GridColumn[] {
 const ROW_MARKER_KINDS: readonly RowMarkerKind[] = ["both", "checkbox", "number", "clickable-number", "none"];
 const RANGE_SELECT_MODES = ["rect", "multi-rect", "cell", "multi-cell", "none"] as const;
 const FILL_DIRECTIONS: readonly FillHandleDirection[] = ["orthogonal", "vertical", "horizontal", "any"];
+
+// 9g. All three blending args are cycled together, because the interesting thing to see is whether
+// a cell selection and a row/column selection can coexist at all -- and that needs the range side
+// and the row/column side to agree. `"exclusive"` is source's default (and this port's old
+// hardcoded value), `"mixed"` co-selects while Ctrl/Cmd is held, `"additive"` always co-selects.
+const SELECTION_BLENDINGS: readonly SelectionBlending[] = ["exclusive", "mixed", "additive"];
+// `"no-editor"` is the value worth having a demo for: the ring is drawn normally, and vanishes for
+// as long as an overlay editor is open over the cell.
+const FOCUS_RING_MODES: readonly (boolean | "no-editor")[] = [true, "no-editor", false];
 
 export default class DemoGrid extends Component {
     constructor(...args: ConstructorParameters<typeof Component>) {
@@ -490,6 +500,54 @@ export default class DemoGrid extends Component {
         this.freezeColumns = this.freezeColumns === 0 ? 2 : 0;
     };
 
+    // --- Phase 9g: selection tuning + editing behaviour ------------------------------------------
+    // Five selection args that were hardcoded until 9g, plus three editing-behaviour flags. Every
+    // one of them is invisible in a screenshot, which is exactly why they get controls: with
+    // `"additive"` blending a cell selection and a row selection coexist, with `"exclusive"` they
+    // cannot, and nothing but trying it says which is live.
+    @tracked selectionBlendingIndex = 0;
+    @tracked multiSelectionMode = false;
+    @tracked editOnType = true;
+    @tracked trapFocus = false;
+    @tracked focusRingIndex = 0;
+
+    get selectionBlending(): SelectionBlending {
+        return SELECTION_BLENDINGS[this.selectionBlendingIndex] ?? "exclusive";
+    }
+
+    get selectionMode(): "auto" | "multi" {
+        return this.multiSelectionMode ? "multi" : "auto";
+    }
+
+    get drawFocusRing(): boolean | "no-editor" {
+        return FOCUS_RING_MODES[this.focusRingIndex] ?? true;
+    }
+
+    get focusRingLabel(): string {
+        const mode = this.drawFocusRing;
+        return mode === "no-editor" ? "no-editor" : mode ? "on" : "off";
+    }
+
+    cycleSelectionBlending = (): void => {
+        this.selectionBlendingIndex = (this.selectionBlendingIndex + 1) % SELECTION_BLENDINGS.length;
+    };
+
+    toggleSelectionMode = (): void => {
+        this.multiSelectionMode = !this.multiSelectionMode;
+    };
+
+    toggleEditOnType = (): void => {
+        this.editOnType = !this.editOnType;
+    };
+
+    toggleTrapFocus = (): void => {
+        this.trapFocus = !this.trapFocus;
+    };
+
+    cycleFocusRing = (): void => {
+        this.focusRingIndex = (this.focusRingIndex + 1) % FOCUS_RING_MODES.length;
+    };
+
     // --- Phase 10a: the notification-only args, surfaced as a live status line ------------------
     // `@onSelectionChanged` and `@onVisibleRegionChanged` are pure notifications. Rendering them
     // costs nothing and turns two otherwise-invisible callbacks into something a regression can
@@ -617,6 +675,22 @@ export default class DemoGrid extends Component {
                 <button type="button" class="gdg-full__toggle" data-test-external-search-toggle {{on "click" this.toggleExternalSearch}}>
                     App-owned search: <b>{{if this.useExternalSearch "on" "off"}}</b>
                 </button>
+                {{! Phase 9g. }}
+                <button type="button" class="gdg-full__toggle" data-test-selection-blending-toggle {{on "click" this.cycleSelectionBlending}}>
+                    Selection blending: <b>{{this.selectionBlending}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-selection-mode-toggle {{on "click" this.toggleSelectionMode}}>
+                    Selection mode: <b>{{this.selectionMode}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-edit-on-type-toggle {{on "click" this.toggleEditOnType}}>
+                    Edit on type: <b>{{if this.editOnType "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-trap-focus-toggle {{on "click" this.toggleTrapFocus}}>
+                    Trap focus: <b>{{if this.trapFocus "on" "off"}}</b>
+                </button>
+                <button type="button" class="gdg-full__toggle" data-test-focus-ring-toggle {{on "click" this.cycleFocusRing}}>
+                    Focus ring: <b>{{this.focusRingLabel}}</b>
+                </button>
             </div>
 
             {{! Notification-only args, rendered so they are observable rather than merely wired. }}
@@ -713,6 +787,15 @@ export default class DemoGrid extends Component {
                         what first exercised the row-marker offset in `@highlightRegions`. }}
                     @rowMarkers={{this.rowMarkers}}
                     @rangeSelect={{this.rangeSelect}}
+                    {{! Phase 9g: selection tuning + editing behaviour. }}
+                    @rangeSelectionBlending={{this.selectionBlending}}
+                    @columnSelectionBlending={{this.selectionBlending}}
+                    @rowSelectionBlending={{this.selectionBlending}}
+                    @rowSelectionMode={{this.selectionMode}}
+                    @columnSelectionMode={{this.selectionMode}}
+                    @editOnType={{this.editOnType}}
+                    @trapFocus={{this.trapFocus}}
+                    @drawFocusRing={{this.drawFocusRing}}
                     @onRowMoved={{this.onRowMovedIfAvailable}}
                     @fillHandle={{this.useFillHandle}}
                     @allowedFillDirections={{this.allowedFillDirections}}

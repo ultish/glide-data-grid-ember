@@ -64,6 +64,7 @@ import type {
     FillHandleDirection,
     FillPatternEventArgs,
     GridMouseEventArgs,
+    SelectionBlending,
 } from "../rendering/index.ts";
 
 /** Shape handed to `@onReady` once the underlying `GridHostController` exists. */
@@ -166,6 +167,16 @@ export interface GlideDataGridSignature {
         columnSelect?: "none" | "single" | "multi";
         rangeSelect?: "none" | "cell" | "rect" | "multi-cell" | "multi-rect";
         rangeSelectionColumnSpanning?: boolean;
+        // Selection tuning (Phase 9g). Pure passthroughs -- the selection writers in
+        // `rendering/selection-behavior.ts` have been parameterized over all five since Phase 3a.
+        // `"exclusive"` (the default) means a cell/range selection clears any row/column selection
+        // and vice versa; `"mixed"` keeps them while Ctrl/Cmd is held; `"additive"` always keeps
+        // them. The two `*SelectionMode` args make row/header clicks accumulate without a modifier.
+        rangeSelectionBlending?: SelectionBlending;
+        columnSelectionBlending?: SelectionBlending;
+        rowSelectionBlending?: SelectionBlending;
+        rowSelectionMode?: "auto" | "multi";
+        columnSelectionMode?: "auto" | "multi";
         onSelectionChanged?: (selection: GridSelection) => void;
         onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
         onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
@@ -252,6 +263,14 @@ export interface GlideDataGridSignature {
         // off the pointer path. Narrow the union with the exported `headerKind` / `groupHeaderKind`
         // / `outOfBoundsKind` discriminants.
         onItemHovered?: (args: GridMouseEventArgs) => void;
+
+        // Editing behaviour (Phase 9g). `@editOnType` (default `true`) is what makes typing a
+        // printable character over the selected cell open its editor seeded with that character;
+        // `@trapFocus` (default `false`) stops an at-the-edge arrow key escaping to the next tab
+        // stop; `@drawFocusRing` accepts `"no-editor"` to hide the ring only while an editor is open.
+        editOnType?: boolean;
+        trapFocus?: boolean;
+        drawFocusRing?: boolean | "no-editor";
     };
 }
 
@@ -316,6 +335,11 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         columnSelect: this.args.columnSelect,
         rangeSelect: this.args.rangeSelect,
         rangeSelectionColumnSpanning: this.args.rangeSelectionColumnSpanning,
+        rangeSelectionBlending: this.args.rangeSelectionBlending,
+        columnSelectionBlending: this.args.columnSelectionBlending,
+        rowSelectionBlending: this.args.rowSelectionBlending,
+        rowSelectionMode: this.args.rowSelectionMode,
+        columnSelectionMode: this.args.columnSelectionMode,
         onSelectionChanged: this.args.onSelectionChanged,
         onHeaderMenuClick: this.args.onHeaderMenuClick,
         onCellsEdited: this.args.onCellsEdited,
@@ -349,7 +373,10 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onCellContextMenu: this.args.onCellContextMenu,
         onHeaderContextMenu: this.args.onHeaderContextMenu,
         onGroupHeaderContextMenu: this.args.onGroupHeaderContextMenu,
-            onItemHovered: this.args.onItemHovered,
+        onItemHovered: this.args.onItemHovered,
+        editOnType: this.args.editOnType,
+        trapFocus: this.args.trapFocus,
+        drawFocusRing: this.args.drawFocusRing,
     });
 
     // Installs `GridHostController` on the container div on first insert. `ember-modifier`'s

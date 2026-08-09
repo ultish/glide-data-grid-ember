@@ -99,6 +99,7 @@ import type {
     FillPatternEventArgs,
     ScrollEdge,
     GridMouseEventArgs,
+    SelectionBlending,
 } from "../rendering/index.ts";
 import {
     headerKind,
@@ -166,14 +167,10 @@ export interface GridHostArgs {
     readonly headerIcons?: SpriteMap;
 
     // --- Phase 3a: selection / interaction config -----------------------------------------------
-    // Mirrors a subset of `DataEditorProps`. Selection *blending* (`rangeSelectionBlending` /
-    // `columnSelectionBlending` / `rowSelectionBlending`, all source default `"exclusive"`) and
-    // `rowSelectionMode`/`columnSelectionMode` (source default `"auto"`) are deliberately NOT
-    // exposed here yet -- `GridHostController` wires the writer with those defaults hardcoded
-    // internally (see `DEFAULT_SELECTION_OPTIONS` below), but the writer functions themselves
-    // (`setCurrentSelection`/`setSelectedRows`/`setSelectedColumns` in `rendering/
-    // selection-behavior.ts`) are fully parameterized over blending, so a later phase can add
-    // these as `GridHostArgs`/`<GlideDataGrid>` args without touching the writer.
+    // Mirrors a subset of `DataEditorProps`. Selection *blending* and the two selection *modes*
+    // landed in 9g -- they were always pure `resolveArgs()` plumbing, because the writer functions
+    // (`setCurrentSelection`/`setSelectedRows`/`setSelectedColumns` in
+    // `rendering/selection-behavior.ts`) have been fully parameterized over them since Phase 3a.
 
     /** @defaultValue "none" (no row-marker column) */
     readonly rowMarkers?: RowMarkerKind;
@@ -187,6 +184,32 @@ export interface GridHostArgs {
     readonly rangeSelect?: "none" | "cell" | "rect" | "multi-cell" | "multi-rect";
     /** @defaultValue true */
     readonly rangeSelectionColumnSpanning?: boolean;
+
+    /**
+     * How a cell/range selection blends with any row/column selection already in place.
+     * `"exclusive"` (source's default) clears the others; `"mixed"` keeps them while a
+     * multi-key (Ctrl/Cmd) is held or during a drag; `"additive"` always keeps them.
+     * Mirrors source's `rangeSelectionBlending`.
+     * @defaultValue "exclusive"
+     */
+    readonly rangeSelectionBlending?: SelectionBlending;
+    /** The same, for column selection. Mirrors source's `columnSelectionBlending`.
+     *  @defaultValue "exclusive" */
+    readonly columnSelectionBlending?: SelectionBlending;
+    /** The same, for row selection. Mirrors source's `rowSelectionBlending`.
+     *  @defaultValue "exclusive" */
+    readonly rowSelectionBlending?: SelectionBlending;
+
+    /**
+     * `"multi"` makes every row-marker click behave as if the multi-key were held, so rows
+     * accumulate without Ctrl/Cmd. `"auto"` (source's default) requires the modifier.
+     * Only meaningful when `rowSelect === "multi"`. Mirrors source's `rowSelectionMode`.
+     * @defaultValue "auto"
+     */
+    readonly rowSelectionMode?: "auto" | "multi";
+    /** The same, for header clicks. Mirrors source's `columnSelectionMode`.
+     *  @defaultValue "auto" */
+    readonly columnSelectionMode?: "auto" | "multi";
 
     /** Fired whenever the internally-owned `GridSelection` changes for any reason. */
     readonly onSelectionChanged?: (selection: GridSelection) => void;
@@ -527,6 +550,32 @@ export interface GridHostArgs {
      * would put consumer work directly on the pointer path.
      */
     readonly onItemHovered?: (args: GridMouseEventArgs) => void;
+
+    // --- Phase 9g: editing behaviour flags -------------------------------------------------------
+
+    /**
+     * Typing a printable character over the selected cell immediately opens its editor, seeded with
+     * that character. Set `false` to require an explicit activation (Enter, or a click on the
+     * already-selected cell) instead. Mirrors source's `editOnType`, including its default.
+     * @defaultValue true
+     */
+    readonly editOnType?: boolean;
+
+    /**
+     * Keeps keyboard navigation inside the grid: an arrow/Home/End press that cannot move any
+     * further (already at an edge) is still swallowed rather than left to the browser, so focus
+     * never escapes to the next tab stop. Mirrors source's `trapFocus`, including its default.
+     * @defaultValue false
+     */
+    readonly trapFocus?: boolean;
+
+    /**
+     * Draws the focus ring around the active cell. `"no-editor"` draws it only while no overlay
+     * editor is open -- source's own value for "don't double up the ring and the editor border"
+     * (`data-editor.tsx:909`). Mirrors source's `drawFocusRing`.
+     * @defaultValue true
+     */
+    readonly drawFocusRing?: boolean | "no-editor";
 }
 
 /** What a context-menu callback receives alongside the target. */
@@ -594,6 +643,11 @@ interface ResolvedGridHostArgs {
     readonly columnSelect: "none" | "single" | "multi";
     readonly rangeSelect: "none" | "cell" | "rect" | "multi-cell" | "multi-rect";
     readonly rangeSelectionColumnSpanning: boolean;
+    readonly rangeSelectionBlending: SelectionBlending;
+    readonly columnSelectionBlending: SelectionBlending;
+    readonly rowSelectionBlending: SelectionBlending;
+    readonly rowSelectionMode: "auto" | "multi";
+    readonly columnSelectionMode: "auto" | "multi";
     readonly onSelectionChanged: ((selection: GridSelection) => void) | undefined;
     readonly onHeaderMenuClick: ((col: number, bounds: Rectangle) => void) | undefined;
     readonly onCellsEdited: ((edits: readonly { location: Item; value: GridCell }[]) => void) | undefined;
@@ -639,20 +693,20 @@ interface ResolvedGridHostArgs {
     readonly onHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
     readonly onGroupHeaderContextMenu: ((col: number, event: ContextMenuEventArgs) => void) | undefined;
     readonly onItemHovered: ((args: GridMouseEventArgs) => void) | undefined;
+
+    readonly editOnType: boolean;
+    readonly trapFocus: boolean;
+    readonly drawFocusRing: boolean | "no-editor";
 }
 
 const DEFAULT_ROW_HEIGHT = 34;
 const DEFAULT_HEADER_HEIGHT = 36;
 
-// Hardcoded selection-blending/mode defaults (see the `GridHostArgs` doc comment above for why
-// these aren't args yet). Values match source's own defaults (`data-editor.tsx:836-850`).
-const DEFAULT_SELECTION_OPTIONS: Pick<SelectionBehaviorOptions, "rangeBehavior" | "columnBehavior" | "rowBehavior"> = {
-    rangeBehavior: "exclusive",
-    columnBehavior: "exclusive",
-    rowBehavior: "exclusive",
-};
-const DEFAULT_ROW_SELECTION_MODE: "auto" | "multi" = "auto";
-const DEFAULT_COLUMN_SELECTION_MODE: "auto" | "multi" = "auto";
+// Selection-blending/mode defaults, matching source's own (`data-editor.tsx:836-850`). These used
+// to be the *only* possible values -- 9g turned them into `GridHostArgs` fields, so they are now
+// just the `??` fallbacks in `resolveArgs`.
+const DEFAULT_SELECTION_BLENDING: SelectionBlending = "exclusive";
+const DEFAULT_SELECTION_MODE: "auto" | "multi" = "auto";
 // The marker *body* cell's checkbox style. Its header-column counterpart lives in
 // `mangled-layout.ts` alongside the rest of the synthetic column (Phase 9k).
 const DEFAULT_ROW_MARKER_CHECKBOX_STYLE: "square" | "circle" = "square";
@@ -1256,6 +1310,11 @@ export class GridHostController {
             columnSelect: args.columnSelect ?? "multi",
             rangeSelect: args.rangeSelect ?? "rect",
             rangeSelectionColumnSpanning: args.rangeSelectionColumnSpanning ?? true,
+            rangeSelectionBlending: args.rangeSelectionBlending ?? DEFAULT_SELECTION_BLENDING,
+            columnSelectionBlending: args.columnSelectionBlending ?? DEFAULT_SELECTION_BLENDING,
+            rowSelectionBlending: args.rowSelectionBlending ?? DEFAULT_SELECTION_BLENDING,
+            rowSelectionMode: args.rowSelectionMode ?? DEFAULT_SELECTION_MODE,
+            columnSelectionMode: args.columnSelectionMode ?? DEFAULT_SELECTION_MODE,
             onSelectionChanged: args.onSelectionChanged,
             onHeaderMenuClick: args.onHeaderMenuClick,
             onCellsEdited: args.onCellsEdited,
@@ -1298,6 +1357,10 @@ export class GridHostController {
             onHeaderContextMenu: args.onHeaderContextMenu,
             onGroupHeaderContextMenu: args.onGroupHeaderContextMenu,
             onItemHovered: args.onItemHovered,
+
+            editOnType: args.editOnType ?? true,
+            trapFocus: args.trapFocus === true,
+            drawFocusRing: args.drawFocusRing ?? true,
         };
     }
 
@@ -1563,9 +1626,14 @@ export class GridHostController {
         return this.mangledLayoutCache.get(this.sizedColumns(args), this.rowMarkerSpec(args), args.freezeColumns);
     }
 
+    // The full option bag the `selection-behavior.ts` writers take. Rebuilt per call rather than
+    // memoized on purpose: this value never reaches `DrawGridArg`, so it is not one of
+    // `computeCanBlit`'s identity-compared fields, and the writers read it and discard it.
     private selectionOptions(args: ResolvedGridHostArgs): SelectionBehaviorOptions {
         return {
-            ...DEFAULT_SELECTION_OPTIONS,
+            rangeBehavior: args.rangeSelectionBlending,
+            columnBehavior: args.columnSelectionBlending,
+            rowBehavior: args.rowSelectionBlending,
             rangeSelect: args.rangeSelect,
             rangeSelectionColumnSpanning: args.rangeSelectionColumnSpanning,
         };
@@ -1767,7 +1835,10 @@ export class GridHostController {
             isResizing: this.resizeState !== undefined,
             resizeCol: this.resizeState?.col,
             isFocused: this.isFocused,
-            drawFocus: true,
+            // 9g. `"no-editor"` suppresses the ring only while an overlay editor is open, exactly
+            // as source resolves the same prop (`data-editor.tsx:909`). Not one of
+            // `computeCanBlit`'s identity-compared fields, so a per-draw boolean is fine here.
+            drawFocus: args.drawFocusRing === "no-editor" ? this.overlayState === undefined : args.drawFocusRing,
             // Mangled, and memoized so its identity is stable across draws (`computeCanBlit`
             // compares this field by reference).
             selection: this.mangledSelection(args),
@@ -3007,9 +3078,9 @@ export class GridHostController {
                 selectedRows.hasIndex(lastHighlighted)
             ) {
                 const newSlice: Slice = [Math.min(lastHighlighted, row), Math.max(lastHighlighted, row) + 1];
-                if (isMultiRow || DEFAULT_ROW_SELECTION_MODE === "multi") {
+                if (isMultiRow || args.rowSelectionMode === "multi") {
                     this.applySelection(
-                        writerSetSelectedRows(this.selection, undefined, newSlice, true, DEFAULT_SELECTION_OPTIONS)
+                        writerSetSelectedRows(this.selection, undefined, newSlice, true, this.selectionOptions(args))
                     );
                 } else {
                     this.applySelection(
@@ -3018,11 +3089,11 @@ export class GridHostController {
                             CompactSelection.fromSingleSelection(newSlice),
                             undefined,
                             isMultiRow,
-                            DEFAULT_SELECTION_OPTIONS
+                            this.selectionOptions(args)
                         )
                     );
                 }
-            } else if (args.rowSelect === "multi" && (isMultiRow || DEFAULT_ROW_SELECTION_MODE === "multi")) {
+            } else if (args.rowSelect === "multi" && (isMultiRow || args.rowSelectionMode === "multi")) {
                 if (isSelected) {
                     this.applySelection(
                         writerSetSelectedRows(
@@ -3030,12 +3101,12 @@ export class GridHostController {
                             selectedRows.remove(row),
                             undefined,
                             true,
-                            DEFAULT_SELECTION_OPTIONS
+                            this.selectionOptions(args)
                         )
                     );
                 } else {
                     this.applySelection(
-                        writerSetSelectedRows(this.selection, undefined, row, true, DEFAULT_SELECTION_OPTIONS)
+                        writerSetSelectedRows(this.selection, undefined, row, true, this.selectionOptions(args))
                     );
                     this.lastSelectedRow = row;
                 }
@@ -3046,7 +3117,7 @@ export class GridHostController {
                         CompactSelection.empty(),
                         undefined,
                         isMultiKey,
-                        DEFAULT_SELECTION_OPTIONS
+                        this.selectionOptions(args)
                     )
                 );
             } else {
@@ -3056,7 +3127,7 @@ export class GridHostController {
                         CompactSelection.fromSingleSelection(row),
                         undefined,
                         isMultiKey,
-                        DEFAULT_SELECTION_OPTIONS
+                        this.selectionOptions(args)
                     )
                 );
                 this.lastSelectedRow = row;
@@ -3187,7 +3258,7 @@ export class GridHostController {
                             CompactSelection.fromSingleSelection([0, args.rows]),
                             undefined,
                             isMultiKey,
-                            DEFAULT_SELECTION_OPTIONS
+                            this.selectionOptions(args)
                         )
                     );
                 } else {
@@ -3197,7 +3268,7 @@ export class GridHostController {
                             CompactSelection.empty(),
                             undefined,
                             isMultiKey,
-                            DEFAULT_SELECTION_OPTIONS
+                            this.selectionOptions(args)
                         )
                     );
                 }
@@ -3213,10 +3284,10 @@ export class GridHostController {
             selectedColumns.hasIndex(lastCol)
         ) {
             const newSlice: Slice = [Math.min(lastCol, col), Math.max(lastCol, col) + 1];
-            if (isMultiKey || DEFAULT_COLUMN_SELECTION_MODE === "multi") {
+            if (isMultiKey || args.columnSelectionMode === "multi") {
                 this.applyMangledSelection(
                     args,
-                    writerSetSelectedColumns(mangledSelection, undefined, newSlice, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                    writerSetSelectedColumns(mangledSelection, undefined, newSlice, isMultiKey, this.selectionOptions(args))
                 );
             } else {
                 this.applyMangledSelection(
@@ -3226,11 +3297,11 @@ export class GridHostController {
                         CompactSelection.fromSingleSelection(newSlice),
                         undefined,
                         isMultiKey,
-                        DEFAULT_SELECTION_OPTIONS
+                        this.selectionOptions(args)
                     )
                 );
             }
-        } else if (args.columnSelect === "multi" && (isMultiKey || DEFAULT_COLUMN_SELECTION_MODE === "multi")) {
+        } else if (args.columnSelect === "multi" && (isMultiKey || args.columnSelectionMode === "multi")) {
             if (selectedColumns.hasIndex(col)) {
                 this.applyMangledSelection(
                     args,
@@ -3239,13 +3310,13 @@ export class GridHostController {
                         selectedColumns.remove(col),
                         undefined,
                         isMultiKey,
-                        DEFAULT_SELECTION_OPTIONS
+                        this.selectionOptions(args)
                     )
                 );
             } else {
                 this.applyMangledSelection(
                     args,
-                    writerSetSelectedColumns(mangledSelection, undefined, col, isMultiKey, DEFAULT_SELECTION_OPTIONS)
+                    writerSetSelectedColumns(mangledSelection, undefined, col, isMultiKey, this.selectionOptions(args))
                 );
             }
             this.lastSelectedCol = col;
@@ -3258,7 +3329,7 @@ export class GridHostController {
                         selectedColumns.remove(col),
                         undefined,
                         isMultiKey,
-                        DEFAULT_SELECTION_OPTIONS
+                        this.selectionOptions(args)
                     )
                 );
             } else {
@@ -3269,7 +3340,7 @@ export class GridHostController {
                         CompactSelection.fromSingleSelection(col),
                         undefined,
                         isMultiKey,
-                        DEFAULT_SELECTION_OPTIONS
+                        this.selectionOptions(args)
                     )
                 );
             }
@@ -3315,7 +3386,7 @@ export class GridHostController {
                     CompactSelection.fromSingleSelection([start, end]),
                     undefined,
                     false,
-                    DEFAULT_SELECTION_OPTIONS
+                    this.selectionOptions(args)
                 )
             );
             return;
@@ -3808,6 +3879,7 @@ export class GridHostController {
             // any single printable character, no modifiers, immediately opens the overlay seeded
             // with that character instead of the cell's existing content.
             if (
+                activationArgs.editOnType &&
                 !primary &&
                 !ev.metaKey &&
                 ev.key.length === 1 &&
@@ -3903,10 +3975,10 @@ export class GridHostController {
         }
 
         const moved = this.moveActiveCell(args, targetCol, targetRow);
-        // Mirrors source's `moved || !cancelOnlyOnMove || trapFocus` gate (`trapFocus` defaults to
-        // `false` and isn't exposed by this port yet) -- an already-at-the-edge nav key is left
-        // alone (not prevented) rather than swallowed, matching source exactly.
-        if (moved) {
+        // Mirrors source's `moved || !cancelOnlyOnMove || trapFocus` gate -- an already-at-the-edge
+        // nav key is left alone (not prevented) rather than swallowed, so focus can tab out of the
+        // grid, unless `trapFocus` says otherwise.
+        if (moved || args.trapFocus) {
             ev.preventDefault();
             ev.stopPropagation();
         }
