@@ -1138,6 +1138,69 @@ demo that actually runs, same rule as Phase 10. And the guide is the natural hom
 missing "bring your own cell type" contract doc and 9n's absent API reference — check both before
 scoping, since together they may make this an `L`.
 
+## HANDOFF — written 2026-08-09 at end of session. READ THIS FIRST.
+
+Everything below in "THE QUEUE" is still accurate as background; this block is what changed today and
+what to do next. **Tree is clean and green at commit `dc139a9`: 840 vitest tests, both `ember-tsc`
+checks, addon build and test-app build all passing.** Nothing is half-applied.
+
+### Landed today (18 commits on `phase-9-partial`)
+
+Queue items 1–6, Phase 11, and backlog items 9f, 9g, 9j, 9k, plus N1/N2 from `TBD.md`:
+
+- **The docs were restructured.** `DATA.md` and `THEMING.md` are **deleted**; their content lives in
+  the test-app as cookbook/guide chapters, one chapter per file in `test-app/app/utils/{cookbook,guide}/`.
+  There are now **two tabs**: a narrative **Guide** (Phase 11) and a task-indexed **Cookbook**, sharing
+  `components/docs-page.gts`. Rule between them: **exactly one copy of everything**.
+- **`TBD.md`** (workspace root, new): a story-by-story audit against source's Storybook — 111 stories,
+  88 feature-facing, **15 gaps that no backlog item covers**, N1/N2 now done.
+- **9g** (26 props), **9j** (the last three `packages/source` hooks), **9k** (layout memoization),
+  **9f** (7 of 8 imperative methods), and the `@onSelectionChanged` coordinate fix.
+- **Seven real addon defects fixed**, listed in PORTING-NOTES.md.
+
+### Do these first — small, and each is already diagnosed
+
+1. **9r** (new section below): `withMovableColumns` memoizes on the wrong key, and `UndoRedo` has no
+   "am I replaying?" signal. Both `S`, both found by *using* the hooks rather than reading them.
+2. **`emit`** is the one imperative method still unported (9f). Low value; skip unless wanted.
+3. **Merge and deploy Pages.** Everything is ready: the base-path bug is fixed and verified both
+   directions, Pages is enabled in repo settings, the remote exists. **The remote is still empty —
+   nothing has ever been pushed.** `pages.yml` triggers on push to `main`/`master`, and GitHub only
+   shows the `workflow_dispatch` button for workflows on the *default* branch, so pushing `main` is
+   the path. `phase-9-partial` is ~50 commits ahead of `main`. **This is the user's call to make, not
+   an agent's** — it is outward-facing.
+
+### Then, in rough value order
+
+- **9i — row grouping** (`L`). The biggest remaining parity gap. **Read the warning in 9i before
+  starting**: it changes row-space mapping globally, so it interacts with every decorator's coordinate
+  contract — including the three hooks 9j just added.
+- **`TBD.md` N3–N15** — 13 audited gaps with sizes and source citations. `rightElement` and external
+  HTML5 drag-and-drop are the two genuinely new subsystems.
+- **9h leftovers** — controlled-selection mode, span/merged-cell selection, the `onSelect` renderer
+  hook, keybinding remapping, nav variants. (Two other 9h items were found **already fixed**; see the
+  audit note there.)
+- **Queue item 7, lint** — 117 eslint + 65 prettier. Blocks `ci.yml`/`release.yml`, i.e. **npm
+  publishing**. Confirmed **not** to block the Pages deploy.
+
+**Deferred by explicit user decision — do not propose these:** 9b (accessibility), 9c (touch), 9p
+(Playwright).
+
+### How to work on this repo, learned the hard way today
+
+- **Nearly every remaining item touches `grid-host-controller.ts` (~5,200 lines).** Agents cannot work
+  it in parallel — they will conflict. Serialize controller work; `src/data-source/`, `test-app/`
+  docs, and new demo files are the only safely-parallel areas.
+- **Two agents were killed mid-run by usage limits.** Both times the work was salvageable and nearly
+  complete. **Check `git status` and run the full verification before relaunching** — the standing
+  rule in CLAUDE.md, and it paid off twice.
+- **The controller cannot be imported by vitest.** Extracting logic into pure `src/rendering/` modules
+  is the *only* way it becomes testable; that pattern produced ~60 of today's new tests.
+- **Browser testing**: run the dev server on a **unique port** and build `dist/` explicitly first. A
+  watch build rebuilding underneath a test invalidated a whole verification pass today, and an
+  occluded Chrome window makes the grid completely inert (`visibilityState: "hidden"`, canvases 0x0)
+  — check that before believing any failure.
+
 ## THE QUEUE — start here (accurate as of 2026-08-09, end of session)
 
 **Done on branch `phase-9-partial`**: 9q both halves (the addon's DOM is fully restylable), 9e
