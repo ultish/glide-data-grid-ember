@@ -87,6 +87,8 @@ import type {
     Theme,
     FullTheme,
     GetRowThemeCallback,
+    GroupDetails,
+    GroupDetailsCallback,
     CellArray,
     GetCellsThunk,
     DrawCellCallback,
@@ -128,6 +130,7 @@ import {
     type MappedGridColumn,
 } from "../rendering/render/data-grid-lib.ts";
 import { computeHeaderLayout } from "../rendering/render/data-grid-render.header.ts";
+import { hitTestGroupHeaderAction, type GroupHeaderAction } from "../rendering/render/group-header-actions.ts";
 import { pointInRect } from "../rendering/common/math.ts";
 import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
@@ -223,6 +226,23 @@ export interface GridHostArgs {
     readonly resizeIndicator?: "full" | "header" | "none";
     /** Enables wrapping text beyond the normal cell boundary. @defaultValue false */
     readonly hyperWrapping?: boolean;
+    /**
+     * Resolves a column-group name to how its header strip is drawn: a display `name` (which may
+     * differ from the key on `column.group`), an optional `icon` from the header-icon sprite set, an
+     * optional `overrideTheme` merged over the grid theme for that strip only, and optional
+     * `actions` -- icon buttons drawn right-aligned in the strip, which appear on hover and get
+     * their own hit targets. Mirrors source's `getGroupDetails`.
+     *
+     * Anything you leave out falls back: a result with no `name` gets the group key. Return
+     * `undefined` for a group to accept every default. (Source requires `name`; this port makes it
+     * optional so an icon-only or actions-only override does not have to restate the name it is not
+     * changing.)
+     *
+     * **Keep the callback itself reference-stable** (a class-field arrow, not an inline `{{fn}}` or
+     * a fresh closure per render): the controller memoizes its own wrapper on this identity, and the
+     * grid's `computeCanBlit` fast path is identity-sensitive throughout -- see TODO.md rule 1.
+     */
+    readonly getGroupDetails?: (groupName: string) => Partial<GroupDetails> | undefined;
     /**
      * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
      * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
@@ -898,6 +918,9 @@ interface ResolvedGridHostArgs {
     readonly verticalBorder: (col: number) => boolean;
     readonly resizeIndicator: "full" | "header" | "none";
     readonly hyperWrapping: boolean;
+    /** Always defined: {@link GridHostController.resolvedGroupDetails} fills in the defaults, so
+     *  every reader (draw, hit test) sees the same total function. */
+    readonly getGroupDetails: GroupDetailsCallback;
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
@@ -1015,14 +1038,17 @@ const PRINTABLE_CHAR_RE = /[\p{L}\p{M}\p{N}\p{S}\p{P}]/u;
 // disabled the scroll blit fast path entirely. Found in Phase 6, see PORTING-NOTES.md.
 const ALWAYS_VERTICAL_BORDER = (): boolean => true;
 
-// `DrawGridArg.getGroupDetails` -- resolves a group name to its render details. This port doesn't
-// expose source's richer `GroupDetails` (icon/overrideTheme/actions) or its `onGroupHeaderRenamed`
-// plumbing, so the default identity mapping is the whole implementation. Hoisted to module scope
-// for the same identity-stability reason as `ALWAYS_VERTICAL_BORDER` above -- `getGroupDetails`
-// happens not to be one of `computeCanBlit`'s identity-compared fields today, but an inline
-// closure in `runDraw` is exactly the shape that silently broke the blit path in Phase 6, so this
-// port keeps every `DrawGridArg` value reference-stable by default rather than by case analysis.
-const DEFAULT_GROUP_DETAILS = (name: string): { name: string } => ({ name });
+// `DrawGridArg.getGroupDetails` -- the fallback when the consumer passes no `@getGroupDetails`:
+// the group's key *is* its display name and it has no icon, theme or actions. Source's own default
+// (`data-grid.tsx:830`, `getGroupDetails ?? (name => ({ name }))`).
+//
+// Hoisted to module scope for the same identity-stability reason as `ALWAYS_VERTICAL_BORDER` above
+// -- `getGroupDetails` happens not to be one of `computeCanBlit`'s identity-compared fields today,
+// but an inline closure in `runDraw` is exactly the shape that silently broke the blit path in
+// Phase 6, so this port keeps every `DrawGridArg` value reference-stable by default rather than by
+// case analysis. The consumer-supplied case is memoized in `resolvedGroupDetails` for the same
+// reason.
+const DEFAULT_GROUP_DETAILS = (name: string): GroupDetails => ({ name });
 
 // Phase 3d: column resize/reorder. Resize-edge hit region width (px) at a header cell's right
 // border; source doesn't expose an exact named constant for this in the parts of `data-grid.tsx`
@@ -1662,6 +1688,7 @@ export class GridHostController {
             verticalBorder: args.verticalBorder ?? ALWAYS_VERTICAL_BORDER,
             resizeIndicator: args.resizeIndicator ?? "none",
             hyperWrapping: args.hyperWrapping ?? false,
+            getGroupDetails: this.resolvedGroupDetails(args.getGroupDetails),
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
@@ -1774,6 +1801,43 @@ export class GridHostController {
         if (cached !== undefined && cached.columns === args.columns) return cached.value;
         const value = args.columns.some(c => c.group !== undefined);
         this.enableGroupsCache = { columns: args.columns, value };
+        return value;
+    }
+
+    // 4.2: the consumer's `@getGroupDetails`, wrapped so every reader gets a *total* function --
+    // source's `mangledGetGroupDetails` (`data-editor.tsx:1401-1425`), which likewise fills in
+    // `{ name: group }` for a group the consumer says nothing about. (Source's other job there,
+    // injecting a "Rename" action for `onGroupHeaderRenamed`, has no counterpart here yet: group
+    // renaming needs a second inline overlay host and is still deferred -- see TODO.md 4.2.)
+    //
+    // Memoized on the consumer callback's identity for the reason spelled out on
+    // `DEFAULT_GROUP_DETAILS`: this value ends up in `DrawGridArg`, and this port keeps every field
+    // of that reference-stable rather than reasoning case-by-case about which ones `computeCanBlit`
+    // compares today. A consumer who passes a fresh arrow per render defeats the cache but breaks
+    // nothing -- the `GridHostArgs` doc comment asks for a stable one.
+    private groupDetailsCache:
+        | {
+              readonly src: (groupName: string) => Partial<GroupDetails> | undefined;
+              readonly value: GroupDetailsCallback;
+          }
+        | undefined;
+
+    private resolvedGroupDetails(
+        src: ((groupName: string) => Partial<GroupDetails> | undefined) | undefined
+    ): GroupDetailsCallback {
+        if (src === undefined) return DEFAULT_GROUP_DETAILS;
+        const cached = this.groupDetailsCache;
+        if (cached !== undefined && cached.src === src) return cached.value;
+        const value: GroupDetailsCallback = groupName => {
+            const result = src(groupName);
+            // `name` is the only field the render path dereferences unconditionally
+            // (`data-grid-render.header.ts:187`), so it is the only one worth defaulting. The
+            // spread costs one small object per group per frame, the same order as
+            // `DEFAULT_GROUP_DETAILS` already allocated.
+            if (result === undefined) return { name: groupName };
+            return { ...result, name: result.name ?? groupName };
+        };
+        this.groupDetailsCache = { src, value };
         return value;
     }
 
@@ -2287,7 +2351,9 @@ export class GridHostController {
                 this.cursorOverride = cursor;
                 this.applyCursor();
             },
-            getGroupDetails: DEFAULT_GROUP_DETAILS,
+            // 4.2: memoized on the consumer callback's identity in `resolvedGroupDetails`, and the
+            // module-scoped default when there is none.
+            getGroupDetails: args.getGroupDetails,
             getRowThemeOverride: args.getRowThemeOverride,
             // Phase 9: consumer draw hooks. Passed straight through -- `prelightCells` and
             // `highlightRegions` are identity-compared by `computeCanBlit`, so the stability
@@ -3413,6 +3479,30 @@ export class GridHostController {
         return layout.menuBounds;
     }
 
+    /**
+     * Hit-test for a group header's action icons (4.2). Port of source's
+     * `groupHeaderActionForEvent` (`data-grid.tsx:1004-1029`); the geometry and the comparison it
+     * makes live in `rendering/render/group-header-actions.ts` so they are shared with the drawing
+     * code and reachable from vitest.
+     *
+     * Returns `undefined` for anything that is not a group-header press, so callers can ask
+     * unconditionally.
+     */
+    private hitTestGroupHeaderAction(args: ResolvedGridHostArgs, hit: MouseHit): GroupHeaderAction | undefined {
+        if (hit.kind !== "header" || hit.location[1] !== -2 || !this.enableGroups(args)) return undefined;
+        const mangledCol = hit.location[0];
+        const groupName = args.columns[mangledCol - args.rowMarkerOffset]?.group ?? "";
+        // `computeCellRect` grows a group header's rect across its whole span (row `-2` is handled
+        // natively by `computeBounds`), which is the rect the actions were drawn right-aligned in.
+        const bounds = this.computeCellRect(args, mangledCol, -2);
+        return hitTestGroupHeaderAction(
+            args.getGroupDetails(groupName),
+            bounds,
+            hit.localX - bounds.x,
+            hit.localY - bounds.y
+        );
+    }
+
     // Hit-test for a header column's resize-edge region (Phase 3d) -- a narrow strip at the
     // column's right border, `RESIZE_EDGE_PX` wide. `localX` is root-relative, same coordinate
     // space `computeBounds` returns. Resize is only reachable when at least one of the three
@@ -3555,6 +3645,15 @@ export class GridHostController {
         // dispatch. Resize gets first priority, matching source's DND wrapper; otherwise a menu
         // glyph at the same right edge would consume the resize gesture.
         if (hit.kind === "header") {
+            // 4.2: a press on one of a group header's action icons is not a grid interaction at all
+            // -- it must not select the group's columns, not start a column drag, and not record a
+            // press location. Source returns from `onPointerDown` before calling any of that
+            // (`data-grid.tsx:1104-1110`); the action fires on the matching pointerup.
+            if (this.hitTestGroupHeaderAction(args, hit) !== undefined) {
+                this.pendingHeaderMenuClick = undefined;
+                return;
+            }
+
             // Column resize (Phase 3d): mousedown on a header's resize-edge starts a resize drag
             // and is exclusive with normal header-click selection/reorder, exactly like the
             // menu-glyph check above -- mirrors source's `onMouseDownImpl`
@@ -3692,6 +3791,28 @@ export class GridHostController {
             this.overFillHandle = hit.kind === "cell" && this.hitTestFillHandle(args, hit.localX, hit.localY);
             this.applyCursor();
             return;
+        }
+
+        // 4.2: group-header actions. Checked ahead of every other mouseup path because source does
+        // exactly that (`data-grid.tsx:1183-1194`, before its `onMouseUp` runs at all): an action
+        // click reports itself and nothing else -- no `@onGroupHeaderClicked`, no group selection.
+        // The matching mousedown returned early, so there is no drag or press state to unwind here.
+        {
+            const args = this.resolveArgs();
+            const hit = this.resolveMouseHit(args, ev);
+            const action = this.hitTestGroupHeaderAction(args, hit);
+            if (action !== undefined) {
+                // Source swallows the mouseup for any button but only *fires* on the primary one.
+                if (ev.button === 0) {
+                    const eventArgs = this.buildMouseEventArgs(args, hit.location, {
+                        ...this.clickEventBase(hit),
+                        localX: hit.localX,
+                        localY: hit.localY,
+                    });
+                    if (eventArgs.kind === groupHeaderKind) action.onClick(eventArgs);
+                }
+                return;
+            }
         }
 
         // 9g: the click notifications, placed here on purpose -- ahead of the drag branches below,

@@ -14,7 +14,10 @@ import {
     roundedPoly,
     type MappedGridColumn,
 } from "./data-grid-lib.ts";
-import type { GroupDetails, GroupDetailsCallback } from "./data-grid-render.cells.ts";
+import type { GroupDetailsCallback } from "./data-grid-render.cells.ts";
+// Shared with the *hit test* in `group-header-actions.ts`; see that file's header for why it lives
+// there rather than here.
+import { getActionBoundsForGroup } from "./group-header-actions.ts";
 import { walkColumns, walkGroups } from "./data-grid-render.walk.ts";
 import { drawCheckbox } from "./draw-checkbox.ts";
 import type { DragAndDropState, HoverInfo } from "./draw-grid-arg.ts";
@@ -293,27 +296,6 @@ function getHeaderMenuBounds(x: number, y: number, width: number, height: number
         width: menuButtonSize,
         height: Math.min(menuButtonSize, height),
     };
-}
-
-export function getActionBoundsForGroup(
-    box: Rectangle,
-    actions: NonNullable<GroupDetails["actions"]>
-): readonly Rectangle[] {
-    const result: Rectangle[] = [];
-    let x = box.x + box.width - 26 * actions.length;
-    const y = box.y + box.height / 2 - 13;
-    const height = 26;
-    const width = 26;
-    for (let i = 0; i < actions.length; i++) {
-        result.push({
-            x,
-            y,
-            width,
-            height,
-        });
-        x += 26;
-    }
-    return result;
 }
 
 type Mutable<T> = {

@@ -4993,3 +4993,65 @@ mattered — but "fresh array = no blit" was never the precise statement.
 **Rule for future doc comments:** say *which* comparison a field gets. `===` for the identity-compared
 fields; structural-with-a-bail-out for `mappedColumns`. Overstating it produces confident but wrong
 design arguments, which is exactly what happened in the `data-source/` headers.
+
+## 4.2 — `@getGroupDetails`: group-header icons, themes and actions (COMPLETE, browser-verified, 2026-08-12)
+
+TODO.md §4.2. `DrawGridArg.getGroupDetails` had been hardcoded to `name => ({ name })` since Phase 7b,
+so **three render paths that have existed since Phase 1 had never once executed**: the group-strip
+icon, the per-group `overrideTheme`, and the hover-revealed action buttons (`drawGroups`,
+`render/data-grid-render.header.ts:184-259`). The usual shape — dormant code that no demo switched on,
+the same as `column.icon`, `grow` and the fill handle before it. Nothing needed porting in the render
+engine; the whole item was the arg, the hit test, and wiring it into a demo.
+
+### What landed
+
+- **`GridHostArgs.getGroupDetails` / `<GlideDataGrid @getGroupDetails>`**, resolved through
+  `GridHostController.resolvedGroupDetails` — source's `mangledGetGroupDetails`
+  (`data-editor.tsx:1401-1425`), memoized on the consumer callback's identity for the usual
+  `DrawGridArg` reference-stability reason.
+  **One deliberate divergence:** the arg returns `Partial<GroupDetails>`, so an icon-only or
+  actions-only override need not restate a `name` it is not changing; the wrapper fills the group key
+  in. Source requires `name`.
+- **`rendering/render/group-header-actions.ts`** (new) — `getActionBoundsForGroup` (moved out of
+  `data-grid-render.header.ts`) plus `hitTestGroupHeaderAction`. Both halves in one leaf module
+  because the *drawing* and the *clicking* only agree if they share the geometry, and the controller
+  is not importable from vitest. 7 tests.
+- **Click routing**, ported from `data-grid.tsx:1104-1110` (down) and `:1183-1194` (up): a press on an
+  action returns from `onMouseDown` before recording any press/drag state, and `onMouseUp` fires the
+  action ahead of every other path. So an action click reports itself and *nothing else* — no
+  `@onGroupHeaderClicked`, no group-column selection. Browser-confirmed both ways.
+- **`withCollapsingGroups` now returns a `getGroupDetails`**, closing the "no collapsed-group header
+  tint" gap its own header had been carrying since 9j. It *wraps* a consumer's callback rather than
+  replacing it, and merges their `overrideTheme` under the tint instead of discarding it — the same
+  divergence `applySpans` already makes for `themeOverride`, kept consistent within the file.
+- Wired into **`<DemoGrid>`** (icons on all five groups, `overrideTheme` + a renamed strip on one,
+  two actions on another) and **`<ComposedDemo>`** (the collapsed tint). Cookbook: a new group-band
+  block in *Columns*, the composing chapter's list, and **the theming precedence table gained a
+  sixth level** — a group's `overrideTheme` applies to the strip, its columns' headers *and* their
+  cells (`data-grid-render.cells.ts:157`), sitting between `@theme` and `column.themeOverride`.
+
+### Source quirk reproduced on purpose
+
+`groupHeaderActionForEvent` compares y as `pointInRect(box, localEventX + bounds.x, localEventY + box.y)`
+— it adds the *box's* own `y` to the local pointer y, so the hit region is the top 26px of the strip
+rather than the icons' actual vertical extent. Ported verbatim with a comment and a test that pins it;
+a "fix" would silently give consumers different click targets from their React version. Browser-checked:
+clicking 15px lower at the same x falls through to an ordinary group-header click, exactly as predicted.
+
+### Found in passing, NOT fixed (recorded in TODO.md §4.5)
+
+`onMouseDown` starts a column-reorder drag for `hit.kind === "header"` without excluding the group
+band (`hit.location[1] === -2`). Source cannot: its `kind` is `"group-header"` there, and
+`data-grid-dnd.tsx:158` only matches `"header"`. So this port lets a column be dragged by its *group*
+strip. Left alone deliberately — it is drag code (see 9h's warning), it is not part of 4.2, and it
+degrades rather than breaks.
+
+### Browser-verification method worth reusing
+
+The `computer` tool's screenshot coordinates are **not** page coordinates when the display is scaled
+(1512-wide screenshot over a 1712-CSS-px canvas here), and the demo's status line rewraps as its text
+changes, moving the grid by ~24px mid-test. Both together produced a convincing false "group-header
+clicks are broken" reading. The reliable method is CLAUDE.md's existing rule generalised: dispatch
+`MouseEvent`s at canvas-relative coordinates from `javascript_tool`, `await` ~150ms for Ember to
+render, then read `.gdg-full__status`'s text. Synchronous reads right after dispatch return the
+*previous* state, which is its own way to be misled.

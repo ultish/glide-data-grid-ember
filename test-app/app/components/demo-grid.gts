@@ -78,6 +78,7 @@ import {
     type CellActivatedEventArgs,
     type CellActivationBehavior,
     type GroupHeaderClickedEventArgs,
+    type GroupDetails,
 } from "glide-data-grid-ember/rendering/index";
 
 // Phase 9: `@extraCells` replaces this demo's old hand-built `createCombinedCellRenderer(...)`
@@ -144,6 +145,25 @@ const DARK_THEME: Partial<Theme> = getDataEditorDarkTheme();
 // right-click), and header icons were dead code for six phases because nothing ever set
 // `column.icon`.
 const COLUMN_GROUPS = ["Identity", "Content", "Media", "Signals", "Records"] as const;
+
+// 4.2: what each group's header strip shows, beyond its name. `getGroupDetails` was hardcoded to
+// `name => ({ name })` from Phase 7b until 4.2, so **the icon, per-group theme and action paths in
+// `drawGroups` had never once run** even though the render engine has consumed all three since
+// Phase 1 -- the same dormant-feature shape as `column.icon` and `grow` before it.
+//
+// One group gets a theme override and one gets two actions, so a single glance covers: icon-only,
+// theme-only, actions, and (for the ungrouped tail columns) no details at all.
+const GROUP_ICONS: Readonly<Record<string, string>> = {
+    Identity: "headerRowID",
+    Content: "headerString",
+    Media: "headerImage",
+    Signals: "headerMath",
+    Records: "headerArray",
+};
+/** The group whose strip is re-themed, to prove `overrideTheme` merges over the grid theme. */
+const THEMED_GROUP = "Media";
+/** The group carrying action icons. Two of them, so their left-to-right order is checkable. */
+const ACTION_GROUP = "Signals";
 
 // A custom glyph merged **over** the built-in set via `@headerIcons`. The built-ins are always
 // present, so this is only needed to add a glyph of your own or restyle a stock one. The `fg`/`bg`
@@ -751,6 +771,46 @@ export default class DemoGrid extends Component {
         this.lastClick = `group header over col ${col}`;
     };
 
+    /**
+     * 4.2: `@getGroupDetails`. A class-field arrow, so its identity never changes -- the controller
+     * memoizes its wrapper on it, and every `DrawGridArg` field this port hands over is kept
+     * reference-stable (rule 1).
+     *
+     * The actions are hover-revealed: they draw, and are clickable, only while the pointer is over
+     * their group's strip. Clicking one reports itself and nothing else -- no `@onGroupHeaderClicked`
+     * and no group-column selection -- which is what the `lastClick` readout below distinguishes.
+     */
+    getGroupDetails = (group: string): Partial<GroupDetails> | undefined => {
+        if (group === "") return undefined;
+        const icon = GROUP_ICONS[group];
+        const actions =
+            group === ACTION_GROUP
+                ? ([
+                      {
+                          title: "Rename",
+                          icon: "renameIcon",
+                          onClick: () => {
+                              this.lastClick = `group action "Rename" on ${group}`;
+                          },
+                      },
+                      {
+                          title: "Info",
+                          icon: "headerReference",
+                          onClick: () => {
+                              this.lastClick = `group action "Info" on ${group}`;
+                          },
+                      },
+                  ] satisfies GroupDetails["actions"])
+                : undefined;
+        return {
+            // The strip's label need not be the key on `column.group`; this proves it.
+            name: group === THEMED_GROUP ? `${group} (themed)` : group,
+            icon,
+            overrideTheme: group === THEMED_GROUP ? { bgHeader: "#2d3f5f", textGroupHeader: "#ffffff" } : undefined,
+            actions,
+        };
+    };
+
     toggleSuppressGroupHeaderSelect = (): void => {
         this.suppressGroupHeaderSelect = !this.suppressGroupHeaderSelect;
     };
@@ -1342,6 +1402,8 @@ export default class DemoGrid extends Component {
                     {{! Column groups + header icons (Phase 7b / Phase 1's sprite set). Groups are
                         also the only way `@onGroupHeaderContextMenu` is reachable. }}
                     @headerIcons={{this.headerIcons}}
+                    {{! 4.2: group-header icons, per-group theme, and hover-revealed action icons. }}
+                    @getGroupDetails={{this.getGroupDetails}}
                     @freezeColumns={{this.freezeColumns}}
                     @verticalBorder={{DEMO_VERTICAL_BORDER}}
                     @resizeIndicator="full"

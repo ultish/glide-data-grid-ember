@@ -18,13 +18,13 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-09:** `main` is pushed, GitHub Pages is deployed and working. 842 vitest tests
+**State as of 2026-08-12:** `main` is pushed, GitHub Pages is deployed and working. 853 vitest tests
 pass. Phases 0–11 are done; what is left is the backlog below.
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~600ms. 840 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 853 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -191,19 +191,18 @@ every decorator's coordinate contract (rule 4 above) — including the three hoo
 `recordsSource`, `AsyncRecordsSource`). This is the item most likely to break things quietly. Give it
 its own session with a browser available; do not squeeze it in.
 
-### 4.2 `getGroupDetails` — group header icons, themes, actions — `M`
+### 4.2 `getGroupDetails` — group header icons, themes, actions — DONE (2026-08-12)
 
-Hardcoded to `DEFAULT_GROUP_DETAILS` (defined at `grid-host-controller.ts:1020`, wired in around
-`:1804`); a comment near the theme merge notes group themes can therefore never merge. **The render engine already consumes it fully**
-(`rendering/render/data-grid-render.ts:439`).
+Shipped as `<GlideDataGrid @getGroupDetails={{fn}}>`: display name, `icon`, `overrideTheme`, and
+`actions` (hover-revealed icon buttons with their own hit targets, which report themselves and
+suppress both `@onGroupHeaderClicked` and the group-column selection). `withCollapsingGroups` now
+returns one too, closing its "no collapsed-group header tint" gap. Browser-verified; 11 new tests.
+Full write-up, including the source y-comparison quirk that is reproduced on purpose, in
+**PORTING-NOTES.md → "4.2 — `@getGroupDetails`"**.
 
-Source shape: `getGroupDetails(group) => { name, icon?, overrideTheme?, actions? }`, where `actions`
-are clickable icons drawn into the group strip with their own hit targets.
-
-**This is the prop several other things hang off**, and group-header *actions* appear in no backlog
-item at all. `onGroupHeaderRenamed` (deferred during 9g) is implemented in source by injecting a
-"Rename" entry into `actions` plus a second inline overlay host — so it needs this first. Do this
-before or alongside further group work, not after.
+**`onGroupHeaderRenamed` is still unported** and this was its prerequisite: source implements it by
+injecting a "Rename" entry into `actions` (`data-editor.tsx:1401-1425`) plus a second inline overlay
+host. The `actions` half now exists, so what is left is the overlay host and the callback.
 
 ### 4.3 `rightElement` / `rightElementProps` — `M`
 
@@ -233,6 +232,7 @@ reusing the existing `resolveMouseHit` for the cell target.
 | **`preventDiagonalScrolling`** | `S` | Locks scrolling to one axis per gesture. |
 | **`onPaste` prop** | `S` | `boolean \| ((target, values) => boolean)` — veto a paste wholesale. The port's paste path (search `onPaste` in the controller) is unconditional. **Not** substituted by `coercePasteValue`, which is per-value. |
 | **`experimental` bag, rest** | `S` each | `paddingRight`/`paddingBottom`, `eventTarget`, `strict`, `scrollbarWidthOverride`, `disableMinimumCellWidth` (`minimumCellWidth: 10` hardcoded at `:2303`), `renderStrategy` (derived from `browserIsSafari` at `:2299`, not overridable). |
+| **Column drag starts from the group band** | `S` | Found during 4.2, not fixed. `onMouseDown`'s `hit.kind === "header"` branch records `dragColState` without excluding row `-2`, so a column can be reordered by dragging its *group* strip. Source cannot: its kind is `"group-header"` there and `data-grid-dnd.tsx:158` only matches `"header"`. One guard — but it is drag code (see 9h), so give it a browser check. |
 | **Shadow DOM** | `S` to check | Never tried. **Unknown, not broken.** Risks: `window`-scoped listeners (`paste` at `:1484`, the window-level `mousemove` from 9h) and the measurement canvas appended to `document.documentElement` at `:1408`. Overlay editors append to the grid root, which is the good case. |
 
 ### 4.6 Interaction gaps (formerly 9h)

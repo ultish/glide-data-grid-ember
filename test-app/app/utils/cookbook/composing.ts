@@ -69,6 +69,7 @@ get gridArgs() {
   @onCellsEdited={{this.gridArgs.onCellsEdited}}
   @onColumnMoved={{this.gridArgs.onColumnMoved}}            {{! enables the reorder drag }}
   @onGroupHeaderClicked={{this.gridArgs.onGroupHeaderClicked}}
+  @getGroupDetails={{this.gridArgs.getGroupDetails}}        {{! tints a collapsed group's header }}
   @onSelectionChanged={{this.gridArgs.onSelectionChanged}}
   ...
 />`,
@@ -86,6 +87,7 @@ get gridArgs() {
             items: [
                 '`withMovableColumns` expresses order as **column keys** (`id`, falling back to `"<group>/<title>"`), not indices — give every column an `id`. Keys naming columns that no longer exist are ignored, and a column missing from a saved order is slotted in beside its left-hand neighbour rather than dumped at one end. Export `columnOrderKey` if you need to build the initial value: `columns.map(columnOrderKey)`.',
                 "`withCollapsingGroups` needs columns with `group` set — grouping is driven entirely by that field. It **remaps nothing**: collapsing shrinks a run of columns to 8px slivers, so every column keeps its index and there is no write path to translate. It also expands a collapsed group when the selection lands inside it, which is why you wire its `onSelectionChanged` rather than your own.",
+                "`withCollapsingGroups` also returns a `getGroupDetails` that tints a collapsed group's *header strip*. Wire it or the slivers are tinted while the header above them is not. It wraps your own `getGroupDetails` if you pass one in, so you keep your group icons and names.",
                 "`UndoRedo` is a class you construct once, like `AsyncRecordsSource`, because it owns two stacks. Call `wrap()` from inside the same `@cached` getter — **not** from the constructor: `recordsSource` hands back a fresh `getCellContent` every time the data changes, and one captured at construction time would make undo write values that were current when the grid was built.",
                 "`UndoRedo` holds no tracked state (the whole data-source layer is Ember-free below `recordsSource`), so drive your buttons from `onHistoryChanged` into a `@tracked` field. `handleKeyDown` / `attachKeyboardShortcuts()` give you primary+Z, primary+Shift+Z and primary+Y; nothing is bound for you.",
                 "One `@onCellsEdited` call is one undo step. A paste, a fill-handle drag and a delete-over-a-range each arrive as a single batch, so they each undo in one go.",

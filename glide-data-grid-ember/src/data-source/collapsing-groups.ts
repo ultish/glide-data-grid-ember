@@ -37,13 +37,9 @@
 // WHAT THIS PORT CANNOT DO YET
 // -------------------------------------------------------------------------------------------
 //
-//  1. **No collapsed-group header tint.** Source also returns a `getGroupDetails` that gives a
-//     collapsed group's header `bgHeaderHasFocus`. This addon hardcodes `getGroupDetails` to an
-//     identity mapping in `grid-host-controller.ts` (`DEFAULT_GROUP_DETAILS`) and exposes no arg, so
-//     the collapsed *cells* are tinted (via each column's `themeOverride`, which is exposed) but the
-//     group header itself is not.
-//
-// That is a `GridHostArgs` addition, not data-source work; see the 9j report.
+// (The one gap that used to be listed here -- no collapsed-group header tint, because the grid
+// hardcoded `getGroupDetails` -- closed when `<GlideDataGrid @getGroupDetails>` landed in 4.2. This
+// module now returns one; pass it through.)
 //
 // -------------------------------------------------------------------------------------------
 // IDENTITY STABILITY -- read `column-sort.ts`'s header first.
@@ -56,6 +52,7 @@
 // new `columns` identity on every call of a grid that has never been collapsed).
 
 import type { GridColumn, GridSelection } from "../rendering/data-grid-types.ts";
+import type { GroupDetails } from "../rendering/render/data-grid-render.cells.ts";
 import type { Theme } from "../rendering/theme.ts";
 import { getDataEditorTheme } from "../rendering/theme.ts";
 
@@ -86,10 +83,16 @@ export interface CollapsingGroupsProps {
     /** Mirror of the grid's own `@freezeColumns`. Frozen columns are never collapsed. @defaultValue 0 */
     readonly freezeColumns?: number;
     /**
-     * The same `@theme` overlay you pass the grid, if any. Only `bgCellMedium` is read, for the
-     * collapsed columns' tint; the built-in light theme's value is used for anything not overridden.
+     * The same `@theme` overlay you pass the grid, if any. Only `bgCellMedium` (the collapsed
+     * columns' tint) and `bgHeaderHasFocus` (the collapsed group header's tint) are read; the
+     * built-in light theme's values are used for anything not overridden.
      */
     readonly theme?: Partial<Theme>;
+    /**
+     * Your own `@getGroupDetails`, if you have one. Wrapped rather than replaced: the returned one
+     * calls yours first and then adds the collapsed tint.
+     */
+    readonly getGroupDetails?: (groupName: string) => Partial<GroupDetails> | undefined;
     /**
      * Your own `@onSelectionChanged`, if you have one. Called after the auto-expand check, with the
      * selection untouched.
@@ -131,6 +134,16 @@ export interface CollapsingGroupsResult {
      * `preventDefault()` stops the collapse from also selecting every column in the group.
      */
     readonly onGroupHeaderClicked: (col: number, event?: { preventDefault: () => void }) => void;
+    /**
+     * Pass to `@getGroupDetails`. Tints a collapsed group's header strip with `bgHeaderHasFocus`,
+     * so the collapsed slivers read as one folded group rather than as narrow columns, and forwards
+     * everything else to your own `getGroupDetails`.
+     *
+     * Divergence from source, matching the one `applySpans` already makes for `themeOverride`: your
+     * `overrideTheme` is *merged* under the tint instead of being discarded, and a `name` you
+     * return wins over the group key.
+     */
+    readonly getGroupDetails: (groupName: string) => Partial<GroupDetails>;
     /** Collapse the group if expanded, expand it if collapsed. The primitive the rest is built on. */
     readonly toggleGroup: (group: string) => void;
     /** True if `group` is currently collapsed. For rendering your own chevrons/toggles. */
@@ -208,9 +221,11 @@ interface CacheEntry {
     readonly collapsedKey: string;
     readonly freezeColumns: number;
     readonly bgCell: string;
+    readonly bgHeaderCollapsed: string;
     readonly rowMarkerOffset: number;
     readonly onCollapsedChange: (collapsed: readonly string[]) => void;
     readonly onSelectionChangedIn: ((selection: GridSelection) => void) | undefined;
+    readonly getGroupDetailsIn: ((groupName: string) => Partial<GroupDetails> | undefined) | undefined;
     readonly result: CollapsingGroupsResult;
 }
 
@@ -254,10 +269,12 @@ export function withCollapsingGroups(p: CollapsingGroupsProps): CollapsingGroups
         collapsed,
         onCollapsedChange,
         onSelectionChanged: onSelectionChangedIn,
+        getGroupDetails: getGroupDetailsIn,
         freezeColumns = 0,
         rowMarkerOffset = 0,
     } = p;
     const bgCell = p.theme?.bgCellMedium ?? getDataEditorTheme().bgCellMedium;
+    const bgHeaderCollapsed = p.theme?.bgHeaderHasFocus ?? getDataEditorTheme().bgHeaderHasFocus;
     const collapsedKey = collapsedCacheKey(collapsed);
 
     const cached = cache.get(columns);
@@ -266,9 +283,11 @@ export function withCollapsingGroups(p: CollapsingGroupsProps): CollapsingGroups
         cached.collapsedKey === collapsedKey &&
         cached.freezeColumns === freezeColumns &&
         cached.bgCell === bgCell &&
+        cached.bgHeaderCollapsed === bgHeaderCollapsed &&
         cached.rowMarkerOffset === rowMarkerOffset &&
         cached.onCollapsedChange === onCollapsedChange &&
-        cached.onSelectionChangedIn === onSelectionChangedIn
+        cached.onSelectionChangedIn === onSelectionChangedIn &&
+        cached.getGroupDetailsIn === getGroupDetailsIn
     ) {
         return cached.result;
     }
@@ -306,6 +325,15 @@ export function withCollapsingGroups(p: CollapsingGroupsProps): CollapsingGroups
             event?.preventDefault();
             toggleGroup(group);
         },
+        getGroupDetails: (groupName: string): Partial<GroupDetails> => {
+            const incoming = getGroupDetailsIn?.(groupName);
+            if (!isCollapsed(groupName)) return incoming ?? { name: groupName };
+            return {
+                ...incoming,
+                name: incoming?.name ?? groupName,
+                overrideTheme: { ...incoming?.overrideTheme, bgHeader: bgHeaderCollapsed },
+            };
+        },
         toggleGroup,
         isCollapsed,
     };
@@ -314,9 +342,11 @@ export function withCollapsingGroups(p: CollapsingGroupsProps): CollapsingGroups
         collapsedKey,
         freezeColumns,
         bgCell,
+        bgHeaderCollapsed,
         rowMarkerOffset,
         onCollapsedChange,
         onSelectionChangedIn,
+        getGroupDetailsIn,
         result,
     });
     return result;

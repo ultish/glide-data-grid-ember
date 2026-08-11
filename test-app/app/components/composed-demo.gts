@@ -381,6 +381,11 @@ export default class ComposedDemo extends Component {
                     @onCellsEdited={{this.handleCellsEdited}}
                     @onColumnMoved={{this.gridArgs.onColumnMoved}}
                     @onGroupHeaderClicked={{this.gridArgs.onGroupHeaderClicked}}
+                    {{! 4.2: `withCollapsingGroups` also returns a `getGroupDetails`, which tints a
+                        collapsed group's header strip. Without this line a collapsed group's *cells*
+                        are tinted but its header is not, which is what the grid did for everyone
+                        before `@getGroupDetails` existed. }}
+                    @getGroupDetails={{this.gridArgs.getGroupDetails}}
                     @onSelectionChanged={{this.gridArgs.onSelectionChanged}}
                     @rowMarkers="both"
                     @rowSelect="multi"

@@ -113,6 +113,13 @@ export { getDataEditorTheme, getDataEditorDarkTheme, mergeAndRealizeTheme, makeC
 // Defined next to the cell renderer that consumes it; re-exported here so consumers of
 // `<GlideDataGrid @getRowThemeOverride={{...}}>` can type their callback without a deep import.
 export type { GetRowThemeCallback, Highlight } from "./render/data-grid-render.cells.ts";
+// Column-group header details (4.2) -- what `<GlideDataGrid @getGroupDetails={{...}}>` returns:
+// display name, icon, per-group theme overlay, and the hoverable action buttons drawn into the
+// group strip. `GroupHeaderAction` is one entry of `GroupDetails.actions`, handy for typing a
+// standalone action object.
+export type { GroupDetails, GroupDetailsCallback } from "./render/data-grid-render.cells.ts";
+export type { GroupHeaderAction } from "./render/group-header-actions.ts";
+export { getActionBoundsForGroup, hitTestGroupHeaderAction } from "./render/group-header-actions.ts";
 
 // Selection writer (Phase 3a) -- pure GridSelection transform functions, ported from source's
 // `use-selection-behavior.ts` hook.

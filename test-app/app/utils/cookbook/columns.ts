@@ -31,6 +31,27 @@ group: "Metrics", icon: "headerNumber", hasMenu: true },
         },
         {
             kind: "p",
+            text: "**Customising the group band.** `group` on a column is only its key. `@getGroupDetails` decides what the strip above it shows — a different display name, an icon, a theme overlay for that strip and the headers under it, and `actions`: icon buttons drawn at the right-hand end that appear on hover and have their own click targets.",
+        },
+        {
+            kind: "code",
+            text: `getGroupDetails = (group) => ({
+  name: group === "hr" ? "People" : group,   // omit to use the key itself
+  icon: "headerRowID",
+  overrideTheme: group === "hr" ? { bgHeader: "#2d3f5f" } : undefined,
+  actions: [{ title: "Rename", icon: "renameIcon", onClick: e => this.rename(e) }],
+});`,
+        },
+        {
+            kind: "list",
+            items: [
+                "Return `undefined` (or leave fields out) to accept the defaults — only the fields you set change anything.",
+                "**Clicking an action reports itself and nothing else**: no `@onGroupHeaderClicked`, and no group-column selection. That is source's behaviour, and it is what makes an action button usable at all.",
+                "Pass a **stable** function — a class-field arrow, not an inline one. The grid keeps every render input reference-stable; see *Performance rules*.",
+            ],
+        },
+        {
+            kind: "p",
             text: "**Reordering columns for real** — including remapping edits back so they still land on the right field — is `withMovableColumns`. See the *Composing data-source hooks* chapter; the handler below is the by-hand version.",
         },
         {

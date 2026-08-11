@@ -61,6 +61,7 @@ import type {
     Theme,
     GetCellRendererCallback,
     GetRowThemeCallback,
+    GroupDetails,
     SpriteMap,
     CustomRenderer,
     DrawCellCallback,
@@ -224,6 +225,16 @@ export interface GlideDataGridSignature {
         verticalBorder?: (col: number) => boolean;
         resizeIndicator?: "full" | "header" | "none";
         hyperWrapping?: boolean;
+        /**
+         * How each column group's header strip is drawn: display `name`, `icon`, `overrideTheme`,
+         * and `actions` (hover-revealed icon buttons with their own click targets). Grouping itself
+         * is switched on by any column carrying a `group`; this only customises the strip.
+         *
+         * Everything is optional -- return `undefined`, or an object with just the fields you want
+         * to change. Pass a **stable** function reference (a class-field arrow), not an inline
+         * arrow: see `GridHostArgs.getGroupDetails`.
+         */
+        getGroupDetails?: (groupName: string) => Partial<GroupDetails> | undefined;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
@@ -504,6 +515,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         verticalBorder: this.args.verticalBorder,
         resizeIndicator: this.args.resizeIndicator,
         hyperWrapping: this.args.hyperWrapping,
+        getGroupDetails: this.args.getGroupDetails,
         getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,

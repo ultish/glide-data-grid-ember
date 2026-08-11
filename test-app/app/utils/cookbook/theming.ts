@@ -21,11 +21,11 @@ export const themingSection: Section = {
 
         {
             kind: "p",
-            text: "**Precedence.** Five levels, merged left to right — later wins. Everything except the base is a `Partial<Theme>`: name only the fields you want to change.",
+            text: "**Precedence.** Six levels, merged left to right — later wins. Everything except the base is a `Partial<Theme>`: name only the fields you want to change.",
         },
         {
             kind: "code",
-            text: `base theme → @theme → column.themeOverride → @getRowThemeOverride(row) → cell.themeOverride`,
+            text: `base theme → @theme → group overrideTheme → column.themeOverride → @getRowThemeOverride(row) → cell.themeOverride`,
         },
         {
             kind: "table",
@@ -33,6 +33,11 @@ export const themingSection: Section = {
             rows: [
                 ["base", "built in (`getDataEditorTheme()`)", "everything"],
                 ["global", "`<GlideDataGrid @theme={{...}}>`", "everything"],
+                [
+                    "group",
+                    "`overrideTheme` from `<GlideDataGrid @getGroupDetails={{fn}}>`",
+                    "that group's header strip, its columns' headers **and** their cells",
+                ],
                 ["column", "`themeOverride` on a `GridColumn`", "that column's header **and** all of its cells"],
                 ["row", "`<GlideDataGrid @getRowThemeOverride={{fn}}>`", "every cell in that row — *not* the header"],
                 ["cell", "`themeOverride` on the `GridCell` you return", "that one cell; beats column and row"],
@@ -40,7 +45,7 @@ export const themingSection: Section = {
         },
         {
             kind: "p",
-            text: "Headers merge only `base + @theme + column.themeOverride` — a row override cannot reach a header, because a header belongs to no row. An open overlay editor is given the *cell's* fully merged theme, so an editor opened over a dark-themed row is styled to match it.",
+            text: "Headers merge only `base + @theme + group overrideTheme + column.themeOverride` — a row override cannot reach a header, because a header belongs to no row. An open overlay editor is given the *cell's* fully merged theme, so an editor opened over a dark-themed row is styled to match it.",
         },
         {
             kind: "note",

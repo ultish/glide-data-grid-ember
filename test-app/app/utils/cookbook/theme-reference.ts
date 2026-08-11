@@ -91,7 +91,7 @@ export const themeReferenceSection: Section = {
                 ["`fgIconHeader`", "foreground of header icon sprites"],
                 [
                     "`bgGroupHeader`, `bgGroupHeaderHovered` *(optional)*",
-                    "column-group header background and its hover state; fall back to `bgHeader` / `bgHeaderHovered`",
+                    "column-group header background and its hover state; fall back to `bgHeader` / `bgHeaderHovered`. Both are unset in the built-in themes — worth knowing, because a group's `overrideTheme` that sets only `bgHeader` has no effect on the strip once your `@theme` defines `bgGroupHeader`",
                 ],
             ],
         },

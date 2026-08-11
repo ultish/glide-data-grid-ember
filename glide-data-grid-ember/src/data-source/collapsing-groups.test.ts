@@ -271,3 +271,60 @@ describe("withCollapsingGroups — identity stability (protects the blit fast pa
         expect(a.columns[0]!.themeOverride?.bgCell).toBe("#111");
     });
 });
+
+describe("withCollapsingGroups — getGroupDetails (4.2)", () => {
+    it("tints only the collapsed group's header strip", () => {
+        const { getGroupDetails } = withCollapsingGroups({
+            columns: COLUMNS,
+            collapsed: ["Personal"],
+            onCollapsedChange: noop,
+        });
+        // The built-in light theme's `bgHeaderHasFocus`, the same value source uses.
+        expect(getGroupDetails("Personal").overrideTheme?.bgHeader).toBe("#E9E9EB");
+        expect(getGroupDetails("Work").overrideTheme).toBeUndefined();
+    });
+
+    it("names each group after its key when nothing else supplies one", () => {
+        const { getGroupDetails } = withCollapsingGroups({
+            columns: COLUMNS,
+            collapsed: [],
+            onCollapsedChange: noop,
+        });
+        expect(getGroupDetails("Work").name).toBe("Work");
+    });
+
+    it("wraps a consumer's own getGroupDetails rather than replacing it", () => {
+        const { getGroupDetails } = withCollapsingGroups({
+            columns: COLUMNS,
+            collapsed: ["Personal"],
+            onCollapsedChange: noop,
+            getGroupDetails: g => ({ name: `${g}!`, icon: "headerRowID", overrideTheme: { textHeader: "#f00" } }),
+        });
+        const collapsed = getGroupDetails("Personal");
+        expect(collapsed.name).toBe("Personal!");
+        expect(collapsed.icon).toBe("headerRowID");
+        // Divergence from source, matching `applySpans`: the incoming override is merged under the
+        // collapsed tint instead of being discarded.
+        expect(collapsed.overrideTheme).toEqual({ textHeader: "#f00", bgHeader: "#E9E9EB" });
+        expect(getGroupDetails("Work").overrideTheme).toEqual({ textHeader: "#f00" });
+    });
+
+    it("rebuilds when the consumer's getGroupDetails changes identity", () => {
+        const first = (): { name: string } => ({ name: "a" });
+        const second = (): { name: string } => ({ name: "b" });
+        const a = withCollapsingGroups({
+            columns: COLUMNS,
+            collapsed: [],
+            onCollapsedChange: noop,
+            getGroupDetails: first,
+        });
+        const b = withCollapsingGroups({
+            columns: COLUMNS,
+            collapsed: [],
+            onCollapsedChange: noop,
+            getGroupDetails: second,
+        });
+        expect(a.getGroupDetails("Work").name).toBe("a");
+        expect(b.getGroupDetails("Work").name).toBe("b");
+    });
+});
