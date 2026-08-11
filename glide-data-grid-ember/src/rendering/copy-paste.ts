@@ -10,7 +10,7 @@
 // `cell.copyData` off a `CustomCell` typed cell via the switch, which is fine since `CustomCell`
 // requires `copyData: string`).
 import { assertNever } from "./common/support.ts";
-import { BooleanEmpty, BooleanIndeterminate, GridCellKind, type GridCell } from "./data-grid-types.ts";
+import { BooleanEmpty, BooleanIndeterminate, GridCellKind, type GridCell, type Item } from "./data-grid-types.ts";
 
 /** @category Copy/Paste */
 export type StringArrayCellBuffer = {
@@ -426,4 +426,39 @@ export function unquote(str: string): CopyBuffer {
     }
     result.push(current);
     return result.map(r => r.map((c): CellBuffer => ({ rawValue: c, formatted: c, format: "string" })));
+}
+
+/**
+ * A consumer's `@onPaste`. `target` is in the consumer's own column space (row-marker column already
+ * subtracted) and `values` is the clipboard as raw strings, *unclipped* — rows and columns past the
+ * end of the grid are still reported, exactly as source does, so a consumer can decline a paste that
+ * would not fit. Return `true` to let it through; anything else cancels it.
+ */
+export type PasteVetoCallback = (target: Item, values: readonly (readonly string[])[]) => boolean;
+
+/** `@onPaste`'s accepted shapes. See {@link shouldAcceptPaste} for what each one means. */
+export type PasteBehavior = boolean | PasteVetoCallback;
+
+/**
+ * Decides whether a decoded clipboard buffer may be written, and is the whole of `@onPaste`'s
+ * semantics. Source's guard is `onPaste === false || (typeof onPaste === "function" &&
+ * onPaste(...) !== true)` (`data-editor.tsx:3714-3722`) — note `!== true`, not `=== false`: a
+ * callback that forgets to return anything cancels the paste rather than allowing it, and that is
+ * deliberate upstream.
+ *
+ * **Divergence, and it is in the `undefined` case only.** Source treats an absent `onPaste` as
+ * "paste the raw clipboard text into the single target cell, no splitting" (`:3699-3707`). This port
+ * treats it as `true` — split on tabs/newlines and write the range — because that is what it has
+ * always done and what every demo and the cookbook describe. `false` and the callback form match
+ * source exactly.
+ */
+export function shouldAcceptPaste(onPaste: PasteBehavior | undefined, target: Item, buffer: CopyBuffer): boolean {
+    if (onPaste === false) return false;
+    if (typeof onPaste !== "function") return true;
+    return (
+        onPaste(
+            target,
+            buffer.map(row => row.map(cell => cell.rawValue?.toString() ?? ""))
+        ) === true
+    );
 }

@@ -75,6 +75,7 @@ import {
     type SelectionBlending,
     type ValidateCellCallback,
     type CoercePasteValueCallback,
+    type PasteBehavior,
     type CellActivatedEventArgs,
     type CellActivationBehavior,
     type GroupHeaderClickedEventArgs,
@@ -250,6 +251,10 @@ const FOCUS_RING_MODES: readonly (boolean | "no-editor")[] = [true, "no-editor",
 // 9g: `onDelete`'s three return shapes, one per cycle position -- `undefined` (no callback at all),
 // `false` (veto) and a replacement `GridSelection` (delete something else instead).
 const DELETE_MODES = ["normal", "veto", "whole-column"] as const;
+
+// 4.5: `@onPaste`'s three shapes. `"single-cell"` is the callback form refusing anything wider than
+// one cell, which is the realistic use — a consumer whose backend writes one field at a time.
+const PASTE_MODES = ["allow", "single-cell", "off"] as const;
 
 // 9g. Only `"second-click"` existed before -- `"single-click"` opens the editor on the very first
 // click, `"double-click"` needs a real double-click on the already-selected cell.
@@ -648,6 +653,32 @@ export default class DemoGrid extends Component {
     cycleDeleteMode = (): void => {
         this.deleteModeIndex = (this.deleteModeIndex + 1) % DELETE_MODES.length;
     };
+
+    // 4.5: `@onPaste`. All-or-nothing, and checked before a single cell is written — where
+    // `@coercePasteValue` above shapes values once a paste is already going ahead.
+    @tracked pasteModeIndex = 0;
+
+    get pasteMode(): (typeof PASTE_MODES)[number] {
+        return PASTE_MODES[this.pasteModeIndex] ?? "allow";
+    }
+
+    cyclePasteMode = (): void => {
+        this.pasteModeIndex = (this.pasteModeIndex + 1) % PASTE_MODES.length;
+    };
+
+    /** A getter rather than a class field because the arg's *value* changes with the toggle; the
+     *  callback identity churning is fine here, since `onPaste` is read at paste time and is not a
+     *  `DrawGridArg` field. */
+    get onPaste(): PasteBehavior | undefined {
+        if (this.pasteMode === "allow") return undefined;
+        if (this.pasteMode === "off") return false;
+        return (target, values) => {
+            const cells = values.reduce((n, row) => n + row.length, 0);
+            if (cells <= 1) return true;
+            this.lastGuard = `onPaste refused a ${values.length}x${values[0]?.length ?? 0} paste at col ${target[0]}, row ${target[1]}`;
+            return false;
+        };
+    }
 
     /** Rejects a blank text value and a negative number. Deliberately a *rejection* rather than a
      *  coercion: rejection is the half of `validateCell` this port implements exactly like source
@@ -1193,6 +1224,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-paste-mode-toggle
+                    {{on "click" this.cyclePasteMode}}
+                >
+                    Paste:
+                    <b>{{this.pasteMode}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-delete-mode-toggle
                     {{on "click" this.cycleDeleteMode}}
                 >
@@ -1436,6 +1476,8 @@ export default class DemoGrid extends Component {
                     @drawFocusRing={{this.drawFocusRing}}
                     @validateCell={{this.validateCell}}
                     @coercePasteValue={{this.coercePasteValue}}
+                    {{! 4.5: all-or-nothing paste veto, checked before any cell is written. }}
+                    @onPaste={{this.onPaste}}
                     @copyHeaders={{this.copyHeaders}}
                     @onDelete={{this.onDelete}}
                     @cellActivationBehavior={{this.cellActivationBehavior}}

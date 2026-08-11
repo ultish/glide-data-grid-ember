@@ -114,6 +114,22 @@ export default class PeopleTable extends Component {
         },
         {
             kind: "p",
+            text: "**Refusing a paste outright.** `@onPaste` is the all-or-nothing gate, checked once before any cell is written — where `@coercePasteValue` above shapes values one at a time. Pass `false` to disable pasting, or a callback that returns `true` to allow it. The callback gets the paste target in your own column space and the clipboard as raw strings, **unclipped**, so you can refuse a block that would not fit.",
+        },
+        {
+            kind: "code",
+            text: `onPaste = (target, values) => {
+  const cells = values.reduce((n, row) => n + row.length, 0);
+  if (cells > 1) return false;            // this backend writes one field at a time
+  return true;                            // anything but a literal \`true\` cancels
+};`,
+        },
+        {
+            kind: "note",
+            text: "**One divergence from React glide-data-grid, and it is the default.** Upstream treats an absent `onPaste` as *write the whole clipboard into the single target cell*; you have to pass `onPaste={true}` to get a range paste. This addon has always split on tabs and newlines and written the range, so leaving `@onPaste` off behaves like upstream's `true`. `false` and the callback form match upstream exactly.",
+        },
+        {
+            kind: "p",
             text: "**Copy and delete.** `@copyHeaders` prepends a row of column titles to a copy or cut (copy/cut only — a paste never expects to read them back). `@onDelete` intercepts Delete/Backspace and the clearing half of a cut:",
         },
         {

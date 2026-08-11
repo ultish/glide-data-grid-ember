@@ -136,6 +136,10 @@ export type {
 // `data-editor/copy-paste.ts` (+ `unquote()` from `data-editor/data-editor-fns.ts`).
 export { getCopyBufferContents, copyHeaderRow, decodeHTML, unquote } from "./copy-paste.ts";
 export type { CellBuffer, StringArrayCellBuffer, BasicCellBuffer, CopyBuffer } from "./copy-paste.ts";
+// `@onPaste`'s all-or-nothing veto (4.5). The rule is a pure function so it can be unit-tested; the
+// types are here because the arg is public.
+export { shouldAcceptPaste } from "./copy-paste.ts";
+export type { PasteBehavior, PasteVetoCallback } from "./copy-paste.ts";
 
 // Paste coercion + edit validation (Phase 9g). The rules `<GlideDataGrid>` runs internally, split
 // out of `GridHostController` so they can be unit-tested; the callback *types* are the reason these

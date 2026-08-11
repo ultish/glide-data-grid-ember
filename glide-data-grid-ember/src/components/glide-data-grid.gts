@@ -74,6 +74,7 @@ import type {
     SelectionBlending,
     ValidateCellCallback,
     CoercePasteValueCallback,
+    PasteBehavior,
     CellClickedEventArgs,
     HeaderClickedEventArgs,
     GroupHeaderClickedEventArgs,
@@ -406,6 +407,16 @@ export interface GlideDataGridSignature {
          */
         validateCell?: ValidateCellCallback;
         coercePasteValue?: CoercePasteValueCallback;
+        /**
+         * Accept or refuse a paste **wholesale**, before any cell is written. `false` disables
+         * pasting entirely; a callback gets the paste target in your own column space plus the
+         * clipboard as raw strings, and must return `true` for the paste to go ahead.
+         *
+         * Orthogonal to `@coercePasteValue`, which shapes individual values once a paste is already
+         * happening. Defaults to allowing the paste — see `GridHostArgs.onPaste` for the one place
+         * this differs from source.
+         */
+        onPaste?: PasteBehavior;
         copyHeaders?: boolean;
         onDelete?: (selection: GridSelection) => boolean | GridSelection;
 
@@ -568,6 +579,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onItemHovered: this.args.onItemHovered,
         validateCell: this.args.validateCell,
         coercePasteValue: this.args.coercePasteValue,
+        onPaste: this.args.onPaste,
         copyHeaders: this.args.copyHeaders,
         onDelete: this.args.onDelete,
         onCellClicked: this.args.onCellClicked,

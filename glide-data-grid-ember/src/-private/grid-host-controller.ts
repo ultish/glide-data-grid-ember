@@ -61,7 +61,7 @@ import {
 import { synthesizeCellsForSelection } from "../rendering/cells-for-selection.ts";
 import { coercePasteCell, type CoercePasteValueCallback } from "../rendering/paste-coercion.ts";
 import { applyCellValidation, type ValidateCellCallback } from "../rendering/validate-cell.ts";
-import { copyHeaderRow } from "../rendering/copy-paste.ts";
+import { copyHeaderRow, shouldAcceptPaste, type PasteBehavior } from "../rendering/copy-paste.ts";
 import { isValidClick, shouldActivateOnClick, resolvePointerActivation } from "../rendering/click-behavior.ts";
 import { computeGroupHeaderSelection } from "../rendering/group-header-selection.ts";
 import { remAdjustDimensions, measureRemSize, type RemAdjustableDimensions } from "../rendering/rem-adjuster.ts";
@@ -693,6 +693,19 @@ export interface GridHostArgs {
      * default behaviour for that cell.
      */
     readonly coercePasteValue?: CoercePasteValueCallback;
+    /**
+     * Accept or refuse a paste **wholesale**, before any cell is written. `false` disables pasting;
+     * a callback receives the paste target in your own column space and the clipboard as raw
+     * strings, and must return `true` for the paste to proceed. Mirrors source's `onPaste`.
+     *
+     * Not a substitute for {@link GridHostArgs.coercePasteValue}, which is consulted per value once
+     * a paste is already going ahead — this one is all-or-nothing.
+     *
+     * @defaultValue `true` (paste is split on tabs/newlines and written as a range). Source's
+     * default is `undefined`, which it treats as "write the whole clipboard into the one target
+     * cell"; this port has always written the range and keeps doing so.
+     */
+    readonly onPaste?: PasteBehavior;
 
     /**
      * Prepend a row of column titles to the copy buffer. Mirrors source's `copyHeaders`, including
@@ -986,6 +999,7 @@ interface ResolvedGridHostArgs {
 
     readonly validateCell: ValidateCellCallback | undefined;
     readonly coercePasteValue: CoercePasteValueCallback | undefined;
+    readonly onPaste: PasteBehavior | undefined;
     readonly copyHeaders: boolean;
     readonly onDelete: ((selection: GridSelection) => boolean | GridSelection) | undefined;
 
@@ -1751,6 +1765,7 @@ export class GridHostController {
 
             validateCell: args.validateCell,
             coercePasteValue: args.coercePasteValue,
+            onPaste: args.onPaste,
             copyHeaders: args.copyHeaders === true,
             onDelete: args.onDelete,
 
@@ -3732,7 +3747,12 @@ export class GridHostController {
             // mousedown handling, so both happen on the same mousedown; whether it resolves to a
             // "click" (selection only, already applied below) or a "drag" (also fires
             // `onColumnMoved` on mouseup once the threshold is crossed) is decided by mousemove/up.
-            if (args.onColumnMoved !== undefined && hit.location[0] >= args.rowMarkerOffset) {
+            // Row `-1` only. `resolveMouseHit` folds both header bands into `kind: "header"`, but
+            // source's DnD wrapper matches `args.kind === "header"` against its *own* kind constant
+            // (`data-grid-dnd.tsx:158`), which a group header never satisfies -- it is
+            // `"group-header"` there. Without this the group strip is a second, undocumented grab
+            // handle for reordering whichever column happens to sit under the pointer.
+            if (args.onColumnMoved !== undefined && hit.location[1] !== -2 && hit.location[0] >= args.rowMarkerOffset) {
                 this.dragColState = {
                     srcCol: hit.location[0],
                     startClientX: ev.clientX,
@@ -5903,6 +5923,12 @@ export class GridHostController {
         } else {
             return;
         }
+
+        // 4.5: `@onPaste`'s veto, checked once the target is known and before a single cell is
+        // written -- the same place source checks it (`data-editor.tsx:3714-3722`). The target is
+        // handed over in the consumer's column space, like every other callback here. No
+        // `preventDefault()` on a refusal: source returns without touching the event either.
+        if (!shouldAcceptPaste(args.onPaste, [anchorCol - args.rowMarkerOffset, anchorRow], buffer)) return;
 
         const edits: { location: Item; value: GridCell }[] = [];
         for (let rowOffset = 0; rowOffset < buffer.length; rowOffset++) {

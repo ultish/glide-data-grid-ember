@@ -5055,3 +5055,50 @@ clicks are broken" reading. The reliable method is CLAUDE.md's existing rule gen
 `MouseEvent`s at canvas-relative coordinates from `javascript_tool`, `await` ~150ms for Ember to
 render, then read `.gdg-full__status`'s text. Synchronous reads right after dispatch return the
 *previous* state, which is its own way to be misled.
+
+## 4.5 — `@onPaste`, and the group-band drag guard (2026-08-12)
+
+Two small items from TODO.md §4.5, done together because both live in `grid-host-controller.ts`.
+
+### `@onPaste`
+
+`boolean | ((target, values) => boolean)`, checked once after the paste target is resolved and
+before a single cell is written — the same place source checks it (`data-editor.tsx:3714-3722`). The
+rule itself is `shouldAcceptPaste` in `rendering/copy-paste.ts` so it is testable; the controller
+just calls it. Two details taken verbatim from source and worth not "fixing":
+
+- The guard is `!== true`, **not** `=== false`. A callback that falls off the end cancels the paste.
+- The values handed over are **unclipped** — rows and columns past the end of the grid are still
+  reported, so a consumer can refuse a block that will not fit.
+
+**Stated divergence, in the `undefined` case only.** Source treats an absent `onPaste` as "write the
+whole clipboard into the single target cell, no splitting" (`:3699-3707`) — a range paste requires
+`onPaste={true}`. This port has split on tabs/newlines since Phase 3c, and every demo, test and
+cookbook page describes that, so `undefined` keeps meaning `true` here. `false` and the callback form
+match source exactly. Recorded in the cookbook's *Editing* chapter as well, since a consumer
+migrating from React is the person this can surprise.
+
+### The group-band column drag
+
+`onMouseDown`'s `hit.kind === "header"` branch recorded `dragColState` for the group band too,
+because `resolveMouseHit` folds both header rows into one kind. Source cannot reach that state: its
+DnD wrapper matches `args.kind === "header"` (`data-grid-dnd.tsx:158`) and a group header is
+`"group-header"` there. One `hit.location[1] !== -2` guard.
+
+### Browser-testing findings (all now in TODO.md's working-practices list)
+
+Three, and the middle one cost real time:
+
+1. **`visibilityState` is `"hidden"` after every navigation** until the `computer` tool touches the
+   tab, so the canvas is 0x0 and every hit test is out of bounds. The status row showing
+   `Visible: cols 0--1, rows 0--1` is the tell. Screenshot first, then measure.
+2. **Synthetic events reach the controller but do not produce edits.** A dispatched `paste` fires the
+   `@onPaste` callback with correct coordinates and a dispatched `copy` returns the right cell text,
+   yet no write lands — and **the identical script on untouched `main` behaves the same**, so it is a
+   harness artifact rather than a regression. Checking that (stash → `git checkout main` → rebuild →
+   re-run) is what turned a suspected regression into a known limitation; do that before debugging
+   further. `navigator.clipboard.writeText` is not a way round it: it hung the renderer for 45s,
+   exactly as CLAUDE.md warns.
+3. Clipboard paths are gated on the controller's `isFocused`, which never becomes true while the OS
+   window is unfocused. `root.dispatchEvent(new FocusEvent("focus"))` sets it and unblocks copy/paste
+   testing.

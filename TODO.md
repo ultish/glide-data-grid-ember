@@ -18,13 +18,13 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-12:** `main` is pushed, GitHub Pages is deployed and working. 853 vitest tests
+**State as of 2026-08-12:** `main` is pushed, GitHub Pages is deployed and working. 858 vitest tests
 pass. Phases 0–11 are done; what is left is the backlog below.
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 853 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 858 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -93,6 +93,20 @@ a rollup/babel requirement `tsc` alone will not catch.
 - **When verifying a coordinate change, find a *semantic* assertion, not a numeric one.**
   `<DemoGrid>` looks its column note up by index, so clicking the Notes column and reading back
   "Markdown cell" is a check a wrong offset cannot pass; "it printed 4" can pass by luck.
+- **After navigating, take a screenshot before any measurement.** The tab is `visibilityState:
+  "hidden"` until the `computer` tool touches it, so the canvas is 0x0 and every hit test is
+  out-of-bounds — the status row reads `Visible: cols 0--1, rows 0--1`, which is the tell. This is
+  the occlusion trap above, and it re-fires on **every** navigation, not just at session start.
+- **`computer`-tool coordinates are screenshot pixels, not CSS pixels** (1512 vs 1712 here), and the
+  demo's status row rewraps as its own text changes, moving the grid ~24px mid-test. Together they
+  produced a convincing false "group-header clicks are broken" reading during 4.2. For anything
+  finer than "click that button", dispatch `MouseEvent`s at canvas-relative coordinates from
+  `javascript_tool`, `await` ~150ms for Ember to render, then read the DOM readout.
+- **Synthetic events cannot verify an *edit*.** Dispatched `paste` and `keydown` reach the
+  controller (a `@onPaste` callback fires with correct coordinates, `copy` returns the right cell),
+  but no write lands — confirmed **identical on untouched `main`**, so it is a harness artifact, not
+  a regression. Do not chase it mid-item; verify write paths through the UI. `navigator.clipboard`
+  is not the way round it: `writeText` hangs the renderer for 45s exactly as CLAUDE.md warns.
 
 ### Standing user decisions — do not propose these
 
@@ -230,9 +244,8 @@ reusing the existing `resolveMouseHit` for the cell target.
 | **Scroll shadows** | `S` | Source `data-grid.tsx:362,454,1879` — `fixedShadowX`/`fixedShadowY`, both default **true**. The port draws none. Purely cosmetic; it *degrades* rather than breaks, which is why nobody noticed. |
 | **`overscrollX`/`overscrollY`** | `S` | N pixels of empty scrollable space past the last column/row. The port computes scroll extent from content only. |
 | **`preventDiagonalScrolling`** | `S` | Locks scrolling to one axis per gesture. |
-| **`onPaste` prop** | `S` | `boolean \| ((target, values) => boolean)` — veto a paste wholesale. The port's paste path (search `onPaste` in the controller) is unconditional. **Not** substituted by `coercePasteValue`, which is per-value. |
+| **`onPaste` prop** | DONE (2026-08-12) | Shipped as `<GlideDataGrid @onPaste>`: `false` refuses every paste, a callback gets the target in consumer space plus the clipboard as raw strings and must return `true`. The rule is `shouldAcceptPaste` in `rendering/copy-paste.ts` (5 tests); `<DemoGrid>`'s "Paste:" toggle cycles allow / single-cell / off. **Stated divergence:** source treats an absent `onPaste` as "write the whole clipboard into the one target cell"; this port keeps its long-standing range paste, i.e. `undefined` behaves as `true`. |
 | **`experimental` bag, rest** | `S` each | `paddingRight`/`paddingBottom`, `eventTarget`, `strict`, `scrollbarWidthOverride`, `disableMinimumCellWidth` (`minimumCellWidth: 10` hardcoded at `:2303`), `renderStrategy` (derived from `browserIsSafari` at `:2299`, not overridable). |
-| **Column drag starts from the group band** | `S` | Found during 4.2, not fixed. `onMouseDown`'s `hit.kind === "header"` branch records `dragColState` without excluding row `-2`, so a column can be reordered by dragging its *group* strip. Source cannot: its kind is `"group-header"` there and `data-grid-dnd.tsx:158` only matches `"header"`. One guard — but it is drag code (see 9h), so give it a browser check. |
 | **Shadow DOM** | `S` to check | Never tried. **Unknown, not broken.** Risks: `window`-scoped listeners (`paste` at `:1484`, the window-level `mousemove` from 9h) and the measurement canvas appended to `document.documentElement` at `:1408`. Overlay editors append to the grid root, which is the good case. |
 
 ### 4.6 Interaction gaps (formerly 9h)

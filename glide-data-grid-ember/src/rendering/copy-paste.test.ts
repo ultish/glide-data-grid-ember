@@ -15,7 +15,8 @@
 //     environment, which this harness does not yet have.
 //  4. Prefer a table (`it.each`) when the same assertion shape repeats over many inputs.
 import { describe, expect, it } from "vitest";
-import { getCopyBufferContents, copyHeaderRow, unquote } from "./copy-paste.ts";
+import { getCopyBufferContents, copyHeaderRow, unquote, shouldAcceptPaste } from "./copy-paste.ts";
+import type { PasteVetoCallback } from "./copy-paste.ts";
 import { GridCellKind, type GridCell } from "./data-grid-types.ts";
 
 function textCell(data: string): GridCell {
@@ -145,5 +146,52 @@ describe("copyHeaderRow", () => {
         expect(copyHeaderRow(columns, [9])).toEqual([
             { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false },
         ]);
+    });
+});
+
+describe("shouldAcceptPaste — `@onPaste` (4.5)", () => {
+    const buffer = unquote("a\tb\nc\td");
+
+    it("allows the paste when nothing is configured", () => {
+        expect(shouldAcceptPaste(undefined, [0, 0], buffer)).toBe(true);
+        expect(shouldAcceptPaste(true, [0, 0], buffer)).toBe(true);
+    });
+
+    it("refuses every paste when `false`", () => {
+        expect(shouldAcceptPaste(false, [0, 0], buffer)).toBe(false);
+    });
+
+    it("hands the callback the target and the clipboard as raw strings", () => {
+        const seen: unknown[] = [];
+        shouldAcceptPaste(
+            (target, values) => {
+                seen.push(target, values);
+                return true;
+            },
+            [3, 7],
+            buffer
+        );
+        expect(seen).toEqual([
+            [3, 7],
+            [
+                ["a", "b"],
+                ["c", "d"],
+            ],
+        ]);
+    });
+
+    it("cancels on anything but a literal `true`", () => {
+        // Source's guard is `!== true`, not `=== false` (`data-editor.tsx:3714-3722`): a callback
+        // that falls off the end cancels the paste rather than allowing it. Faithful on purpose.
+        expect(shouldAcceptPaste(() => true, [0, 0], buffer)).toBe(true);
+        expect(shouldAcceptPaste(() => false, [0, 0], buffer)).toBe(false);
+        expect(shouldAcceptPaste((() => undefined) as unknown as PasteVetoCallback, [0, 0], buffer)).toBe(false);
+        expect(shouldAcceptPaste((() => "yes") as unknown as PasteVetoCallback, [0, 0], buffer)).toBe(false);
+    });
+
+    it("reports values the grid will clip, so a consumer can refuse a paste that would not fit", () => {
+        const rows: (readonly string[])[] = [];
+        shouldAcceptPaste((_t, values) => (rows.push(...values), true), [0, 0], unquote("x\ny\nz"));
+        expect(rows).toHaveLength(3);
     });
 });
