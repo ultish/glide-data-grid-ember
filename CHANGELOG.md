@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-12
+
+### Added
+
+- `@onGroupHeaderRenamed` — providing the callback injects a "Rename" entry into every column
+  group's details, appended after the consumer's own `actions`, and clicking it opens a small
+  inline text box over the group's band. Escape and Enter return focus to the grid.
+- `<:rightElement>` — a named block rendering a panel past the last column, with
+  `@rightElementSticky` and `@rightElementFill`. A block rather than upstream's node prop, so the
+  content keeps the consumer's own components and actions in scope.
+- `@paddingRight` / `@paddingBottom` — a gutter beside the right panel and below the last row.
+  Added to the scroller's extent and subtracted from the area the visible region is measured
+  against. Not scaled by `@scaleToRem`, matching upstream.
+- `@selection` / `@onSelectionCleared` — controlled selection. Passing `@selection` makes the grid
+  keep none of its own: every gesture reports the _requested_ selection through
+  `@onSelectionChanged` and nothing moves until a new value is handed back, so a consumer can
+  refuse a selection, snap it to whole rows, or keep it in step with the rest of their UI.
+  `@onSelectionCleared` fires on the out-of-bounds click only, as narrow as upstream's.
+
+### Notes
+
+- `@onGroupHeaderRenamed` receives the group **key**, not the display name source passes. Renaming
+  means rewriting `column.group`, and a consumer who gave the group a distinct display name — the
+  main reason to use `@getGroupDetails` at all — could not map that name back to those columns.
+- Controlled selection is one flag where source has two. Upstream splits control across
+  `gridSelection` (reads) and `onGridSelectionChange` (writes); all three useful configurations are
+  reachable here — controlled, frozen, and the notify-only grid this already had.
+- A `@onSelectionChanged` handler that stores whatever it is handed is indistinguishable from an
+  uncontrolled grid, and its argument is the _requested_ selection, not the accepted one. The
+  cookbook calls this out.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added
@@ -109,6 +140,7 @@ thousands stay smooth.
   and canary — i.e. through Ember 7.x.
 - Embroider or ember-auto-import v2.
 
+[0.2.1]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.2.0
 [0.1.7]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.7
 [0.1.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.0
