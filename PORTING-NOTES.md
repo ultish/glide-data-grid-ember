@@ -5284,3 +5284,72 @@ defect** — a group's `overrideTheme` is merged into each column header's theme
 `textHeader`, `bgIconHeader` and `fgIconHeader` as well. Worth remembering as the shape of the
 mistake: a partial theme override is not a partial *change*, and the half you forget is the half that
 was already the right colour against the old background.
+
+## 4.2 — `@onGroupHeaderRenamed` (COMPLETE, browser-verified, 2026-08-12)
+
+The remainder of 4.2, and it was as small as that item predicted: the `actions` support built then is
+the whole mechanism, and this adds the entry plus the text box it opens.
+
+### Shape
+
+`appendRenameAction` (`rendering/render/group-header-actions.ts`, 7 tests) mirrors source's
+`mangledGetGroupDetails` (`data-editor.tsx:1401-1425`): with a callback set, every group's details
+gain a `{ title: "Rename", icon: "renameIcon" }` entry **appended after** the consumer's own actions,
+and a group whose key is `""` is skipped because ungrouped columns render a band that is not a group.
+It returns the input object unchanged when there is nothing to add, which keeps
+`resolvedGroupDetails`' memoization honest — that cache gained `canRename` as a second key, since a
+grid with no `@getGroupDetails` at all now still has something to inject.
+
+The box itself is a plain absolutely-positioned `<input>` in a container appended to the grid root,
+styled in `glide-data-grid-editors.css` under `.gdg-group-rename` (source's `RenameInput` rules, rule
+for rule). It deliberately does **not** reuse the cell overlay editor: it shares none of that
+machinery — no `provideEditor`, no validation, no cursor movement on commit — and source likewise
+builds it as its own component (`data-editor/group-rename.tsx`).
+
+**One thing this port gets for free that source works for.** Source positions the box by subtracting
+`canvasBounds` from client-space bounds; here `computeCellRect` already returns grid-root-relative
+coordinates, and `computeBounds` at row `-2` already expands to the group's whole contiguous span and
+clips it to the viewport (`data-grid-lib.ts:797-836`). So the bounds the action's event carries are
+exactly the box's geometry, with only source's 1px/2px insets applied.
+
+`keydown` is `stopPropagation`-ed. Without it the grid's own `root` listener also sees each key, so
+typing "c" in the rename box would start an edit-on-type on the selected cell behind it. Escape and
+Enter both hand focus back to `root`, or the next arrow key scrolls the page instead of moving the
+selection.
+
+### Divergence, stated: the callback gets the group KEY
+
+Source forwards `result.name` — the *display* name from `getGroupDetails` — as the callback's first
+argument (`data-editor.tsx:3988`). This port passes `column.group`, the key.
+
+The reason is that the callback's entire job is "now go rename this group", which a consumer performs
+by rewriting `column.group` on the columns that share it. Handed a display name, a consumer who used
+`@getGroupDetails` to give a group a *different* display name — which this repo's own demo does, and
+which is the main reason to implement `getGroupDetails` at all — has no way back to the columns they
+must edit. Upstream's API docs name the parameter `groupName`, and its own test cannot see the
+difference because it sets `group: c.title` with no `getGroupDetails` at all
+(`test/data-editor.test.tsx:1003-1048`). The text box still *opens* showing the display name, which
+is what the user sees.
+
+This is the rare case where the "needing a paragraph to argue your divergence is the tell" rule was
+checked and overridden deliberately: the paragraph exists, but it is describing an upstream bug that
+upstream's tests structurally cannot catch, not a preference.
+
+### Verification notes
+
+Two traps from TODO.md's working-practices list both fired, and are worth restating because each cost
+a wrong conclusion first:
+
+- **Screenshot pixels are not CSS pixels** (1512 vs 1728 here). The first attempt to click the
+  injected icon swept x-coordinates estimated off a screenshot and found nothing, which read as "the
+  action was never injected". It had been; the clicks were ~200px short.
+- **The screenshot tool blurs the page**, and the rename box closes on blur — so it vanished before
+  every screenshot while being verifiably present, focused and correctly styled when measured from
+  `javascript_tool` in the same uninterrupted script. To photograph it, the blur listener was
+  commented out for one build and restored immediately after. Measure in one script; photograph only
+  what survives losing focus.
+
+Browser-verified end to end: opens over the band with its text preselected, Escape closes without
+calling back, Enter calls back with `("Signals", "Telemetry")` and the demo's own handler rewrites
+`column.group` so the band relabels, an outside click closes it, and toggling `@onGroupHeaderRenamed`
+off removes the action entirely (then restores it, which is what proves the `canRename` cache key).

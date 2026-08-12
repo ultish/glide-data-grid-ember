@@ -17,6 +17,42 @@ import type { GroupDetails } from "./data-grid-render.cells.ts";
 export type GroupHeaderAction = NonNullable<GroupDetails["actions"]>[number];
 
 /**
+ * Appends the "Rename" action that `@onGroupHeaderRenamed` is enabled by, mirroring source's
+ * `mangledGetGroupDetails` (`data-editor.tsx:1401-1425`).
+ *
+ * Two details are source's and both matter:
+ *
+ * - the entry goes **after** the consumer's own actions, so adding a rename handler never reorders
+ *   or displaces buttons a consumer has already positioned;
+ * - a group whose key is `""` is left alone. Ungrouped columns render a blank band that is not a
+ *   group and has nothing to name.
+ *
+ * `onRename` is handed the group **key**, not the display name -- see `@onGroupHeaderRenamed`'s doc
+ * comment for why this port diverges there.
+ *
+ * Returns `details` unchanged when there is nothing to add, which keeps the caller's memoization
+ * honest: an identical object back means the render path sees no change.
+ */
+export function appendRenameAction(
+    details: GroupDetails,
+    groupKey: string,
+    onRename: ((groupKey: string, displayName: string, bounds: Rectangle) => void) | undefined
+): GroupDetails {
+    if (onRename === undefined || groupKey === "") return details;
+    return {
+        ...details,
+        actions: [
+            ...(details.actions ?? []),
+            {
+                title: "Rename",
+                icon: "renameIcon",
+                onClick: e => onRename(groupKey, details.name, e.bounds),
+            },
+        ],
+    };
+}
+
+/**
  * Where each of a group's action icons sits, in the same coordinate space as `box` -- right-aligned
  * inside the group header's rect, 26px square each, vertically centred. Ported verbatim from
  * source's `getActionBoundsForGroup` (`data-grid-render.header.ts:299`).

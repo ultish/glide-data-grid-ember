@@ -108,6 +108,39 @@
     padding: var(--gdg-cell-vertical-padding) var(--gdg-cell-horizontal-padding);
 }
 
+/* --- group rename ------------------------------------------------------------------------------
+ * The inline text box `@onGroupHeaderRenamed` opens over a column group's header band. Source:
+ * `data-editor/group-rename.tsx` (`RenameInput` plus the wrapper's inline block), reproduced rule
+ * for rule.
+ *
+ * Unlike the cell overlay above, this container carries no per-cell theme of its own -- it is a
+ * child of the grid root, so every `--gdg-*` below resolves to the *grid's* theme. That is source's
+ * behaviour too: a group with an `overrideTheme` does not restyle its own rename box.
+ *
+ * Position and size are set inline, from the group band's rect. Nothing else here is.
+ */
+.gdg-root .gdg-group-rename {
+    position: absolute;
+    z-index: 20;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    background-color: var(--gdg-bg-header);
+}
+
+.gdg-root .gdg-group-rename__input {
+    flex-grow: 1;
+    border: none;
+    outline: none;
+    border-radius: 9px;
+    padding: 0 8px;
+    background-color: var(--gdg-bg-header-has-focus);
+    box-shadow: 0 0 0 1px var(--gdg-border-color);
+    color: var(--gdg-text-group-header);
+    font: var(--gdg-header-font-style) var(--gdg-font-family);
+}
+
 /* --- GrowingEntry ------------------------------------------------------------------------------
  * Source: `internal/growing-entry/growing-entry-style.tsx` (`GrowingEntryStyle`, `ShadowBox`,
  * `InputBox`). The autosize trick is a hidden shadow box that sizes the wrapper, with the real

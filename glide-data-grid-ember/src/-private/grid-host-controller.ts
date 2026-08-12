@@ -131,7 +131,11 @@ import {
     type MappedGridColumn,
 } from "../rendering/render/data-grid-lib.ts";
 import { computeHeaderLayout } from "../rendering/render/data-grid-render.header.ts";
-import { hitTestGroupHeaderAction, type GroupHeaderAction } from "../rendering/render/group-header-actions.ts";
+import {
+    appendRenameAction,
+    hitTestGroupHeaderAction,
+    type GroupHeaderAction,
+} from "../rendering/render/group-header-actions.ts";
 import { pointInRect } from "../rendering/common/math.ts";
 import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
@@ -871,6 +875,29 @@ export interface GridHostArgs {
     readonly onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
 
     /**
+     * The user renamed a column group. **Providing this callback is what enables renaming** -- it
+     * adds a "Rename" action to every group's header (alongside any `actions` your
+     * `@getGroupDetails` returns), which opens an inline text box over the group's band. Mirrors
+     * source's `onGroupHeaderRenamed`.
+     *
+     * **Nothing is renamed for you.** The grid has no writable model of a group -- a group exists
+     * only because some columns share a `group` string -- so applying the rename means updating
+     * those columns yourself, exactly as source states it.
+     *
+     * `groupName` is the group **key**, i.e. the value on `column.group`. **Divergence from source,
+     * stated:** upstream passes the group's *display* name here (`data-editor.tsx:3988` forwards
+     * `result.name` from `getGroupDetails`), which is the same string only when no custom display
+     * name is set -- and when one is, the consumer has no way back to the columns they must edit,
+     * which is the callback's entire job. Upstream's own test cannot see the difference because it
+     * sets `group: c.title` with no `getGroupDetails`, and its API docs name the parameter
+     * `groupName`. The text box still *opens* showing the display name, which is what the user sees.
+     *
+     * Groups with an empty key are skipped, as upstream skips them: ungrouped columns render a blank
+     * band that is not a group and cannot be named.
+     */
+    readonly onGroupHeaderRenamed?: (groupName: string, newValue: string) => void;
+
+    /**
      * A cell was activated -- Enter, a printable character (when `editOnType` is on), or a click
      * matching {@link cellActivationBehavior}. Fires just before the editor opens (or, for a
      * boolean cell, before it toggles), so it is the hook for "opened an editor" telemetry.
@@ -1107,6 +1134,7 @@ interface ResolvedGridHostArgs {
     readonly onCellClicked: ((cell: Item, event: CellClickedEventArgs) => void) | undefined;
     readonly onHeaderClicked: ((colIndex: number, event: HeaderClickedEventArgs) => void) | undefined;
     readonly onGroupHeaderClicked: ((colIndex: number, event: GroupHeaderClickedEventArgs) => void) | undefined;
+    readonly onGroupHeaderRenamed: ((groupName: string, newValue: string) => void) | undefined;
     readonly onCellActivated: ((cell: Item, event: CellActivatedEventArgs) => void) | undefined;
     readonly onFinishedEditing: ((newValue: GridCell | undefined, movement: Item) => void) | undefined;
     readonly onColumnAppended: (() => ColumnAppendedResult | Promise<ColumnAppendedResult> | void) | undefined;
@@ -1891,7 +1919,7 @@ export class GridHostController {
             verticalBorder: args.verticalBorder ?? ALWAYS_VERTICAL_BORDER,
             resizeIndicator: args.resizeIndicator ?? "none",
             hyperWrapping: args.hyperWrapping ?? false,
-            getGroupDetails: this.resolvedGroupDetails(args.getGroupDetails),
+            getGroupDetails: this.resolvedGroupDetails(args.getGroupDetails, args.onGroupHeaderRenamed),
             overscrollX,
             overscrollY,
             // Source defaults both to `true` (`data-grid.tsx:362-363`), so the shadows are opt-*out*.
@@ -1981,6 +2009,7 @@ export class GridHostController {
             onCellClicked: args.onCellClicked,
             onHeaderClicked: args.onHeaderClicked,
             onGroupHeaderClicked: args.onGroupHeaderClicked,
+            onGroupHeaderRenamed: args.onGroupHeaderRenamed,
             onCellActivated: args.onCellActivated,
             onFinishedEditing: args.onFinishedEditing,
             onColumnAppended: args.onColumnAppended,
@@ -2030,9 +2059,8 @@ export class GridHostController {
 
     // 4.2: the consumer's `@getGroupDetails`, wrapped so every reader gets a *total* function --
     // source's `mangledGetGroupDetails` (`data-editor.tsx:1401-1425`), which likewise fills in
-    // `{ name: group }` for a group the consumer says nothing about. (Source's other job there,
-    // injecting a "Rename" action for `onGroupHeaderRenamed`, has no counterpart here yet: group
-    // renaming needs a second inline overlay host and is still deferred -- see TODO.md 4.2.)
+    // `{ name: group }` for a group the consumer says nothing about and appends the "Rename" action
+    // when `@onGroupHeaderRenamed` is set.
     //
     // Memoized on the consumer callback's identity for the reason spelled out on
     // `DEFAULT_GROUP_DETAILS`: this value ends up in `DrawGridArg`, and this port keeps every field
@@ -2041,27 +2069,38 @@ export class GridHostController {
     // nothing -- the `GridHostArgs` doc comment asks for a stable one.
     private groupDetailsCache:
         | {
-              readonly src: (groupName: string) => Partial<GroupDetails> | undefined;
+              readonly src: ((groupName: string) => Partial<GroupDetails> | undefined) | undefined;
+              readonly canRename: boolean;
               readonly value: GroupDetailsCallback;
           }
         | undefined;
 
     private resolvedGroupDetails(
-        src: ((groupName: string) => Partial<GroupDetails> | undefined) | undefined
+        src: ((groupName: string) => Partial<GroupDetails> | undefined) | undefined,
+        onGroupHeaderRenamed: ((groupName: string, newValue: string) => void) | undefined
     ): GroupDetailsCallback {
-        if (src === undefined) return DEFAULT_GROUP_DETAILS;
+        const canRename = onGroupHeaderRenamed !== undefined;
+        // The fast path now needs *both* halves absent: with renaming on, even a grid that passes no
+        // `@getGroupDetails` has an action to inject.
+        if (src === undefined && !canRename) return DEFAULT_GROUP_DETAILS;
         const cached = this.groupDetailsCache;
-        if (cached !== undefined && cached.src === src) return cached.value;
+        if (cached !== undefined && cached.src === src && cached.canRename === canRename) return cached.value;
+        // Read through `this` rather than captured, so toggling the callback at runtime does not
+        // strand a stale reference in a memoized closure.
+        const onRename = canRename
+            ? (groupKey: string, displayName: string, bounds: Rectangle) =>
+                  this.openGroupRename(groupKey, displayName, bounds)
+            : undefined;
         const value: GroupDetailsCallback = groupName => {
-            const result = src(groupName);
+            const result = src?.(groupName);
             // `name` is the only field the render path dereferences unconditionally
             // (`data-grid-render.header.ts:187`), so it is the only one worth defaulting. The
             // spread costs one small object per group per frame, the same order as
             // `DEFAULT_GROUP_DETAILS` already allocated.
-            if (result === undefined) return { name: groupName };
-            return { ...result, name: result.name ?? groupName };
+            const details = result === undefined ? { name: groupName } : { ...result, name: result.name ?? groupName };
+            return appendRenameAction(details, groupName, onRename);
         };
-        this.groupDetailsCache = { src, value };
+        this.groupDetailsCache = { src, canRename, value };
         return value;
     }
 
@@ -2500,6 +2539,9 @@ export class GridHostController {
         // 4.5: would otherwise fire a redraw against a torn-down grid ~200ms later.
         window.clearTimeout(this.scrollingStopTimer);
         this.scrollingStopTimer = undefined;
+
+        // Removes its own window listener and its DOM node; a no-op when no rename is open.
+        this.closeGroupRename();
 
         if (this.overlayState !== undefined) {
             this.removeWindowListener("mousedown", this.onOverlayOutsideClick, true);
@@ -5036,6 +5078,114 @@ export class GridHostController {
         if (state === undefined) return;
         if (ev.target instanceof Node && state.container.contains(ev.target)) return;
         this.finishOverlay(this.resolveArgs(), state.currentCell, [0, 0]);
+    };
+
+    // --- Group rename (`@onGroupHeaderRenamed`) ----------------------------------------------------
+    //
+    // A second, much smaller inline overlay: one text box laid over a group's header band, opened by
+    // the "Rename" action `resolvedGroupDetails` injects. Source builds it as its own component
+    // (`data-editor/group-rename.tsx`) rather than reusing the cell overlay editor, and this keeps
+    // that separation -- it shares none of the cell editor's machinery (no `provideEditor`, no
+    // validation, no cursor movement on commit), and folding it in would mean threading "is this a
+    // cell?" through all of it.
+    //
+    // Appearance is in `components/glide-data-grid-editors.css` under `.gdg-group-rename`; only the
+    // geometry is set here, because only this method has the group's rect.
+
+    private groupRenameState:
+        | {
+              readonly container: HTMLDivElement;
+              readonly input: HTMLInputElement;
+              /** The group **key**, not the display name -- what `@onGroupHeaderRenamed` receives. */
+              readonly groupKey: string;
+          }
+        | undefined;
+
+    private openGroupRename(groupKey: string, displayName: string, bounds: Rectangle): void {
+        // Reopening on a different group while one is already open: close the old box first rather
+        // than stranding it in the DOM with its listener still attached.
+        this.closeGroupRename();
+
+        const container = document.createElement("div");
+        container.className = "gdg-group-rename";
+        Object.assign(container.style, {
+            // Source's exact insets (`group-rename.tsx`): 1px in from the left and 2px narrower, so
+            // the box sits inside the group's vertical separator lines instead of covering them.
+            left: `${bounds.x + 1}px`,
+            top: `${bounds.y}px`,
+            width: `${bounds.width - 2}px`,
+            height: `${bounds.height}px`,
+        } satisfies Partial<CSSStyleDeclaration>);
+
+        const input = document.createElement("input");
+        input.className = "gdg-group-rename__input";
+        input.type = "text";
+        // The *display* name, which is what the user sees on the band. Only the callback speaks keys.
+        input.value = displayName;
+        input.setAttribute("data-testid", "group-rename-input");
+        // Source sizes its input off the band height the same way (`min-height: max(16, h - 10)`).
+        input.style.minHeight = `${Math.max(16, bounds.height - 10)}px`;
+
+        input.addEventListener("keydown", ev => {
+            if (ev.key === "Enter") {
+                ev.preventDefault();
+                this.commitGroupRename();
+            } else if (ev.key === "Escape") {
+                ev.preventDefault();
+                this.closeGroupRename();
+                // Escape should hand the keyboard back to the grid, not to the document body --
+                // otherwise the next arrow key scrolls the page instead of moving the selection.
+                this.root.focus();
+            }
+            // Every other key stays in the input. Without this the grid's own `keydown` listener on
+            // `root` would also see it (the event bubbles), so typing "c" in the box would start an
+            // edit-on-type on the selected cell behind it.
+            ev.stopPropagation();
+        });
+        input.addEventListener("blur", () => this.closeGroupRename());
+
+        container.append(input);
+        this.root.append(container);
+        this.groupRenameState = { container, input, groupKey };
+
+        input.focus();
+        input.setSelectionRange(0, input.value.length);
+
+        // Deferred for the same reason as the cell editor's outside-click listener: this runs inside
+        // a native mouseup dispatch, and a capture-phase listener added mid-dispatch must not catch
+        // the tail of the very gesture that opened the box.
+        window.setTimeout(() => {
+            if (this.groupRenameState?.container === container) {
+                this.addWindowListener("mousedown", this.onGroupRenameOutsideClick, true);
+            }
+        }, 0);
+    }
+
+    private commitGroupRename(): void {
+        const state = this.groupRenameState;
+        if (state === undefined) return;
+        const newValue = state.input.value;
+        const groupKey = state.groupKey;
+        // Close first: the callback almost always rewrites `column.group`, which re-renders the
+        // grid, and the box is anchored to a band that is about to be relabelled.
+        this.closeGroupRename();
+        this.root.focus();
+        this.resolveArgs().onGroupHeaderRenamed?.(groupKey, newValue);
+    }
+
+    private closeGroupRename(): void {
+        const state = this.groupRenameState;
+        if (state === undefined) return;
+        this.groupRenameState = undefined;
+        this.removeWindowListener("mousedown", this.onGroupRenameOutsideClick, true);
+        state.container.remove();
+    }
+
+    private readonly onGroupRenameOutsideClick = (ev: MouseEvent): void => {
+        const state = this.groupRenameState;
+        if (state === undefined) return;
+        if (ev.target instanceof Node && state.container.contains(ev.target)) return;
+        this.closeGroupRename();
     };
 
     /** Closes the overlay, optionally committing `newValue` first, then moves the active cell by

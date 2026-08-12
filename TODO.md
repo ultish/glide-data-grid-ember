@@ -220,9 +220,12 @@ returns one too, closing its "no collapsed-group header tint" gap. Browser-verif
 Full write-up, including the source y-comparison quirk that is reproduced on purpose, in
 **PORTING-NOTES.md → "4.2 — `@getGroupDetails`"**.
 
-**`onGroupHeaderRenamed` is still unported** and this was its prerequisite: source implements it by
-injecting a "Rename" entry into `actions` (`data-editor.tsx:1401-1425`) plus a second inline overlay
-host. The `actions` half now exists, so what is left is the overlay host and the callback.
+**`onGroupHeaderRenamed` landed 2026-08-12**, built on that `actions` support exactly as source is:
+the callback's presence injects a "Rename" entry (appended *after* the consumer's own actions), and
+that opens a small inline text box over the group's band. Browser-verified through all five paths —
+open, Escape, Enter, click-outside, and toggling the callback off. **Stated divergence:** the
+callback receives the group **key**, not the display name source passes; see PORTING-NOTES.md →
+"4.2 — `@onGroupHeaderRenamed`". 7 new tests.
 
 ### 4.3 `rightElement` / `rightElementProps` — `M`
 

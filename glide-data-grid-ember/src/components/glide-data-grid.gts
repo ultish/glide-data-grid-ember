@@ -482,6 +482,16 @@ export interface GlideDataGridSignature {
         onCellClicked?: (cell: Item, event: CellClickedEventArgs) => void;
         onHeaderClicked?: (colIndex: number, event: HeaderClickedEventArgs) => void;
         onGroupHeaderClicked?: (colIndex: number, event: GroupHeaderClickedEventArgs) => void;
+        /**
+         * The user renamed a column group. **Passing this is what enables renaming** — it puts a
+         * "Rename" button in every group's header, which opens an inline text box over the band.
+         * Nothing is renamed for you: a group exists only because columns share a `group` string, so
+         * applying it means updating those columns.
+         *
+         * `groupName` is the group **key** (`column.group`), not its display name — see
+         * `GridHostArgs.onGroupHeaderRenamed` for why that differs from source.
+         */
+        onGroupHeaderRenamed?: (groupName: string, newValue: string) => void;
         onCellActivated?: (cell: Item, event: CellActivatedEventArgs) => void;
         onFinishedEditing?: (newValue: GridCell | undefined, movement: Item) => void;
         /** Tab in an editor on the last column. Setting it is what enables that gesture. Return
@@ -646,6 +656,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onCellClicked: this.args.onCellClicked,
         onHeaderClicked: this.args.onHeaderClicked,
         onGroupHeaderClicked: this.args.onGroupHeaderClicked,
+        onGroupHeaderRenamed: this.args.onGroupHeaderRenamed,
         onCellActivated: this.args.onCellActivated,
         onFinishedEditing: this.args.onFinishedEditing,
         onColumnAppended: this.args.onColumnAppended,

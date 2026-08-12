@@ -39,7 +39,7 @@ group: "Metrics", icon: "headerNumber", hasMenu: true },
   name: group === "hr" ? "People" : group,   // omit to use the key itself
   icon: "headerRowID",
   overrideTheme: group === "hr" ? { bgHeader: "#2d3f5f" } : undefined,
-  actions: [{ title: "Rename", icon: "renameIcon", onClick: e => this.rename(e) }],
+  actions: [{ title: "Hide", icon: "headerCode", onClick: e => this.hideGroup(e.group) }],
 });`,
         },
         {
@@ -47,8 +47,25 @@ group: "Metrics", icon: "headerNumber", hasMenu: true },
             items: [
                 "Return `undefined` (or leave fields out) to accept the defaults — only the fields you set change anything.",
                 "**Clicking an action reports itself and nothing else**: no `@onGroupHeaderClicked`, and no group-column selection. That is source's behaviour, and it is what makes an action button usable at all.",
+                "**`overrideTheme` covers the column headers under the strip too**, not just the strip. So darkening `bgHeader` means restating every foreground it affects — `textGroupHeader` for the strip's label, `textHeader` for the column titles, and `bgIconHeader`/`fgIconHeader` for their icons.",
                 "Pass a **stable** function — a class-field arrow, not an inline one. The grid keeps every render input reference-stable; see *Performance rules*.",
             ],
+        },
+        {
+            kind: "p",
+            text: "**Letting users rename a group.** Pass `@onGroupHeaderRenamed` and the grid adds a *Rename* button to every group header — after your own actions, never in front of them — which opens an inline text box over the band. You get the group's **key** and the new string, and applying it is yours to do: a group exists only because columns share a `group` value, so renaming one means rewriting that value.",
+        },
+        {
+            kind: "code",
+            text: `<GlideDataGrid @onGroupHeaderRenamed={{this.renameGroup}} ... />
+
+renameGroup = (groupName, newValue) => {
+  this.columns = this.columns.map(c => (c.group === groupName ? { ...c, group: newValue } : c));
+};`,
+        },
+        {
+            kind: "p",
+            text: "Because the key is what identifies the group, anything else you key by it — an icon map, a theme lookup — moves with the rename or stops matching. If you want an identity that survives renames, key your own maps by something stable and use `@getGroupDetails`'s `name` for the label. **Note for anyone porting from React:** upstream hands this callback the group's *display* name rather than its key, which cannot be mapped back to the columns you have to edit; this addon passes the key.",
         },
         {
             kind: "p",

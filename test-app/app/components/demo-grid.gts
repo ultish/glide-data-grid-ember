@@ -934,10 +934,14 @@ export default class DemoGrid extends Component {
             group === ACTION_GROUP
                 ? ([
                       {
-                          title: "Rename",
-                          icon: "renameIcon",
+                          // Deliberately NOT called "Rename": the grid injects a real Rename action
+                          // of its own whenever `@onGroupHeaderRenamed` is set, and two buttons with
+                          // one name would make the ordering rule below unreadable. Consumer actions
+                          // always come first; the injected one is appended last.
+                          title: "Pin",
+                          icon: "headerRowID",
                           onClick: () => {
-                              this.lastClick = `group action "Rename" on ${group}`;
+                              this.lastClick = `group action "Pin" on ${group}`;
                           },
                       },
                       {
@@ -971,6 +975,36 @@ export default class DemoGrid extends Component {
                     : undefined,
             actions,
         };
+    };
+
+    // 4.2's remainder: `@onGroupHeaderRenamed`. Passing the callback is what puts the "Rename"
+    // button in every group header, so the toggle is the demonstration — watch the button appear on
+    // all four groups, after the "Pin"/"Info" pair on Signals rather than in front of them.
+    @tracked allowGroupRename = true;
+
+    toggleGroupRename = (): void => {
+        this.allowGroupRename = !this.allowGroupRename;
+    };
+
+    get onGroupHeaderRenamed(): ((groupName: string, newValue: string) => void) | undefined {
+        return this.allowGroupRename ? this.applyGroupRename : undefined;
+    }
+
+    /**
+     * The grid renames nothing itself — a group exists only because columns share a `group` string,
+     * so applying the rename is rewriting that string on every column in the group. This is the
+     * whole implementation a real consumer needs.
+     *
+     * Worth watching in the demo: rename "Media" and it loses its icon and dark theme, because
+     * `GROUP_ICONS` and `THEMED_GROUP` are keyed by the group name. That is not a grid bug — it is
+     * the reason the callback hands you the **key**. A consumer who wants a stable identity across
+     * renames keys their own map by something else and uses `@getGroupDetails` for the label.
+     */
+    applyGroupRename = (groupName: string, newValue: string): void => {
+        const trimmed = newValue.trim();
+        this.lastActivity = `renamed group "${groupName}" to "${trimmed}"`;
+        if (trimmed === "" || trimmed === groupName) return;
+        this.columns = this.columns.map(c => (c.group === groupName ? { ...c, group: trimmed } : c));
     };
 
     toggleSuppressGroupHeaderSelect = (): void => {
@@ -1391,6 +1425,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-group-rename-toggle
+                    {{on "click" this.toggleGroupRename}}
+                >
+                    Group rename:
+                    <b>{{if this.allowGroupRename "on" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-strict-region-toggle
                     {{on "click" this.toggleStrictVisibleRegion}}
                 >
@@ -1685,6 +1728,8 @@ export default class DemoGrid extends Component {
                     @onCellClicked={{this.handleCellClicked}}
                     @onHeaderClicked={{this.handleHeaderClicked}}
                     @onGroupHeaderClicked={{this.handleGroupHeaderClicked}}
+                    {{! Passing this is what adds the "Rename" button to every group header. }}
+                    @onGroupHeaderRenamed={{this.onGroupHeaderRenamed}}
                     @onCellActivated={{this.handleCellActivated}}
                     @onFinishedEditing={{this.handleFinishedEditing}}
                     @onColumnAppended={{this.handleColumnAppended}}

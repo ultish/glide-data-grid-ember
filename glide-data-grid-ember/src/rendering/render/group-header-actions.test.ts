@@ -6,7 +6,7 @@
 // nothing when clicked, invisible to every full-redraw check. The controller itself cannot be
 // imported by vitest, so the shared geometry is where the contract can be pinned down.
 import { describe, expect, it } from "vitest";
-import { getActionBoundsForGroup, hitTestGroupHeaderAction } from "./group-header-actions.ts";
+import { appendRenameAction, getActionBoundsForGroup, hitTestGroupHeaderAction } from "./group-header-actions.ts";
 import type { GroupDetails } from "./data-grid-render.cells.ts";
 
 const noop = (): void => undefined;
@@ -73,5 +73,63 @@ describe("hitTestGroupHeaderAction", () => {
         expect(hitTestGroupHeaderAction(details, BOUNDS, 250, 0)?.title).toBe("one");
         expect(hitTestGroupHeaderAction(details, BOUNDS, 250, 26)?.title).toBe("one");
         expect(hitTestGroupHeaderAction(details, BOUNDS, 250, 30)).toBeUndefined();
+    });
+});
+
+describe("appendRenameAction", () => {
+    const onRename = (): void => undefined;
+
+    it("adds nothing when no rename handler is set", () => {
+        const details: GroupDetails = { name: "Identity" };
+        expect(appendRenameAction(details, "Identity", undefined)).toBe(details);
+    });
+
+    it("skips the empty group key -- ungrouped columns are not a group", () => {
+        const details: GroupDetails = { name: "" };
+        expect(appendRenameAction(details, "", onRename)).toBe(details);
+    });
+
+    it("appends a Rename action to a group with none", () => {
+        const result = appendRenameAction({ name: "Identity" }, "Identity", onRename);
+        expect(result.actions).toHaveLength(1);
+        expect(result.actions?.[0]?.title).toBe("Rename");
+        expect(result.actions?.[0]?.icon).toBe("renameIcon");
+    });
+
+    it("appends *after* the consumer's own actions, never reordering them", () => {
+        const result = appendRenameAction({ name: "Signals", actions: ACTIONS }, "Signals", onRename);
+        expect(result.actions?.map(a => a.title)).toEqual(["one", "two", "Rename"]);
+    });
+
+    it("preserves every other field", () => {
+        const theme = { bgHeader: "#123456" };
+        const result = appendRenameAction(
+            { name: "Media (themed)", icon: "headerImage", overrideTheme: theme },
+            "Media",
+            onRename
+        );
+        expect(result.name).toBe("Media (themed)");
+        expect(result.icon).toBe("headerImage");
+        expect(result.overrideTheme).toBe(theme);
+    });
+
+    it("hands the callback the group KEY and the DISPLAY name, in that order", () => {
+        // The divergence from source, pinned down: upstream forwards `result.name` as the group
+        // identifier, which is unusable for a group whose display name differs from its key.
+        const calls: [string, string][] = [];
+        const result = appendRenameAction({ name: "Media (themed)" }, "Media", (key, display) => {
+            calls.push([key, display]);
+        });
+        result.actions?.[0]?.onClick({ bounds: BOUNDS } as never);
+        expect(calls).toEqual([["Media", "Media (themed)"]]);
+    });
+
+    it("passes the group band's bounds through, so the box can be positioned over it", () => {
+        let seen: unknown;
+        const result = appendRenameAction({ name: "Identity" }, "Identity", (_k, _d, bounds) => {
+            seen = bounds;
+        });
+        result.actions?.[0]?.onClick({ bounds: BOUNDS } as never);
+        expect(seen).toBe(BOUNDS);
     });
 });
