@@ -252,6 +252,25 @@ export interface GlideDataGridSignature {
         fixedShadowX?: boolean;
         /** {@inheritDoc fixedShadowX} */
         fixedShadowY?: boolean;
+        /**
+         * Let a cell draw narrower than the render engine's 10px floor (drops it to 1px). Needed for
+         * deliberately hairline columns — `withCollapsingGroups`' 8px slivers are the usual case.
+         */
+        disableMinimumCellWidth?: boolean;
+        /**
+         * How the canvas is composited. Leave it alone unless chasing a specific artefact: the
+         * default already picks `"double-buffer"` on Safari and `"single-buffer"` elsewhere, and
+         * `"direct"` disables the scroll blit fast path.
+         */
+        renderStrategy?: "single-buffer" | "double-buffer" | "direct";
+        /**
+         * Drop the canvas resolution while scrolling and restore it 200ms after the last scroll —
+         * blurrier in motion, sharp at rest. Each only applies on its own browser and only above 1x
+         * DPR. Worth switching on for a wide grid on a hi-DPI screen.
+         */
+        enableFirefoxRescaling?: boolean;
+        /** {@inheritDoc enableFirefoxRescaling} */
+        enableSafariRescaling?: boolean;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
@@ -547,6 +566,10 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         overscrollY: this.args.overscrollY,
         fixedShadowX: this.args.fixedShadowX,
         fixedShadowY: this.args.fixedShadowY,
+        disableMinimumCellWidth: this.args.disableMinimumCellWidth,
+        renderStrategy: this.args.renderStrategy,
+        enableFirefoxRescaling: this.args.enableFirefoxRescaling,
+        enableSafariRescaling: this.args.enableSafariRescaling,
         getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,

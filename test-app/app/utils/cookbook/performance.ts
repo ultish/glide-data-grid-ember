@@ -29,6 +29,14 @@ export const performanceSection: Section = {
         },
         {
             kind: "p",
+            text: "**Hi-DPI screens, wide grids.** The canvas is painted at up to 5x device pixel ratio, and on a 4K screen that is the per-frame fill cost. `@enableFirefoxRescaling` / `@enableSafariRescaling` drop it to 1x / 2x **while scrolling** and restore full resolution 200ms after the last scroll — blurrier in motion, sharp at rest. Each only applies on its own browser, so switching both on is the normal thing to do.",
+        },
+        {
+            kind: "note",
+            text: '**`@renderStrategy` is a diagnostic, not a tuning knob.** The default already picks `"double-buffer"` on Safari and `"single-buffer"` elsewhere. Setting `"direct"` disables the scroll blit fast path and repaints every frame — which makes it useful for exactly one thing: if `"direct"` feels no slower than the default, the fast path was already disabled, and the cause is the first item in the list above.',
+        },
+        {
+            kind: "p",
             text: "For genuinely high-frequency updates — thousands of cells a second from a socket — bypass tracking entirely with the imperative damage API (`updateCells` from `@onReady`). That is **Guide 8, *When the data isn't in memory***, and the **Streaming updates** tab measures it. It is not a fallback for a tracked grid that isn't repainting; that is a different bug, and it is **Guide 3**.",
         },
     ],

@@ -5146,3 +5146,39 @@ axis lock only ever engages during a **touch** scroll. Touch is deferred (9c), s
 permanently false in this port and the arg could never do anything. This is the "read the guard
 conditions, not the prop declaration" rule paying for itself — the prop's name and type suggest a
 general-purpose scroll lock. Recorded as WON'T PORT in TODO.md rather than silently skipped.
+
+## 4.5 — source's `experimental` bag, flattened (2026-08-12)
+
+Source keeps ~12 knobs behind one `experimental` prop. This port has never had that bag —
+`hyperWrapping` came out of it as a top-level arg in 2.5 — so the three worth having are top-level
+args too. Auditing the rest was as valuable as porting them:
+
+**Ported.**
+
+- `@disableMinimumCellWidth` — one literal (`data-grid.tsx:762`, `10` or `1`). It is the floor below
+  which `drawCells` paints a cell's background and skips its contents
+  (`data-grid-render.cells.ts:392`). **Worth knowing for the demo:** the flag is invisible on its own
+  at any realistic width, because the theme's 8px cell padding already consumes an 8px column — the
+  `<DemoGrid>` toggle also drops that column's `cellHorizontalPadding` to 1, and only then does the
+  difference appear (blank sliver vs a clipped `$`).
+- `@renderStrategy` — the derived `browserIsSafari ? "double-buffer" : "single-buffer"` is now just
+  the default. `"direct"` disables the blit fast path, which makes it the only way to *see* that the
+  fast path exists.
+- `@enableFirefoxRescaling` / `@enableSafariRescaling` — cap the canvas DPR at 1x/2x while scrolling,
+  restoring 5x 200ms after the last scroll event. **Source's first-event quirk is reproduced**:
+  `setScrolling(true)` is guarded on a timer already being pending, so a single isolated scroll never
+  enters scroll mode. Its own comment explains why — one scroll would otherwise repaint twice, blurry
+  then sharp, which is more noticeable than the blur it avoids. Each flag is `&&`-ed with its own
+  browser, so switching Firefox rescaling on in Chrome does nothing (and cannot be browser-verified
+  in Chrome either, by construction).
+
+**Won't port, with reasons** (all recorded in TODO.md so they are not re-audited):
+`scrollbarWidthOverride` feeds only source's `idealWidth`/`idealHeight` sizing helper, which this port
+does not have — its one scrollbar measurement is taken live off the element and is more accurate;
+`kineticScrollPerfHack` is touch (9c); `isSubGrid` sets a className for source's click-outside
+library; `disableAccessibilityTree` is 9b.
+
+**Deferred with a reason.** `paddingRight`/`paddingBottom` are reserved space *for `rightElement`* —
+on their own they would be a second, indistinguishable spelling of `@overscrollX`/`Y`, so they belong
+to 4.3. `strict` and `eventTarget` are real items, now written up individually in TODO.md rather than
+hidden inside a "bag, rest" row.

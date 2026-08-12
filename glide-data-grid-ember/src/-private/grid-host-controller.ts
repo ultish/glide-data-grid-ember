@@ -134,7 +134,7 @@ import { hitTestGroupHeaderAction, type GroupHeaderAction } from "../rendering/r
 import { pointInRect } from "../rendering/common/math.ts";
 import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
-import { browserIsSafari, browserIsOSX } from "../rendering/common/browser-detect.ts";
+import { browserIsSafari, browserIsOSX, browserIsFirefox } from "../rendering/common/browser-detect.ts";
 import { isGridSurfaceTarget } from "./grid-event-target.ts";
 import { MangledLayoutCache, type MangledLayout, type RowMarkerColumnSpec } from "./mangled-layout.ts";
 import {
@@ -266,6 +266,37 @@ export interface GridHostArgs {
     readonly fixedShadowX?: boolean;
     /** {@inheritDoc GridHostArgs.fixedShadowX} */
     readonly fixedShadowY?: boolean;
+    /**
+     * Lets a cell be drawn narrower than the 10px floor the render engine otherwise enforces.
+     * Source's `experimental.disableMinimumCellWidth`, which drops the floor to 1px — needed for
+     * `withCollapsingGroups`-style slivers and any other deliberately hairline column.
+     * @defaultValue false
+     */
+    readonly disableMinimumCellWidth?: boolean;
+    /**
+     * How the canvas is composited. `"single-buffer"` draws straight to the visible canvas,
+     * `"double-buffer"` swaps between two offscreen ones (which is what Safari needs to avoid
+     * tearing), `"direct"` disables the scroll blit fast path entirely and repaints every frame.
+     *
+     * Source's `experimental.renderStrategy`. **Leave it alone unless you are chasing a specific
+     * artefact:** the default already picks `"double-buffer"` on Safari and `"single-buffer"`
+     * elsewhere, and `"direct"` is materially slower.
+     */
+    readonly renderStrategy?: "single-buffer" | "double-buffer" | "direct";
+    /**
+     * Drop the canvas resolution *while scrolling* and restore it 200ms after the last scroll —
+     * blurrier in motion, sharp at rest. Only takes effect on the matching browser and only above
+     * 1x device pixel ratio; source gates them the same way
+     * (`experimental.enableFirefoxRescaling` / `enableSafariRescaling`).
+     *
+     * Firefox caps at 1x and Safari at 2x while scrolling, against the usual 5x ceiling. Worth
+     * switching on for a wide grid on a hi-DPI screen, where the per-frame fill cost is the
+     * bottleneck; worth leaving off otherwise.
+     * @defaultValue false
+     */
+    readonly enableFirefoxRescaling?: boolean;
+    /** {@inheritDoc GridHostArgs.enableFirefoxRescaling} */
+    readonly enableSafariRescaling?: boolean;
     /**
      * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
      * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
@@ -962,6 +993,10 @@ interface ResolvedGridHostArgs {
     readonly overscrollY: number | undefined;
     readonly fixedShadowX: boolean;
     readonly fixedShadowY: boolean;
+    readonly minimumCellWidth: number;
+    readonly renderStrategy: "single-buffer" | "double-buffer" | "direct";
+    /** Already `&&`-ed with the running browser, so the draw path only has to ask "is it on". */
+    readonly rescaleWhileScrolling: "firefox" | "safari" | undefined;
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
@@ -1097,6 +1132,9 @@ const DEFAULT_GROUP_DETAILS = (name: string): GroupDetails => ({ name });
 // cited by PORTING-NOTES.md, so this is a reasonable small value consistent with typical
 // resize-handle affordances. Reorder drag activation dead-zone matches source's own
 // `data-grid-dnd.tsx` `Math.abs(event.clientX - dragStartX) > 20` exactly.
+/** How long after the last scroll event the canvas returns to full resolution. Source's literal. */
+const RESCALE_SETTLE_MS = 200;
+
 const RESIZE_EDGE_PX = 6;
 const COLUMN_DRAG_THRESHOLD_PX = 20;
 // Phase 9h: the vertical twin of the above, for row reorder -- source uses the same literal 20 in
@@ -1280,6 +1318,9 @@ export class GridHostController {
     private readonly shadowYEl: HTMLDivElement;
     /** Last styles written to the two shadows, so a draw that changes nothing touches no DOM. */
     private lastShadowState: { x: string; y: string } = { x: "", y: "" };
+    /** 4.5: scroll-time canvas downscale. Both only ever move when a rescaling arg is on. */
+    private isScrolling = false;
+    private scrollingStopTimer: number | undefined;
 
     /**
      * The nodes a pointer event is allowed to have originated on for the grid to treat it as its
@@ -1763,6 +1804,20 @@ export class GridHostController {
             // Source defaults both to `true` (`data-grid.tsx:362-363`), so the shadows are opt-*out*.
             fixedShadowX: args.fixedShadowX !== false,
             fixedShadowY: args.fixedShadowY !== false,
+            // Source's `experimental?.disableMinimumCellWidth === true ? 1 : 10`
+            // (`data-grid.tsx:762`), which had been the hardcoded `10` in the `DrawGridArg` build.
+            minimumCellWidth: args.disableMinimumCellWidth === true ? 1 : 10,
+            // The derived value stays the default; the arg only overrides it. `browserIsSafari` is
+            // lazy, so this still costs one userAgent read for the process, not one per draw.
+            renderStrategy: args.renderStrategy ?? (browserIsSafari.value ? "double-buffer" : "single-buffer"),
+            // Each flag is `&&`-ed with its own browser, exactly as source does
+            // (`data-grid.tsx:437-438`) -- switching on Firefox rescaling in Chrome must do nothing.
+            rescaleWhileScrolling:
+                args.enableFirefoxRescaling === true && browserIsFirefox.value
+                    ? "firefox"
+                    : args.enableSafariRescaling === true && browserIsSafari.value
+                      ? "safari"
+                      : undefined,
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
@@ -2325,6 +2380,9 @@ export class GridHostController {
         // grid. Source cancels in an unmount effect for the same reason.
         this.search?.cancel();
         this.search = undefined;
+        // 4.5: would otherwise fire a redraw against a torn-down grid ~200ms later.
+        window.clearTimeout(this.scrollingStopTimer);
+        this.scrollingStopTimer = undefined;
 
         if (this.overlayState !== undefined) {
             window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
@@ -2446,13 +2504,16 @@ export class GridHostController {
             hoverValues: this.hoverValues,
             hoverInfo: this.hoverInfo,
             spriteManager: this.spriteManager,
-            maxScaleFactor: 5,
+            // 4.5: source's `maxDPR` (`data-grid.tsx:761`) -- 1x on Firefox or 2x on Safari *while
+            // scrolling*, 5x otherwise. `isScrolling` is only ever true when a rescaling flag is on,
+            // so a grid that has not opted in keeps the flat 5x it always had.
+            maxScaleFactor: this.isScrolling ? (args.rescaleWhileScrolling === "firefox" ? 1 : 2) : 5,
             touchMode: false,
-            renderStrategy: browserIsSafari.value ? "double-buffer" : "single-buffer",
+            renderStrategy: args.renderStrategy,
             enqueue: this.animationQueue.enqueue,
             renderStateProvider: this.renderStateProvider,
             getCellRenderer: args.getCellRenderer,
-            minimumCellWidth: 10,
+            minimumCellWidth: args.minimumCellWidth,
             resizeIndicator: args.resizeIndicator,
         };
 
@@ -2797,10 +2858,34 @@ export class GridHostController {
         this.runDraw(args, undefined);
     }
 
+    /**
+     * 4.5: the scroll-time canvas downscale (`@enableFirefoxRescaling` / `@enableSafariRescaling`).
+     * Port of source's layout effect at `data-grid.tsx:438-449`.
+     *
+     * **Source's first-event quirk is deliberate and is reproduced**: `setScrolling(true)` is guarded
+     * on a timer already being pending, so a single isolated scroll event never enters scroll mode —
+     * only the second event within 200ms does. Its comment says why ("we don't want to go into
+     * scroll mode for a single repaint"): a one-off scroll would otherwise repaint twice, once
+     * blurry and once sharp, which is more visible than the blur it avoids.
+     */
+    private noteScrollForRescaling(args: ResolvedGridHostArgs): void {
+        if (args.rescaleWhileScrolling === undefined || window.devicePixelRatio === 1) return;
+        if (this.scrollingStopTimer !== undefined) this.isScrolling = true;
+        window.clearTimeout(this.scrollingStopTimer);
+        this.scrollingStopTimer = window.setTimeout(() => {
+            this.scrollingStopTimer = undefined;
+            if (this.destroyed || !this.isScrolling) return;
+            this.isScrolling = false;
+            // The canvas is still at the reduced resolution, and nothing else will redraw it.
+            this.scheduleFullRedraw();
+        }, RESCALE_SETTLE_MS);
+    }
+
     private readonly onScroll = (): void => {
         if (this.destroyed) return;
         const args = this.resolveArgs();
         this.syncScrollOffsets(args);
+        this.noteScrollForRescaling(args);
 
         // Synchronous, no rAF/debounce -- this is intentional. The ported `drawGrid`'s blit fast
         // path (in `render/data-grid-render.blit.ts`) detects "only scroll offsets changed" and

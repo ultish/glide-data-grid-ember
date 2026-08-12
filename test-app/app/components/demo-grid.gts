@@ -252,6 +252,14 @@ const FOCUS_RING_MODES: readonly (boolean | "no-editor")[] = [true, "no-editor",
 // `false` (veto) and a replacement `GridSelection` (delete something else instead).
 const DELETE_MODES = ["normal", "veto", "whole-column"] as const;
 
+// 4.5: `@renderStrategy`. `"default"` means passing nothing, i.e. letting the grid derive it from
+// the browser -- which is what every consumer should do.
+const RENDER_STRATEGIES = ["default", "single-buffer", "double-buffer", "direct"] as const;
+
+// 4.5: `@disableMinimumCellWidth`. Three states because the flag alone is invisible -- see
+// `effectiveColumns`.
+const HAIRLINE_MODES = ["off", "8px, floor 10", "8px, floor 1"] as const;
+
 // 4.5: `@onPaste`'s three shapes. `"single-cell"` is the callback form refusing anything wider than
 // one cell, which is the realistic use — a consumer whose backend writes one field at a time.
 const PASTE_MODES = ["allow", "single-cell", "off"] as const;
@@ -670,6 +678,60 @@ export default class DemoGrid extends Component {
 
     get overscroll(): number | undefined {
         return this.useOverscroll ? 200 : undefined;
+    }
+
+    // 4.5: the render/perf knobs from source's `experimental` bag, flattened into real args here
+    // (the same call 2.5 made for `hyperWrapping`). `renderStrategy` is the one worth a toggle: it
+    // is the only way to *see* that the scroll blit fast path exists, since `"direct"` turns it off.
+    @tracked renderStrategyIndex = 0;
+    @tracked hairlineIndex = 0;
+
+    get renderStrategy(): (typeof RENDER_STRATEGIES)[number] {
+        return RENDER_STRATEGIES[this.renderStrategyIndex] ?? "default";
+    }
+
+    get renderStrategyArg(): "single-buffer" | "double-buffer" | "direct" | undefined {
+        const strategy = this.renderStrategy;
+        return strategy === "default" ? undefined : strategy;
+    }
+
+    cycleRenderStrategy = (): void => {
+        this.renderStrategyIndex = (this.renderStrategyIndex + 1) % RENDER_STRATEGIES.length;
+    };
+
+    get hairlineMode(): (typeof HAIRLINE_MODES)[number] {
+        return HAIRLINE_MODES[this.hairlineIndex] ?? "off";
+    }
+
+    cycleHairline = (): void => {
+        this.hairlineIndex = (this.hairlineIndex + 1) % HAIRLINE_MODES.length;
+    };
+
+    get disableMinimumCellWidth(): boolean {
+        return this.hairlineMode === "8px, floor 1";
+    }
+
+    /**
+     * `@disableMinimumCellWidth` only *does* anything to a column narrower than 10px — it lowers the
+     * floor below which the render engine paints a cell's background and skips its contents. Nothing
+     * here is that narrow, so the toggle squashes the Salary column to 8px and then cycles the flag,
+     * which is what makes the difference observable: **"8px, floor 10"** paints an empty sliver,
+     * **"8px, floor 1"** paints the number into it. A two-state toggle would have been a switch with
+     * no visible effect, which is the exact dead-arg shape this demo exists to prevent.
+     *
+     * `@cached` so the array keeps its identity between draws.
+     */
+    @cached
+    get effectiveColumns(): readonly GridColumn[] {
+        if (this.hairlineMode === "off") return this.columns;
+        // The padding override is needed, not decorative: with the theme's default 8px of cell
+        // padding on each side, an 8px column has no room left and the text is clipped away
+        // whichever floor is in force -- so the flag would look like it did nothing.
+        return this.columns.map((c, i) =>
+            i === 1
+                ? { ...c, width: 8, grow: undefined, themeOverride: { ...c.themeOverride, cellHorizontalPadding: 1 } }
+                : c
+        );
     }
 
     // 4.5: `@onPaste`. All-or-nothing, and checked before a single cell is written — where
@@ -1242,6 +1304,24 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-render-strategy-toggle
+                    {{on "click" this.cycleRenderStrategy}}
+                >
+                    Render:
+                    <b>{{this.renderStrategy}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-hairline-cells-toggle
+                    {{on "click" this.cycleHairline}}
+                >
+                    Hairline cells:
+                    <b>{{this.hairlineMode}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-scroll-shadows-toggle
                     {{on "click" this.toggleScrollShadows}}
                 >
@@ -1469,7 +1549,7 @@ export default class DemoGrid extends Component {
             {{/if}}
             <div class="gdg-full__grid">
                 <GlideDataGrid
-                    @columns={{this.columns}}
+                    @columns={{this.effectiveColumns}}
                     @getCellContent={{this.getCellContent}}
                     @extraCells={{allExtraCells}}
                     @rows={{this.rows}}
@@ -1519,6 +1599,13 @@ export default class DemoGrid extends Component {
                     @fixedShadowY={{this.scrollShadows}}
                     @overscrollX={{this.overscroll}}
                     @overscrollY={{this.overscroll}}
+                    {{! 4.5: source's `experimental` bag, flattened. Both rescaling flags are on so
+                        the scroll-time downscale is exercised on the browsers that honour it; each
+                        is a no-op elsewhere. }}
+                    @renderStrategy={{this.renderStrategyArg}}
+                    @disableMinimumCellWidth={{this.disableMinimumCellWidth}}
+                    @enableFirefoxRescaling={{true}}
+                    @enableSafariRescaling={{true}}
                     @copyHeaders={{this.copyHeaders}}
                     @onDelete={{this.onDelete}}
                     @cellActivationBehavior={{this.cellActivationBehavior}}

@@ -87,6 +87,7 @@ handleColumnMoved = (from, to) => {
                 "The shadows are the depth cue that makes frozen columns and the header read as floating: one fades in over the frozen columns' right edge as you scroll sideways, one under the header as you scroll down. `@fixedShadowX` / `@fixedShadowY` turn them off.",
                 "The X shadow needs something frozen to cast from — with no `@freezeColumns` and no row markers, there is nothing to draw and it stays hidden.",
                 "Overscroll is scaled by `@scaleToRem` along with every other pixel dimension, so it keeps its proportion at a larger root font size.",
+                "A column narrower than 10px paints its background and **skips its contents** — that floor is what keeps collapsed slivers clean. `@disableMinimumCellWidth` drops it to 1px if you genuinely want a hairline column to show something (you will want to cut its `cellHorizontalPadding` too, or the padding alone will consume the column).",
             ],
         },
     ],
