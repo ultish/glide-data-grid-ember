@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- `@getGroupDetails` — column-group headers gain a display name distinct from the group key, an
+  `icon`, an `overrideTheme`, and `actions`: hover-revealed icon buttons with their own hit targets,
+  which report themselves and suppress both `@onGroupHeaderClicked` and the group-column selection.
+  `withCollapsingGroups` now returns one too, so a collapsed group's header is tinted.
+- `@onPaste` — `boolean | ((target, values) => boolean)`, an all-or-nothing gate checked once the
+  paste target is known and before any cell is written. The values handed over are unclipped, so a
+  consumer can refuse a block that will not fit.
+- `@fixedShadowX` / `@fixedShadowY` — the inset depth cues over the frozen columns' right edge and
+  under the header. **Both default to `true`**, matching upstream, so they are opt-_out_.
+- `@overscrollX` / `@overscrollY` — empty scrollable space past the last column and row. Scaled by
+  `@scaleToRem` like every other dimension.
+- `@disableMinimumCellWidth` — drops the 10px floor below which a cell paints its background and
+  skips its contents, to 1px. Needed for deliberately hairline columns.
+- `@renderStrategy` — `"single-buffer" | "double-buffer" | "direct"`. The browser-derived value
+  (double-buffer on Safari) is now just the default.
+- `@enableFirefoxRescaling` / `@enableSafariRescaling` — cap the canvas device-pixel ratio at 1x/2x
+  while scrolling and restore it 200ms after the last scroll event. Each applies only on its own
+  browser.
+- `@strictVisibleRegion` — refuse to read any cell outside the region last reported to
+  `@onVisibleRegionChanged`, drawing a loading cell instead. A development harness for paged and
+  async sources: it turns "the grid quietly rendered whatever the array held" into visible loading
+  cells. The selected cell and frozen columns stay readable.
+- `@eventTarget` — where the grid attaches its window-level pointer listeners (drag-end, autoscroll
+  pointer tracking, overlay-editor outside-click), for a grid living in an iframe or a portal. Left
+  unset, the target is resolved from the grid root's `getRootNode()`, so a grid inside a shadow root
+  needs no configuration.
+
+### Fixed
+
+- A mousedown on the column-group band no longer arms a column drag. `resolveMouseHit` folds the
+  group band and the header row into one kind, so the group band had been reaching drag state that
+  is meant for headers only.
+
+### Notes
+
+- `@onPaste` diverges from upstream in the `undefined` case only: source treats an absent `onPaste`
+  as "write the whole clipboard into the single target cell" and requires `onPaste={true}` for a
+  range paste. This addon has split on tabs and newlines since its first release, so `undefined`
+  continues to behave as `true` here.
+
 ## [0.1.7] - 2026-08-09
 
 ### Fixed
@@ -65,5 +109,6 @@ thousands stay smooth.
   and canary — i.e. through Ember 7.x.
 - Embroider or ember-auto-import v2.
 
+[0.2.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.2.0
 [0.1.7]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.7
 [0.1.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.0

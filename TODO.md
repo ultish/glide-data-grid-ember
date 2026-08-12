@@ -18,15 +18,14 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-12:** GitHub Pages is deployed from `main` and working. 861 vitest tests pass.
+**State as of 2026-08-12:** GitHub Pages is deployed from `main` and working. 869 vitest tests pass.
 Phases 0–11 are done; what is left is the backlog below.
 
-**Where the newest work is.** Branch **`group-details`**, four commits ahead of `main` and **not
-pushed** (no upstream set). It holds 4.2 (`@getGroupDetails`) and four §4.5 rows — `@onPaste`, scroll
-shadows, overscroll, and source's `experimental` bag flattened into real args. All browser-verified,
-all with entries in this file and PORTING-NOTES.md. `main` itself is unchanged since the v0.1.7
-release, so **nothing here is published**: merging (and a version bump) is a decision, not a
-leftover.
+**Where the newest work is.** All of it is on **`main`** and released as **v0.2.0**: 4.2
+(`@getGroupDetails`) and every §4.5 row that was going to be ported — `@onPaste`, scroll shadows,
+overscroll, source's `experimental` bag flattened into real args, and finally `@strictVisibleRegion`
+and `@eventTarget`. All browser-verified, all with entries in this file and PORTING-NOTES.md. The
+`group-details` branch that carried them was merged fast-forward and can be deleted.
 
 ### Commands
 
@@ -314,12 +313,15 @@ violations.)
 - Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
   character.
 
-### 5.3 First npm publish — DONE (2026-08-09)
+### 5.3 npm publish — DONE (0.1.7 on 2026-08-09, 0.2.0 on 2026-08-12)
 
-- Addon version `0.1.7` is committed and tagged as `v0.1.7`.
+- Current version is `0.2.0`, tagged `v0.2.0`. Everything from 4.2 and §4.5 ships in it.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.
+- **The release procedure** is: bump `glide-data-grid-ember/package.json`, add the CHANGELOG entry
+  and its link line, commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`. Pushing the tag is
+  what publishes; pushing `main` alone does not.
 
 ---
 
@@ -340,8 +342,11 @@ containing `{{ }}` would otherwise be parsed as Glimmer.
 
 **Rules:** exactly one copy of everything — the cookbook links *into* the guide rather than restating
 it. Every code sample uses **class-field arrows, never `@action`** (Ember 6+, and an arrow field is
-also identity-stable, which is what rule 1 wants). The workspace-root `README.md` is the file to edit;
-the addon's copy is a build artifact rollup overwrites.
+also identity-stable, which is what rule 1 wants). The workspace-root `README.md` **and
+`CHANGELOG.md`** are the files to edit; the addon's copies of *both* are build artifacts —
+`rollup.config.mjs:74-78` copies them in, and neither addon copy is tracked by git. Editing
+`glide-data-grid-ember/CHANGELOG.md` looks like it works right up until the next `pnpm build` silently
+reverts it, and `git status` will not warn you because the file is untracked.
 
 **Standing lesson: consumer docs rot in exactly one direction.** Features get added and the "not
 implemented yet" lists never get revisited. Migrating `THEMING.md` found two stale claims of that
