@@ -18,8 +18,15 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-12:** `main` is pushed, GitHub Pages is deployed and working. 861 vitest tests
-pass. Phases 0–11 are done; what is left is the backlog below.
+**State as of 2026-08-12:** GitHub Pages is deployed from `main` and working. 861 vitest tests pass.
+Phases 0–11 are done; what is left is the backlog below.
+
+**Where the newest work is.** Branch **`group-details`**, four commits ahead of `main` and **not
+pushed** (no upstream set). It holds 4.2 (`@getGroupDetails`) and four §4.5 rows — `@onPaste`, scroll
+shadows, overscroll, and source's `experimental` bag flattened into real args. All browser-verified,
+all with entries in this file and PORTING-NOTES.md. `main` itself is unchanged since the v0.1.7
+release, so **nothing here is published**: merging (and a version bump) is a decision, not a
+leftover.
 
 ### Commands
 
