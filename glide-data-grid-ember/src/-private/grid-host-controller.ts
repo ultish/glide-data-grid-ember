@@ -69,6 +69,7 @@ import { sizeColumns, applyColumnGrow, measureColumn } from "../rendering/column
 import { computeScrollDelta, type ScrollToParams } from "../rendering/scroll-to.ts";
 import { resolveNewRowTarget } from "../rendering/new-row-target.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
+import { isOutsideStrictRegion } from "../rendering/strict-region.ts";
 import type {
     DrawGridArg,
     DragAndDropState,
@@ -297,6 +298,42 @@ export interface GridHostArgs {
     readonly enableFirefoxRescaling?: boolean;
     /** {@inheritDoc GridHostArgs.enableFirefoxRescaling} */
     readonly enableSafariRescaling?: boolean;
+    /**
+     * Refuse to read any cell outside the region last reported to `@onVisibleRegionChanged`, handing
+     * the renderer a `Loading` cell instead. Source's `experimental.strict`.
+     *
+     * **A correctness harness, not an optimisation.** A paged or async source only loads what the
+     * grid asked it to load; without this, a bug in that plumbing shows up as *stale or wrong data*
+     * silently rendered from whatever the backing array happens to hold. With it on, the same bug
+     * shows up as visible loading cells. Switch it on while building the source, off in production.
+     *
+     * The selected cell and any frozen columns stay readable — see `isOutsideStrictRegion`
+     * (`rendering/strict-region.ts`) for the exact bounds, which are source's.
+     *
+     * **Narrower than source, deliberately:** it gates the draw and hit-test path only. This port's
+     * copy/search/auto-size sweeps read `getCellContent` directly rather than through the mangled
+     * closure the check lives in, so they are unaffected — which also means turning this on cannot
+     * break a copy of an off-screen range.
+     * @defaultValue false
+     */
+    readonly strictVisibleRegion?: boolean;
+    /**
+     * Where the grid attaches its **window-level** pointer listeners: the `mouseup` that ends a drag
+     * outside the grid, the `mousemove` that feeds autoscroll once the pointer leaves it, and the
+     * outside-click that dismisses an open overlay editor. Source's `experimental.eventTarget`.
+     *
+     * Needed when the grid lives somewhere those events never reach `window`: an iframe, a portal,
+     * or a shadow root. Left unset, the grid resolves the target itself from the canvas's
+     * `getRootNode()` — so a grid inside a shadow root already works without this arg, and setting
+     * it is only for the cases that resolution cannot see.
+     *
+     * Read once, when listeners are attached. Changing it later has no effect.
+     *
+     * Clipboard listeners (`copy`/`cut`/`paste`) are **not** redirected — they stay on `window`,
+     * matching source, because clipboard events are dispatched to the focused document regardless of
+     * where the grid sits in the tree.
+     */
+    readonly eventTarget?: HTMLElement | Window | Document | ShadowRoot;
     /**
      * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
      * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
@@ -997,6 +1034,7 @@ interface ResolvedGridHostArgs {
     readonly renderStrategy: "single-buffer" | "double-buffer" | "direct";
     /** Already `&&`-ed with the running browser, so the draw path only has to ask "is it on". */
     readonly rescaleWhileScrolling: "firefox" | "safari" | undefined;
+    readonly strictVisibleRegion: boolean;
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
@@ -1114,6 +1152,16 @@ const PRINTABLE_CHAR_RE = /[\p{L}\p{M}\p{N}\p{S}\p{P}]/u;
 // frame's arg, so an inline `() => true` in `runDraw` made the check fail on every frame and
 // disabled the scroll blit fast path entirely. Found in Phase 6, see PORTING-NOTES.md.
 const ALWAYS_VERTICAL_BORDER = (): boolean => true;
+
+// What `@strictVisibleRegion` compares against before a region has ever been computed. Source's own
+// initial `visibleRegionRef` (`data-editor.tsx:1171-1176`). It should be unreachable here --
+// `runDraw` computes the real region before anything reads it -- and exists so that a future call
+// path that reads cell content outside a draw degrades to "the top-left cell is available" rather
+// than crashing.
+const INITIAL_VISIBLE_REGION: Rectangle = { x: 0, y: 0, width: 1, height: 1 };
+
+/** The shape every listener the grid puts on `windowEventTarget` has. See `addWindowListener`. */
+type MouseHandler = (ev: MouseEvent) => void;
 
 // `DrawGridArg.getGroupDetails` -- the fallback when the consumer passes no `@getGroupDetails`:
 // the group's key *is* its display name and it has no icon, theme or actions. Source's own default
@@ -1330,6 +1378,33 @@ export class GridHostController {
      */
     private readonly gridSurfaces: readonly unknown[];
 
+    /**
+     * Where the grid's **window-level** pointer listeners live (4.5, source's
+     * `experimental.eventTarget` → its `windowEventTargetRef`, `data-grid.tsx:409,1442-1452`).
+     *
+     * Three listeners need a target wider than `root`, because each fires precisely when the pointer
+     * has left the grid: the drag-ending `mouseup`, autoscroll's `mousemove`, and the overlay
+     * editor's outside-click `mousedown`. `window` is the right answer for a grid in an ordinary
+     * document and the wrong one inside a shadow root, where those events are retargeted at the host
+     * long before they reach it.
+     *
+     * Resolved once, in the constructor, from the same three-way choice source makes. Clipboard
+     * listeners are deliberately not included -- see the `@eventTarget` doc comment.
+     */
+    private readonly windowEventTarget: EventTarget;
+
+    // The bare `EventTarget` interface has no per-event-name typing (that lives on `WindowEventMap`,
+    // which is unreachable once the target may also be a `ShadowRoot`), so every listener it takes
+    // is an `EventListener` over the base `Event`. All three of ours are mouse listeners, so the one
+    // narrowing cast is here rather than at each call site.
+    private addWindowListener(type: "mouseup" | "mousemove" | "mousedown", handler: MouseHandler, capture = false) {
+        this.windowEventTarget.addEventListener(type, handler as EventListener, capture);
+    }
+
+    private removeWindowListener(type: "mouseup" | "mousemove" | "mousedown", handler: MouseHandler, capture = false) {
+        this.windowEventTarget.removeEventListener(type, handler as EventListener, capture);
+    }
+
     private readonly bufferAEl: HTMLCanvasElement;
     private readonly bufferBEl: HTMLCanvasElement;
 
@@ -1542,6 +1617,18 @@ export class GridHostController {
             this.spacerEl,
         ];
 
+        // 4.5: the window-level listeners' target. Source's own resolution order
+        // (`data-grid.tsx:1442-1452`): an explicit `eventTarget` wins, otherwise the canvas's root
+        // node -- which is `document` for an ordinary grid and the `ShadowRoot` for one inside a web
+        // component, so shadow DOM works without the consumer passing anything. `window` rather than
+        // `document` in the ordinary case only because that is the object the port has always used.
+        //
+        // (Source's version of this branch is missing an `else` and therefore always takes the
+        // root-node path. Not reproduced: the two are equivalent for a document root, so the bug is
+        // invisible upstream and copying it would only mean copying an accident.)
+        this.windowEventTarget =
+            this.getArgsFn().eventTarget ?? (this.root.getRootNode() === document ? window : this.root.getRootNode());
+
         // --- offscreen double-buffer canvases -------------------------------------------------
         this.bufferAEl = document.createElement("canvas");
         this.bufferBEl = document.createElement("canvas");
@@ -1602,11 +1689,12 @@ export class GridHostController {
         // element keydown targets, but this is a belt-and-suspenders guard matching the brief and
         // makes the gating explicit rather than implicit in DOM focus semantics alone).
         this.root.addEventListener("keydown", this.onKeyDown);
-        // Mouseup listens on `window`, not `root` -- a drag-extend can end with the pointer outside
-        // the grid (mirrors source's `onPointerUp` listening on `windowEventTarget`,
+        // Mouseup listens on `windowEventTarget`, not `root` -- a drag-extend can end with the
+        // pointer outside the grid (mirrors source's `onPointerUp` listening on `windowEventTarget`,
         // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderMenuClick`
-        // in that case.
-        window.addEventListener("mouseup", this.onMouseUp);
+        // in that case. `windowEventTarget` is `window` unless `@eventTarget` or a shadow root says
+        // otherwise; see its field comment.
+        this.addWindowListener("mouseup", this.onMouseUp);
         // Phase 9h. The main `mousemove` listener is on `root`, so it stops firing the moment a drag
         // leaves the grid -- which is exactly when autoscroll needs to know where the pointer is.
         // Source sidesteps this by listening for `pointermove` on the window (`data-grid.tsx:1374`);
@@ -1614,13 +1702,18 @@ export class GridHostController {
         // window listener that only wakes up for an in-flight drag *outside* the grid. Events inside
         // the grid reach this one too, by bubbling -- the `contains` check is what stops them being
         // processed twice.
-        window.addEventListener("mousemove", this.onWindowMouseMove);
+        this.addWindowListener("mousemove", this.onWindowMouseMove);
         // Copy/cut/paste (Phase 3c): native clipboard events, attached at `window` level (not a
         // specific DOM node) and gated on `this.isFocused` inside each handler -- mirrors source's
         // own `useEventListener("copy"/"cut"/"paste", ..., safeWindow, ...)` plus its
         // `document.activeElement` focus check (`data-editor.tsx:3642-3644,3775-3778,3882-3884`),
         // reusing the same `isFocused` field the 3a/3b focus-gating fix already established rather
         // than re-deriving `document.activeElement` containment here.
+        //
+        // 4.5: these three stay on `window` even when `@eventTarget` redirects the pointer listeners
+        // above, because source keeps them on `safeWindow` too (`data-editor.tsx:3767,3877,3908`) --
+        // a clipboard event is dispatched at the focused document, so the target that matters for it
+        // is the window the grid is running in, which is already this one.
         window.addEventListener("copy", this.onCopy);
         window.addEventListener("cut", this.onCut);
         window.addEventListener("paste", this.onPaste);
@@ -1818,6 +1911,7 @@ export class GridHostController {
                     : args.enableSafariRescaling === true && browserIsSafari.value
                       ? "safari"
                       : undefined,
+            strictVisibleRegion: args.strictVisibleRegion === true,
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
@@ -2106,6 +2200,12 @@ export class GridHostController {
               readonly columns: readonly GridColumn[];
               readonly trailingRowOptions: TrailingRowOptions | undefined;
               readonly rowMarkerStartIndex: number;
+              // 4.5 (`experimental.strict`). The flag itself is part of the key; the *region* it
+              // compares against is read lazily inside the closure, exactly as source reads
+              // `visibleRegionRef.current` (`data-editor.tsx:1351`) -- baking it in would rebuild
+              // this closure on every scrolled row and take the blit fast path down with it.
+              readonly strictVisibleRegion: boolean;
+              readonly freezeColumns: number;
               readonly value: (item: Item) => InnerGridCell;
           }
         | undefined;
@@ -2124,7 +2224,9 @@ export class GridHostController {
     }
 
     private mangledGetCellContent(args: ResolvedGridHostArgs): (item: Item) => InnerGridCell {
-        if (!args.hasRowMarkers && !args.showTrailingBlankRow) {
+        // `strictVisibleRegion` joins the two conditions that make a wrapper necessary at all: with
+        // it on there is a check to run even when the consumer's own space and the grid's coincide.
+        if (!args.hasRowMarkers && !args.showTrailingBlankRow && !args.strictVisibleRegion) {
             return args.getCellContent;
         }
         const canReorderRows = args.onRowMoved !== undefined;
@@ -2140,7 +2242,9 @@ export class GridHostController {
             cached.canReorderRows === canReorderRows &&
             cached.columns === args.columns &&
             cached.trailingRowOptions === args.trailingRowOptions &&
-            cached.rowMarkerStartIndex === args.rowMarkerStartIndex
+            cached.rowMarkerStartIndex === args.rowMarkerStartIndex &&
+            cached.strictVisibleRegion === args.strictVisibleRegion &&
+            cached.freezeColumns === args.freezeColumns
         ) {
             return cached.value;
         }
@@ -2194,7 +2298,18 @@ export class GridHostController {
                     allowOverlay: false,
                 };
             }
-            return args.getCellContent([col - rowMarkerOffset, row]);
+            const outerCol = col - rowMarkerOffset;
+            // 4.5: `experimental.strict`, in source's position -- the last thing checked before the
+            // consumer's callback is reached, so the marker and trailing-row cells above are never
+            // affected by it.
+            if (args.strictVisibleRegion) {
+                const region = this.lastVisibleRegion ?? INITIAL_VISIBLE_REGION;
+                const selected = this.selection.current?.cell;
+                if (isOutsideStrictRegion(outerCol, row, region, args.rows, selected, args.freezeColumns)) {
+                    return { kind: GridCellKind.Loading, allowOverlay: false };
+                }
+            }
+            return args.getCellContent([outerCol, row]);
         };
         this.mangledCellContentCache = {
             getCellContent: args.getCellContent,
@@ -2207,6 +2322,8 @@ export class GridHostController {
             columns: args.columns,
             trailingRowOptions: args.trailingRowOptions,
             rowMarkerStartIndex: args.rowMarkerStartIndex,
+            strictVisibleRegion: args.strictVisibleRegion,
+            freezeColumns: args.freezeColumns,
             value,
         };
         return value;
@@ -2385,7 +2502,7 @@ export class GridHostController {
         this.scrollingStopTimer = undefined;
 
         if (this.overlayState !== undefined) {
-            window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
+            this.removeWindowListener("mousedown", this.onOverlayOutsideClick, true);
             this.overlayState.stopStayOnScreen?.();
             this.overlayState.handle.destroy();
             this.overlayState.container.remove();
@@ -2399,8 +2516,8 @@ export class GridHostController {
         this.root.removeEventListener("focus", this.onFocus);
         this.root.removeEventListener("blur", this.onBlur);
         this.root.removeEventListener("keydown", this.onKeyDown);
-        window.removeEventListener("mouseup", this.onMouseUp);
-        window.removeEventListener("mousemove", this.onWindowMouseMove);
+        this.removeWindowListener("mouseup", this.onMouseUp);
+        this.removeWindowListener("mousemove", this.onWindowMouseMove);
         this.autoscroller.stop();
         window.removeEventListener("copy", this.onCopy);
         window.removeEventListener("cut", this.onCut);
@@ -2427,6 +2544,9 @@ export class GridHostController {
     // changed" blit shortcut, and they do NOT update `lastFullDrawArg`.
     private runDraw(args: ResolvedGridHostArgs, damage: CellSet | undefined): void {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
+        // Before the `DrawGridArg` is built, because `mangledGetCellContent` consults the stored
+        // region when `@strictVisibleRegion` is on. See `updateVisibleRegion`.
+        this.updateVisibleRegion(args, mappedColumns, freezeColumns);
         const theme = this.mergedTheme(args);
         // Mirrors source's root-element `style={makeCSSStyle(mergedTheme)}` (`data-editor.tsx:4215`).
         // Done here rather than once at construction so a changed `@theme` restamps the variables;
@@ -2524,8 +2644,6 @@ export class GridHostController {
         } else {
             drawGrid(current, undefined);
         }
-
-        this.maybeEmitVisibleRegion(args, mappedColumns, freezeColumns);
     }
 
     // 9g: the tinted trailing row, memoized on the one row index it can contain.
@@ -2639,21 +2757,25 @@ export class GridHostController {
     // --- Phase 8: visible-region reporting ---------------------------------------------------------
     //
     // Source computes this in `scrolling-data-grid.tsx`'s `processArgs` (its own scroll handler);
-    // this port derives it at the end of every draw instead, which covers scroll, resize and arg
-    // changes with one call site and keeps it aligned with the offsets that were actually painted.
-    // The dedupe below is what keeps that cheap: the callback fires only when the visible block
-    // genuinely changes, i.e. at most once per crossed row/column boundary, not once per frame.
+    // this port derives it from the draw's own offsets instead, which covers scroll, resize and arg
+    // changes with one call site. The dedupe below is what keeps that cheap: the callback fires only
+    // when the visible block genuinely changes, i.e. at most once per crossed row/column boundary,
+    // not once per frame.
+    //
+    // 4.5: this runs **before** the draw, not after, and stores the region whether or not anyone is
+    // listening. Both because of `@strictVisibleRegion`, which reads `lastVisibleRegion` from inside
+    // the cell-content closure: computed afterwards, the first frame of a strict grid would consult
+    // a region that did not exist yet and paint an all-Loading grid with nothing scheduled to
+    // correct it. Running first also matches source, where `visibleRegionRef` is updated by the
+    // scroll handler and is therefore already current by the time React redraws.
 
     private lastVisibleRegion: Rectangle | undefined = undefined;
 
-    private maybeEmitVisibleRegion(
+    private updateVisibleRegion(
         args: ResolvedGridHostArgs,
         mappedColumns: readonly MappedGridColumn[],
         freezeColumns: number
     ): void {
-        const onVisibleRegionChanged = args.onVisibleRegionChanged;
-        if (onVisibleRegionChanged === undefined) return;
-
         const region = this.computeVisibleRegion(args, mappedColumns, freezeColumns);
         const last = this.lastVisibleRegion;
         if (
@@ -2666,6 +2788,9 @@ export class GridHostController {
             return;
         }
         this.lastVisibleRegion = region;
+
+        const onVisibleRegionChanged = args.onVisibleRegionChanged;
+        if (onVisibleRegionChanged === undefined) return;
 
         // Deferred deliberately -- see the doc comment on `GridHostArgs.onVisibleRegionChanged`.
         // A draw can be triggered from inside the Ember modifier's tracking frame, and consumers
@@ -4843,9 +4968,13 @@ export class GridHostController {
         // always called from within a native event dispatch (a mouseup that activated a cell, or a
         // keydown), and adding a capture-phase `window` listener mid-dispatch must not risk catching
         // that same gesture.
+        //
+        // 4.5: on `windowEventTarget`, matching source -- this is the one *non*-pointer-move listener
+        // it redirects, via `customEventTarget={experimental?.eventTarget}` on its
+        // `ClickOutsideContainer` (`data-editor.tsx:4332`).
         window.setTimeout(() => {
             if (this.overlayState === state) {
-                window.addEventListener("mousedown", this.onOverlayOutsideClick, true);
+                this.addWindowListener("mousedown", this.onOverlayOutsideClick, true);
             }
         }, 0);
     }
@@ -4924,7 +5053,7 @@ export class GridHostController {
         state.finished = true;
         this.overlayState = undefined;
 
-        window.removeEventListener("mousedown", this.onOverlayOutsideClick, true);
+        this.removeWindowListener("mousedown", this.onOverlayOutsideClick, true);
         state.stopStayOnScreen?.();
         state.handle.destroy();
         state.container.remove();

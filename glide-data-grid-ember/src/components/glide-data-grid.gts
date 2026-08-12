@@ -271,6 +271,22 @@ export interface GlideDataGridSignature {
         enableFirefoxRescaling?: boolean;
         /** {@inheritDoc enableFirefoxRescaling} */
         enableSafariRescaling?: boolean;
+        /**
+         * Refuse to read any cell outside the region last reported to `@onVisibleRegionChanged`,
+         * drawing a loading cell instead. A **development harness for paged/async sources**: it
+         * turns "the grid quietly rendered whatever the array held" into visible loading cells.
+         * The selected cell and frozen columns stay readable. Off by default; leave it off in
+         * production.
+         */
+        strictVisibleRegion?: boolean;
+        /**
+         * Where the grid attaches its window-level pointer listeners (drag-end, autoscroll's
+         * pointer tracking, overlay-editor outside-click). Needed when the grid lives somewhere
+         * those never reach `window` — an iframe, a portal. A grid inside a shadow root is already
+         * handled without this: the target is resolved from the canvas's `getRootNode()`.
+         * Read once, when listeners are attached.
+         */
+        eventTarget?: HTMLElement | Window | Document | ShadowRoot;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
@@ -570,6 +586,8 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         renderStrategy: this.args.renderStrategy,
         enableFirefoxRescaling: this.args.enableFirefoxRescaling,
         enableSafariRescaling: this.args.enableSafariRescaling,
+        strictVisibleRegion: this.args.strictVisibleRegion,
+        eventTarget: this.args.eventTarget,
         getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,

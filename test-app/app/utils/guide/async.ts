@@ -58,6 +58,10 @@ export default class PagedTable extends Component {
             kind: "p",
             text: "The last two args are both required and do different jobs. `@onVisibleRegionChanged` tells the source which rows are on screen, so it knows what to fetch. `@onReady` hands it the grid's imperative `updateCells` API, which is what repaints a page once it lands — **without it the pages still load and nothing shows them** until some unrelated event happens to repaint. `setRowCount()` updates the total when the server tells you the real one, and `invalidate()` drops the buffer so pages refetch. The **Async paging** tab is exactly this, live, at 100,000 rows.",
         },
+        {
+            kind: "p",
+            text: "**While you are building one of these, switch on `@strictVisibleRegion`.** A paged source that loses track of which pages it has loaded does not fail loudly — it returns whatever its buffer happens to hold for that index, which looks like real data and is simply the wrong row. With this arg on, the grid refuses to read any cell outside the region it last reported to you and draws a loading cell instead, so the gap you would otherwise never notice becomes visible. It is a development harness, not a feature: leave it off in production, where it only costs you a bounds check per cell.",
+        },
 
         // -- updateCells -----------------------------------------------------------------------------
         {

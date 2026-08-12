@@ -163,6 +163,8 @@ const GROUP_ICONS: Readonly<Record<string, string>> = {
 };
 /** The group whose strip is re-themed, to prove `overrideTheme` merges over the grid theme. */
 const THEMED_GROUP = "Media";
+/** Where the `@eventTarget` toggle parks its choice across the reload it needs. See its comment. */
+const EVENT_TARGET_KEY = "gdg-demo-event-target";
 /** The group carrying action icons. Two of them, so their left-to-right order is checkable. */
 const ACTION_GROUP = "Signals";
 
@@ -707,6 +709,40 @@ export default class DemoGrid extends Component {
         this.hairlineIndex = (this.hairlineIndex + 1) % HAIRLINE_MODES.length;
     };
 
+    // 4.5: `@strictVisibleRegion` (source's `experimental.strict`). Off by default because it is a
+    // development harness, not a feature. Switching it on here is the whole demonstration: this grid
+    // has a fully in-memory source, so *nothing* changes — which is the point. The cells that do go
+    // grey are the ones outside the reported region, and the two that deliberately do not are the
+    // selected cell and the frozen columns, both visible without scrolling anywhere.
+    @tracked strictVisibleRegion = false;
+
+    toggleStrictVisibleRegion = (): void => {
+        this.strictVisibleRegion = !this.strictVisibleRegion;
+    };
+
+    // 4.5: `@eventTarget`. There is nothing to *see* here — the arg exists for a grid inside an
+    // iframe or a portal, neither of which the demo has. The toggle is here so the redirect is
+    // exercised rather than dormant: with it on, the drag-end `mouseup`, autoscroll's `mousemove`
+    // and the overlay editor's outside-click bind to `document` instead of `window`, and all three
+    // interactions must keep working exactly as before.
+    //
+    // Persisted and reloaded rather than flipped in place, because the grid resolves its event
+    // target **once**, when it attaches listeners — so a live flip would silently do nothing and the
+    // toggle would be a lie. (Source re-binds on change, but only as a side effect of React
+    // re-running its `useEventListener`; it is not a documented behaviour and nothing upstream uses
+    // it.) `localStorage` is what carries the choice across the reload.
+    @tracked useDocumentEventTarget = localStorage.getItem(EVENT_TARGET_KEY) === "document";
+
+    toggleEventTarget = (): void => {
+        const next = !this.useDocumentEventTarget;
+        localStorage.setItem(EVENT_TARGET_KEY, next ? "document" : "window");
+        location.reload();
+    };
+
+    get eventTarget(): Document | undefined {
+        return this.useDocumentEventTarget ? document : undefined;
+    }
+
     get disableMinimumCellWidth(): boolean {
         return this.hairlineMode === "8px, floor 1";
     }
@@ -917,7 +953,22 @@ export default class DemoGrid extends Component {
             // The strip's label need not be the key on `column.group`; this proves it.
             name: group === THEMED_GROUP ? `${group} (themed)` : group,
             icon,
-            overrideTheme: group === THEMED_GROUP ? { bgHeader: "#2d3f5f", textGroupHeader: "#ffffff" } : undefined,
+            // A group's `overrideTheme` covers the *whole* header block — the group strip and the
+            // column headers under it (`render/data-grid-render.header.ts:68-72` merges it into each
+            // column header's theme, as source does). So darkening `bgHeader` means every foreground
+            // it affects has to be restated: `textGroupHeader` for the strip's own label,
+            // `textHeader` for the column titles, and the two icon colours for their glyphs.
+            // Setting only the first is how this group spent its first week unreadable.
+            overrideTheme:
+                group === THEMED_GROUP
+                    ? {
+                          bgHeader: "#2d3f5f",
+                          textGroupHeader: "#ffffff",
+                          textHeader: "#eef2fb",
+                          bgIconHeader: "#8aa4d6",
+                          fgIconHeader: "#1b2740",
+                      }
+                    : undefined,
             actions,
         };
     };
@@ -1340,6 +1391,24 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-strict-region-toggle
+                    {{on "click" this.toggleStrictVisibleRegion}}
+                >
+                    Strict region:
+                    <b>{{if this.strictVisibleRegion "on" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-event-target-toggle
+                    {{on "click" this.toggleEventTarget}}
+                >
+                    Window events:
+                    <b>{{if this.useDocumentEventTarget "document" "window"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-paste-mode-toggle
                     {{on "click" this.cyclePasteMode}}
                 >
@@ -1606,6 +1675,10 @@ export default class DemoGrid extends Component {
                     @disableMinimumCellWidth={{this.disableMinimumCellWidth}}
                     @enableFirefoxRescaling={{true}}
                     @enableSafariRescaling={{true}}
+                    {{! 4.5: the last two `experimental` keys. `@strictVisibleRegion` is a harness for
+                        paged sources; `@eventTarget` moves the window-level pointer listeners. }}
+                    @strictVisibleRegion={{this.strictVisibleRegion}}
+                    @eventTarget={{this.eventTarget}}
                     @copyHeaders={{this.copyHeaders}}
                     @onDelete={{this.onDelete}}
                     @cellActivationBehavior={{this.cellActivationBehavior}}

@@ -5180,5 +5180,107 @@ library; `disableAccessibilityTree` is 9b.
 
 **Deferred with a reason.** `paddingRight`/`paddingBottom` are reserved space *for `rightElement`* —
 on their own they would be a second, indistinguishable spelling of `@overscrollX`/`Y`, so they belong
-to 4.3. `strict` and `eventTarget` are real items, now written up individually in TODO.md rather than
-hidden inside a "bag, rest" row.
+to 4.3. `strict` and `eventTarget` were the two real items left; both landed the same day and are
+written up below.
+
+## 4.5 — `@strictVisibleRegion` and `@eventTarget`, the last two `experimental` keys (COMPLETE, browser-verified, 2026-08-12)
+
+With these two the `experimental` bag is fully accounted for: five keys flattened into real args,
+four declined with reasons, two deferred into 4.3.
+
+### `@strictVisibleRegion` (source's `experimental.strict`)
+
+Returns a `Loading` cell instead of calling the consumer's `getCellContent` for anything outside the
+region last reported to `@onVisibleRegionChanged`. It is a **development harness, not an
+optimisation**: a paged source that mis-tracks which pages it loaded otherwise renders whatever its
+backing array happens to hold, silently and plausibly. With this on, the same bug is grey cells.
+
+The rule lives in `rendering/strict-region.ts` (`isOutsideStrictRegion`, 8 tests) rather than in the
+controller, because every bound in it is **inclusive on purpose** — source compares against
+`region.x + region.width`, not `- 1`, since the last row/column of a region may be only partially
+visible — and an off-by-one there presents as "the edge column flickers grey", which nothing but a
+test pins down. Two escape hatches, both source's: the **selected cell** (it outlives a scroll) and
+the **frozen columns** (permanently on screen, yet outside the reported region by construction,
+because `computeVisibleRegion` deliberately reports only the scrolling block). `freezeTrailingRows` is
+hardcoded `0` here as at every other layout site, so source's three freeze regions collapse to one.
+
+**The ordering change this forced, and why it is the interesting part.** `maybeEmitVisibleRegion` ran
+at the *end* of `runDraw` and early-returned when no `@onVisibleRegionChanged` was wired. Both had to
+go: it is now `updateVisibleRegion`, it runs **before** the `DrawGridArg` is built, and it stores the
+region whether or not anyone is listening. Left at the end, a strict grid's very first frame would
+consult a region that did not exist yet, paint every cell as Loading, and have **nothing scheduled to
+correct it** — a permanently blank grid. Running it first is also what source effectively does:
+`visibleRegionRef` is written by its scroll handler and is therefore already current by the time
+React redraws.
+
+**Deliberately narrower than source.** The check sits in the mangled cell-content closure, which is
+where source puts it — but in *this* port only the draw and hit-test paths route through that
+closure; `getCellsForSelection`, copy, search and auto-sizing all read `args.getCellContent`
+directly, for reasons that predate this item. So they are unaffected, which also means switching this
+on cannot break a copy of an off-screen range. Source's `forceStrict` argument (always-on for its
+hover/cursor lookups) is not ported for the same reason.
+
+The closure's cache gained `strictVisibleRegion` and `freezeColumns` as keys; the *region* itself is
+read lazily inside the closure, exactly as source reads `visibleRegionRef.current`. Baking it in
+would rebuild the closure on every crossed row boundary and take the blit fast path down with it
+(rule 1).
+
+### `@eventTarget` (source's `experimental.eventTarget`)
+
+Three listeners need a target wider than `root`, because each fires precisely when the pointer has
+left the grid: the drag-ending `mouseup`, autoscroll's window `mousemove` (9h), and the overlay
+editor's outside-click `mousedown`. They now go through `addWindowListener`/`removeWindowListener`,
+which hold the one narrowing cast the bare `EventTarget` interface forces (it has no
+`WindowEventMap`, so every listener it takes is over the base `Event`).
+
+**Read the guard, not the prop — twice, and it changed the shape of the item both times.**
+
+1. TODO.md's entry said this redirects "paste/copy/cut, and 9h's window `mousemove`". Source does the
+   opposite: clipboard listeners stay on `safeWindow` unconditionally
+   (`data-editor.tsx:3767,3877,3908`) and `eventTarget` feeds only `windowEventTargetRef`, which
+   serves the *pointer* listeners (`data-grid.tsx:1134,1198,1249,1374`). A clipboard event is
+   dispatched at the focused document regardless of where the grid sits, so redirecting it is
+   meaningless. Clipboard was left on `window`.
+2. The listener source *does* also redirect is the outside-click one, via
+   `customEventTarget={experimental?.eventTarget}` on its `ClickOutsideContainer`
+   (`data-editor.tsx:4332`) — which the prop's name and type give no hint of.
+
+**The default is not `window`.** Source resolves the canvas's `getRootNode()`: `document` for an
+ordinary grid, the `ShadowRoot` for one inside a web component — so **shadow DOM works without the
+consumer passing anything**, and that retires most of TODO.md's "Shadow DOM" row. This port does the
+same from `root.getRootNode()`. Source's version of that branch is missing an `else` and therefore
+always takes the root-node path; not reproduced, because the two are equivalent for a document root,
+so the bug is invisible upstream and copying it would only mean copying an accident.
+
+**Divergence, stated:** the target is read **once**, when listeners attach. Source re-binds when it
+changes, but only as a side effect of React re-running `useEventListener` — it is not documented and
+nothing upstream relies on it. The `<DemoGrid>` toggle therefore persists to `localStorage` and
+reloads rather than flipping in place, since a live flip would silently do nothing and the toggle
+would be a lie.
+
+### Verification method: proving a guard is *reachable*, not just harmless
+
+Both args have the same problem — with a fully in-memory demo, a correct implementation is
+indistinguishable from one that never runs. Two techniques worth reusing:
+
+- **`@strictVisibleRegion`:** temporarily shrink the region at the call site to `{width: 2, height:
+  4}`, rebuild `dist/`, reload. Exactly cols 0–2 and rows 0–4 rendered real data and everything else
+  went blank — the inclusive bounds the unit tests assert, observed end-to-end. Reverted immediately
+  after. Separately, frozen columns kept their data while scrolled to cols 9–18, which is the freeze
+  escape hatch doing its job (the wrong coordinate space there would have greyed them out).
+- **`@eventTarget`:** dispatch the drag-ending `mouseup` **on `document` with `bubbles: false`**. A
+  `window` listener can never see such an event, so the two configurations separate cleanly: with
+  `@eventTarget={{document}}` the drag ended (a further button-held move changed nothing); on the
+  default `window` the drag stayed live and the same move grew the selection from 3x5 to 4x11. A
+  bubbling event would have proved nothing — it reaches both targets.
+
+### Found in passing: the demo's themed group was unreadable
+
+`<DemoGrid>`'s `@getGroupDetails` set `overrideTheme: { bgHeader: "#2d3f5f", textGroupHeader: "#fff" }`
+for the "Media" group, which rendered its *column* titles near-black on dark navy. **Not an addon
+defect** — a group's `overrideTheme` is merged into each column header's theme under it
+(`render/data-grid-render.header.ts:68-72`, line-for-line with source's `:65-69`), so darkening
+`bgHeader` obliges the consumer to restate every foreground it affects. The demo now sets
+`textHeader`, `bgIconHeader` and `fgIconHeader` as well. Worth remembering as the shape of the
+mistake: a partial theme override is not a partial *change*, and the half you forget is the half that
+was already the right colour against the old background.
