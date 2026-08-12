@@ -18,14 +18,19 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-12:** GitHub Pages is deployed from `main` and working. 869 vitest tests pass.
-Phases 0–11 are done; what is left is the backlog below.
+**State as of 2026-08-12:** everything is on **`main`**, which is pushed, green in CI, and deployed to
+GitHub Pages. 876 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
-**Where the newest work is.** All of it is on **`main`** and released as **v0.2.0**: 4.2
-(`@getGroupDetails`) and every §4.5 row that was going to be ported — `@onPaste`, scroll shadows,
-overscroll, source's `experimental` bag flattened into real args, and finally `@strictVisibleRegion`
-and `@eventTarget`. All browser-verified, all with entries in this file and PORTING-NOTES.md. The
-`group-details` branch that carried them was merged fast-forward and can be deleted.
+**Published vs unpublished.** **v0.2.0 is on npm** and contains 4.2 (`@getGroupDetails`) plus every
+§4.5 row that was going to be ported — `@onPaste`, scroll shadows, overscroll, the flattened
+`experimental` args, `@strictVisibleRegion`, `@eventTarget`. **Three commits have landed since that
+tag and are not released:** `@onGroupHeaderRenamed` (4.2's remainder), `<:rightElement>` + the two
+paddings (4.3), and controlled selection (`@selection` / `@onSelectionCleared`, 4.6). All three are
+browser-verified with write-ups in PORTING-NOTES.md. Cutting **v0.2.1** — bump, CHANGELOG, tag, push —
+is a decision, not a leftover; §5.3 has the procedure.
+
+**The `experimental` bag is now fully closed**, and with 4.3 done the only `M`/`L` parity items left
+are row grouping (§4.1), external HTML5 drag-and-drop (§4.4), and the rest of §4.6.
 
 ### Commands
 

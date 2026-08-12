@@ -115,9 +115,14 @@ items 1–6"): the two `.md` guides migrated into the cookbook and deleted, the 
 was an addon defect**. Two real defects were fixed: pointer events inside an overlay editor were
 dispatched as grid clicks (tearing the editor down and rebuilding it, in *every* editor since Phase
 4a), and `recordsSource` painted blank rows for records appended to a live Ember Data array. Vitest:
-**614**. **Next up: items 7 (make CI green) and 8 (release prerequisites), both deferred by the user
-for now**, then 9p (Playwright). One decision is waiting: `@onSelectionChanged` reports mangled
-column indices while the edit and context-menu callbacks don't.
+**614**.
+
+**Both follow-ups from that queue are since closed, and so is the decision it was waiting on** — this
+paragraph is kept as the record of the queue, not as a plan. CI is green across the whole `ember-try`
+matrix (TODO.md §5.1), the addon is published (v0.1.7, then v0.2.0 — §5.3), and
+`@onSelectionChanged`'s coordinate space was made consistent with every other callback on
+2026-08-09 and browser-verified; `-private/selection-space.ts` now makes a missed conversion a
+compile error. Only 9p (Playwright) is still deferred. **For what is actually next, read `TODO.md`.**
 
 **Phase 10 changed two things a cold session will otherwise get wrong.** (1) `<DemoGrid>` is now the
 single fully-featured reference grid — every shipped arg switched on, with toggles for the
