@@ -262,6 +262,10 @@ const RENDER_STRATEGIES = ["default", "single-buffer", "double-buffer", "direct"
 // `effectiveColumns`.
 const HAIRLINE_MODES = ["off", "8px, floor 10", "8px, floor 1"] as const;
 
+// 4.3: `<:rightElement>` plus its two layout flags, as one cycle. "scroll" is the plain block with
+// neither flag — you have to scroll past the last column to reach it.
+const RIGHT_ELEMENT_MODES = ["off", "scroll", "sticky", "fill"] as const;
+
 // 4.5: `@onPaste`'s three shapes. `"single-cell"` is the callback form refusing anything wider than
 // one cell, which is the realistic use — a consumer whose backend writes one field at a time.
 const PASTE_MODES = ["allow", "single-cell", "off"] as const;
@@ -708,6 +712,47 @@ export default class DemoGrid extends Component {
     cycleHairline = (): void => {
         this.hairlineIndex = (this.hairlineIndex + 1) % HAIRLINE_MODES.length;
     };
+
+    // 4.3: the `<:rightElement>` block. Three states rather than a boolean, because `sticky` and
+    // `fill` are the whole point and are mutually interesting: "scroll" makes you reach the end of
+    // the columns to find the panel, "sticky" pins it to the visible edge, "fill" lets it eat the
+    // leftover width (and fights `grow` columns for it, which this grid has — worth seeing).
+    @tracked rightElementIndex = 0;
+
+    get rightElementMode(): (typeof RIGHT_ELEMENT_MODES)[number] {
+        return RIGHT_ELEMENT_MODES[this.rightElementIndex] ?? "off";
+    }
+
+    cycleRightElement = (): void => {
+        this.rightElementIndex = (this.rightElementIndex + 1) % RIGHT_ELEMENT_MODES.length;
+    };
+
+    get rightElementSticky(): boolean {
+        return this.rightElementMode === "sticky";
+    }
+
+    get rightElementFill(): boolean {
+        return this.rightElementMode === "fill";
+    }
+
+    get showRightElement(): boolean {
+        return this.rightElementMode !== "off";
+    }
+
+    /**
+     * A **gutter beside the panel**, not a stand-in for its width — worth stating because 8px looks
+     * arbitrary until you see where it is applied. The grid uses it twice, as source does: as the
+     * panel's `margin-right`, and as the inset a sticky panel keeps from the scrollport's edge. So
+     * the reserved strip sits to the *right* of the panel; setting it to the panel's own width just
+     * parks the panel 160px inland with a 160px void beside it.
+     *
+     * It is also subtracted from the width and height the visible region is measured against, which
+     * is the part that matters for a paged source: with the panel on, this grid reports
+     * `cols 0-8, rows 0-12` where it reported `cols 0-10, rows 0-17` without it.
+     */
+    get rightElementPadding(): number | undefined {
+        return this.rightElementMode === "off" ? undefined : 8;
+    }
 
     // 4.5: `@strictVisibleRegion` (source's `experimental.strict`). Off by default because it is a
     // development harness, not a feature. Switching it on here is the whole demonstration: this grid
@@ -1425,6 +1470,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-right-element-toggle
+                    {{on "click" this.cycleRightElement}}
+                >
+                    Right panel:
+                    <b>{{this.rightElementMode}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-group-rename-toggle
                     {{on "click" this.toggleGroupRename}}
                 >
@@ -1754,12 +1808,41 @@ export default class DemoGrid extends Component {
                     @onCellContextMenu={{this.handleCellContextMenu}}
                     @onHeaderContextMenu={{this.handleHeaderContextMenu}}
                     @onGroupHeaderContextMenu={{this.handleGroupHeaderContextMenu}}
-                    {{! UI #1: the addon's own bar. The block renders inside the grid's own root,
-                        which is where its `.gdg-root`-scoped CSS and `--gdg-*` theme variables live.
-                        Both values come from the block, so no `@onReady` plumbing is needed for it. }}
-                    as |grid|
+                    {{! 4.3: the right-hand panel, past the last column. `sticky` pins it to the
+                        visible edge, `fill` lets it eat the leftover width; the padding holds it
+                        clear of the last column and keeps the cells under it out of the reported
+                        visible region. }}
+                    @rightElementSticky={{this.rightElementSticky}}
+                    @rightElementFill={{this.rightElementFill}}
+                    @paddingRight={{this.rightElementPadding}}
+                    @paddingBottom={{this.rightElementPadding}}
                 >
-                    <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
+                    <:default as |grid|>
+                        {{! UI #1: the addon's own bar. The block renders inside the grid's own root,
+                            which is where its `.gdg-root`-scoped CSS and `--gdg-*` theme variables
+                            live. Both values come from the block, so no `@onReady` plumbing is
+                            needed for it. }}
+                        <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
+                    </:default>
+                    <:rightElement>
+                        {{! The named block is the Ember spelling of source's `rightElement` prop, and
+                            the better one: ordinary template content with the component's own actions
+                            in scope, not a detached DOM node handed over as a value.
+
+                            The conditional is *inside* the block because a named block cannot be
+                            wrapped in one, nor can a comment sit between two named blocks — the tag
+                            may contain nothing but the blocks themselves. So "off" here renders an
+                            empty panel rather than exercising the no-block path; that path is covered
+                            by every other grid in this app, none of which pass the block. }}
+                        {{#if this.showRightElement}}
+                            <div class="gdg-demo-right-panel" data-test-right-panel>
+                                <button type="button" {{on "click" this.handleColumnAppended}}>
+                                    + Add column
+                                </button>
+                                <p>{{this.columns.length}} columns</p>
+                            </div>
+                        {{/if}}
+                    </:rightElement>
                 </GlideDataGrid>
 
                 {{#if this.headerMenu}}

@@ -213,6 +213,17 @@ export interface GlideDataGridSignature {
                 searchState: SearchState | undefined;
             },
         ];
+        /**
+         * A panel rendered at the far end of the horizontal scroll region, past the last column —
+         * the "+ add column" button, a summary rail, a message. Source takes this as a
+         * `rightElement` *prop* holding a React node; a named block is the Ember spelling, and a
+         * better one: the content stays in the consumer's template, with their own components,
+         * services and actions in scope.
+         *
+         * Pair it with `@rightElementSticky` to pin it to the visible edge, `@rightElementFill` to
+         * let it eat the leftover width, and `@paddingRight` to hold it clear of the last column.
+         */
+        rightElement: [];
     };
     Args: {
         columns: readonly GridColumn[];
@@ -287,6 +298,26 @@ export interface GlideDataGridSignature {
          * Read once, when listeners are attached.
          */
         eventTarget?: HTMLElement | Window | Document | ShadowRoot;
+        /**
+         * Pin the `<:rightElement>` panel to the visible edge instead of making the user scroll to
+         * the end to reveal it.
+         */
+        rightElementSticky?: boolean;
+        /**
+         * Let the `<:rightElement>` panel consume the leftover horizontal space rather than sitting
+         * immediately after the last column. **Does not play nicely with `grow` columns** — they are
+         * competing for the same slack.
+         */
+        rightElementFill?: boolean;
+        /**
+         * Reserved empty space at the right and bottom of the scrollable area, in px. Meant to go
+         * with `<:rightElement>`: `@paddingRight` holds a sticky panel clear of the last column and
+         * is subtracted from the width the visible region is measured against, so cells underneath
+         * the panel are not reported as visible. Without a right element, use `@overscrollX`/`Y`.
+         */
+        paddingRight?: number;
+        /** {@inheritDoc paddingRight} */
+        paddingBottom?: number;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
@@ -543,6 +574,33 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
     @tracked private searchApi: GlideDataGridApi | undefined;
     @tracked private searchState: SearchState | undefined;
 
+    // 4.3: the host node for the `<:rightElement>` block. `{{in-element}}` renders the block *into*
+    // it; the controller decides where in the scroller's DOM it sits.
+    //
+    // WHY THE NODE IS CREATED HERE AND NOT IN THE TEMPLATE. A node Glimmer itself rendered must not
+    // be reparented -- Glimmer removes it on teardown through the parent it recorded at insertion
+    // time, so moving it into the scroller turns teardown into a `NotFoundError`. A node Glimmer only
+    // renders *into* carries no such constraint, which is precisely what `{{in-element}}` is for.
+    //
+    // WHY LAZILY, AND WHY THAT IS ALSO THE "IS THERE A BLOCK?" SIGNAL. `has-block` is template-only
+    // -- there is no `this.hasBlock` to read from JS. But the template only reads this getter from
+    // inside `{{#if (has-block "rightElement")}}`, so the node existing *is* the answer, with no
+    // heuristic and no extra DOM. The getter runs during render and the controller reads
+    // `buildGridHostArgs()` afterwards (modifiers install once the tree is in the DOM), so the
+    // ordering is settled rather than lucky.
+    private rightHostEl: HTMLElement | undefined;
+
+    private get rightElementHost(): HTMLElement {
+        // `ember/no-side-effects` guards against a getter writing *tracked* state, which invalidates
+        // mid-render and causes backtracking assertions. This writes one plain, untracked field and
+        // does it once: memoizing a detached DOM node so the value stays reference-stable, which
+        // `GridHostArgs` requires of everything it carries. Creating it eagerly instead would make
+        // the node exist for grids that pass no block, and its existence is the signal that one was.
+        // eslint-disable-next-line ember/no-side-effects
+        this.rightHostEl ??= document.createElement("div");
+        return this.rightHostEl;
+    }
+
     // Wraps the consumer's `@onSearchStateChange` so the yielded `searchState` stays current
     // whether or not they passed one. A stable reference, since it is a `GridHostArgs` field.
     private readonly handleSearchStateChange = (state: SearchState): void => {
@@ -598,6 +656,12 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         enableSafariRescaling: this.args.enableSafariRescaling,
         strictVisibleRegion: this.args.strictVisibleRegion,
         eventTarget: this.args.eventTarget,
+        // `undefined` until the template has rendered a `<:rightElement>` block -- see the getter.
+        rightElement: this.rightHostEl,
+        rightElementSticky: this.args.rightElementSticky,
+        rightElementFill: this.args.rightElementFill,
+        paddingRight: this.args.paddingRight,
+        paddingBottom: this.args.paddingBottom,
         getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,
@@ -741,6 +805,16 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
     <template>
         <div style={{this.containerStyle}} {{this.setupGrid}} ...attributes>
             {{yield (hash api=this.searchApi searchState=this.searchState)}}
+            {{! 4.3. The block renders into a detached node the controller then places inside the
+                scroller, past the last column. The in-element keyword rather than plain markup,
+                because the node has to live somewhere Glimmer did not put it -- see the
+                `rightElementHost` getter for why that distinction is load-bearing.
+
+                NB: a template comment ends at the first closing double-brace, so writing a curly
+                expression inside one silently truncates it and leaks the remainder as text. }}
+            {{#if (has-block "rightElement")}}
+                {{#in-element this.rightElementHost}}{{yield to="rightElement"}}{{/in-element}}
+            {{/if}}
         </div>
     </template>
 }

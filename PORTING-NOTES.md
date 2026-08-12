@@ -5353,3 +5353,87 @@ Browser-verified end to end: opens over the band with its text preselected, Esca
 calling back, Enter calls back with `("Signals", "Telemetry")` and the demo's own handler rewrites
 `column.group` so the band relabels, an outside click closes it, and toggling `@onGroupHeaderRenamed`
 off removes the action entirely (then restores it, which is what proves the `canRename` cache key).
+
+## 4.3 — `<:rightElement>`, and the last of the `experimental` bag (COMPLETE, browser-verified, 2026-08-12)
+
+The panel at the far end of the horizontal scroll region — source's `rightElement` prop plus
+`rightElementProps.sticky` / `.fill` and `experimental.paddingRight` / `paddingBottom`. With these
+four args the `experimental` bag is fully accounted for.
+
+### The Ember shape, and the constraint that forces it
+
+Source takes a React node as a prop. This port takes a **named block**, which is the better spelling:
+the content stays in the consumer's template with their own components, services and actions in
+scope, instead of being a detached DOM node handed over as a value.
+
+The mechanism is `{{in-element}}` into a node the *component* creates and the *controller* places:
+
+- **A node Glimmer rendered must not be reparented.** Glimmer removes it on teardown through the
+  parent element it recorded at insertion time, so moving it into the scroller turns teardown into a
+  `NotFoundError`. A node Glimmer only renders *into* carries no such constraint — that is exactly
+  what `{{in-element}}` is for.
+- **`has-block` is template-only**; there is no `this.hasBlock` to read from JS, and the controller
+  needs to know whether a block exists. Resolved without a heuristic: the template reads the host
+  getter *only* from inside `{{#if (has-block "rightElement")}}`, and the getter creates the node
+  lazily — so the node existing **is** the answer. The getter carries a targeted
+  `ember/no-side-effects` disable, with the reason: the rule guards against writing *tracked* state
+  mid-render, and this writes one plain untracked field, once.
+- Ordering is settled rather than lucky: the getter runs during render, modifiers install after the
+  tree is in the DOM, and the controller reads `buildGridHostArgs()` from its modifier.
+
+### Two Glimmer rules worth knowing before you touch a template here
+
+Both cost real time in this item and neither is obvious from an error message:
+
+1. **A named block cannot be wrapped in a conditional, and nothing may sit between named blocks —
+   not even a comment.** The compiler's message is "when using named blocks, the tag cannot contain
+   other content", which does not obviously mean "your comment". Put the conditional *inside* the
+   block and the comments inside the blocks.
+2. **A template comment ends at the first `}}`.** Writing a curly expression inside `{{! ... }}` —
+   e.g. explaining that "the `{{#if}}` is inside the block" — silently truncates the comment and
+   **leaks the remainder into the DOM as a text node**. Here that text node became a flex child of
+   `.dvn-scroll-inner`, blew the right-element host from 160px to 2092px, and made sticky positioning
+   look broken. The DOM measurement that found it (`hostTextNodes`) is worth keeping in any future
+   right-element check. The repo already knew this hazard in one form — it is why the cookbook is
+   plain data rather than markup — but not that it applies to *comments*. A scan of every `.gts` and
+   `.hbs` in the repo found no other instance, and the addon's own template comment had the same bug
+   and was fixed in the same pass.
+
+### Placement and geometry
+
+`syncRightElement` runs from `rebuildScrollContent`, so it re-applies on every arg change. It sets
+source's inline block verbatim (`infinite-scroller.tsx:356-369`): the grid's height, a `maxHeight` off
+the scroller's *client* height so the panel never outgrows the visible area, `marginRight:
+paddingRight`, `flexGrow` when filling, and `right: paddingRight` when sticky. The static rules
+(`position: sticky`, `top: 0`, `padding-left: 1px`, `margin-bottom: -40px`, `pointer-events: auto`)
+are in `glide-data-grid.css` under `.dvn-right-element`.
+
+Two of source's structural details are reproduced with a note rather than copied blindly:
+
+- **`.dvn-hidden`** on the scroll-inner when there is no right element (`visibility: hidden`). The
+  port never had this class; with no panel the inner exists only to give the scroller its extent, and
+  `visibility` does not affect layout, so the extent still works.
+- **The spacer** is a permanent node here (it predates this item and carries the horizontal extent),
+  where source renders it only alongside a non-filling panel. It is hidden rather than removed when
+  `fill` is on, so the two do not fight for the same slack.
+
+### `paddingRight` is a gutter, not the panel's width
+
+Worth stating because the demo got it wrong first and it *looked* plausible. Source applies
+`paddingRight` **twice** — as the panel's `margin-right` and as the inset a sticky panel keeps from
+the scrollport edge — so the reserved strip ends up to the *right* of the panel. Setting it to the
+panel's own width therefore parks the panel that far inland with an equally wide void beside it,
+which is what the browser showed. It is a gutter.
+
+What it also does, and the reason it is not just a second spelling of `@overscrollX`: both paddings
+are subtracted from the width and height `computeVisibleRegion` measures against
+(`infinite-scroller.tsx:280-281`), so a paged source stops being asked for rows behind the panel. The
+browser check is the semantic one: `cols 0-10, rows 0-17` without the panel, `cols 0-8, rows 0-12`
+with it — both axes.
+
+### `fill` cannot be demonstrated on a wide grid, by construction
+
+`flex-grow` distributes *positive* free space. `<DemoGrid>` has 50 columns overflowing the viewport,
+so there is none and the toggle looks inert. That is source's own caveat ("if any") and its warning
+that fill "does not play nice with growing columns" — they compete for the same slack. Recorded here
+rather than treated as a defect; the inline `flex-grow: 1` is confirmed applied.

@@ -227,14 +227,15 @@ open, Escape, Enter, click-outside, and toggling the callback off. **Stated dive
 callback receives the group **key**, not the display name source passes; see PORTING-NOTES.md →
 "4.2 — `@onGroupHeaderRenamed`". 7 new tests.
 
-### 4.3 `rightElement` / `rightElementProps` — `M`
+### 4.3 `rightElement` / `rightElementProps` — DONE (2026-08-12)
 
-The "+ add column" button every spreadsheet UI has. Source: `scrolling-data-grid.tsx` →
-`infinite-scroller.tsx`. The port has none, though the DOM scaffolding (`.dvn-*` scroller,
-`scrollInnerEl`, `stackEl`, `spacerEl`) all exists.
-
-**This is the one gap that is *nicer* in Ember than React** — a named block rather than a prop
-carrying an element. Design it that way.
+Shipped as the **`<:rightElement>` named block**, with `@rightElementSticky`, `@rightElementFill`,
+`@paddingRight` and `@paddingBottom` — which closes source's `experimental` bag entirely. The block
+renders into a detached node via `{{in-element}}` and the controller places that node in the
+scroller; the reason it cannot simply be markup is that Glimmer removes a node it rendered through
+the parent it recorded at insertion, so reparenting turns teardown into a `NotFoundError`. Full
+write-up, including the template-comment truncation trap that cost an hour, in **PORTING-NOTES.md →
+"4.3 — `<:rightElement>`"**.
 
 ### 4.4 External HTML5 drag-and-drop — `M`
 
@@ -257,8 +258,17 @@ reusing the existing `resolveMouseHit` for the cell target.
 | **`experimental` bag, rest** | PARTLY DONE (2026-08-12) | Flattened into real args rather than an `experimental` bag, following 2.5's precedent with `hyperWrapping`. **Done:** `@disableMinimumCellWidth`, `@renderStrategy`, `@enableFirefoxRescaling` / `@enableSafariRescaling` (the scroll-time DPR cap, 200ms settle). **Won't port:** `scrollbarWidthOverride` (its only use upstream is the `idealWidth`/`idealHeight` sizing helper this port does not have — the port measures the live element for its one scrollbar hit-test), `kineticScrollPerfHack` (touch, 9c), `isSubGrid` (a className for source's click-outside library), `disableAccessibilityTree` (9b). **`strict` and `eventTarget` landed 2026-08-12** (rows below), which leaves only `paddingRight`/`paddingBottom`, deferred into 4.3. |
 | **`experimental.strict`** | DONE (2026-08-12) | Shipped as `@strictVisibleRegion`. The rule is `isOutsideStrictRegion` (`rendering/strict-region.ts`, 8 tests) — source's inclusive bounds reproduced, with its two escape hatches (the selected cell, and the frozen columns the reported region deliberately excludes). The controller now tracks its visible region on **every** draw whether or not `@onVisibleRegionChanged` is wired, and does so **before** the draw rather than after: computed after, a strict grid's first frame would consult a region that did not exist yet and paint all-Loading with nothing scheduled to fix it. **Narrower than source on purpose:** the check sits in the mangled cell-content closure, and this port's copy/search/auto-size sweeps read `getCellContent` directly, so they are unaffected — turning it on cannot break a copy of an off-screen range. |
 | **`experimental.eventTarget`** | DONE (2026-08-12) | Shipped as `@eventTarget`. Redirects the three **pointer** listeners that must outlive the grid's bounds: drag-end `mouseup`, 9h's window `mousemove`, and the overlay editor's outside-click `mousedown`. **Clipboard stays on `window`** — source keeps `copy`/`cut`/`paste` on `safeWindow` too (`data-editor.tsx:3767,3877,3908`), because a clipboard event is dispatched at the focused document regardless of where the grid sits; an earlier revision of this row said otherwise. Unset, the target is resolved from `root.getRootNode()` as source does, so **a grid inside a shadow root works without the arg** (which also retires most of the "Shadow DOM" row below). Read once, at setup: source re-binds on change only as a side effect of React re-running `useEventListener`, so that is not treated as contract. |
-| **`experimental.paddingRight`/`paddingBottom`** | with 4.3 | Reserved trailing space *for `rightElement`* — source adds them to the scroller's extent and threads `paddingRight` through the visible-region math (`scrolling-data-grid.tsx:97,231,261`). Do them as part of `rightElement`, not before: on their own they are indistinguishable from `@overscrollX`/`Y`, which now exist. |
+| **`experimental.paddingRight`/`paddingBottom`** | DONE (2026-08-12) | Landed with 4.3 as `@paddingRight`/`@paddingBottom`. Added to the scroller's extent and subtracted from the width **and** height the visible region is measured against. `paddingRight` is a *gutter beside* the right panel, not a stand-in for its width — source applies it twice, as the panel's `margin-right` and as a sticky panel's inset from the edge. Not `scaleToRem`-scaled, matching source, which scales the overscrolls but not these. |
 | **Shadow DOM** | `S` to check | Still never tried in a browser, but **the pointer-listener half is now handled**: `@eventTarget`'s default resolves `root.getRootNode()`, so the three window-level mouse listeners bind to the `ShadowRoot` automatically. What remains unverified is the measurement canvas appended to `document.documentElement` and the `window`-scoped clipboard listeners (which source also leaves on `window`). Overlay editors append to the grid root, which is the good case. |
+
+### 4.5b `<DemoGrid>`'s header menu offers nothing — `S`
+
+Its `@onHeaderMenuClick` menu has a single "Close" item, so opening it reads as a broken feature. The
+split is deliberate — `<DemoGrid>` demos grid *args*, and sorting is a data-source decorator
+(`withColumnSort`), demoed in `<GlideDemo>` — but a menu with nothing in it is a poor advert for the
+callback either way. Either wire `withColumnSort` into `<DemoGrid>` (it composes with the tracked
+cell data, row markers and column reorder already there, so the write path needs threading) or give
+the menu a real item that *is* a grid concern, e.g. hide/auto-size the column.
 
 ### 4.6 Interaction gaps (formerly 9h)
 

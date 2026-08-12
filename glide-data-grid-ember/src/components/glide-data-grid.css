@@ -97,3 +97,24 @@
 .gdg-root .dvn-spacer {
     flex-grow: 1;
 }
+
+/* 4.3. With no `<:rightElement>` the scroll-inner exists only to give the scroller its extent, so
+   source hides it outright (`infinite-scroller.tsx:36-38`) rather than leaving an empty flex row
+   over the canvas. */
+.gdg-root .dvn-hidden {
+    visibility: hidden;
+}
+
+/* The `<:rightElement>` host. Sticky so it can be pinned to the visible edge; the rest of its
+   geometry (height, max-height, margin-right, flex-grow, right) is per-instance and set from
+   `syncRightElement`. `pointer-events` has to be restored because `.dvn-scroll-inner` disables them
+   for the padder stack. Source: `infinite-scroller.tsx:356-369`. */
+.gdg-root .dvn-right-element {
+    position: sticky;
+    top: 0;
+    padding-left: 1px;
+    /* Source's own value. It pulls the panel clear of the horizontal scrollbar gutter, which would
+       otherwise make the scroller taller than its content and produce a second scrollbar. */
+    margin-bottom: -40px;
+    pointer-events: auto;
+}

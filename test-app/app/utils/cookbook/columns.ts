@@ -88,6 +88,36 @@ handleColumnMoved = (from, to) => {
         },
         {
             kind: "p",
+            text: '**A panel past the last column.** The `<:rightElement>` named block renders at the far end of the horizontal scroll region — the "+ add column" button most spreadsheets grow, a summary rail, a message. It is ordinary template content with your own components and actions in scope, which is the Ember improvement on source\'s `rightElement` prop (that one takes a detached DOM node as a value).',
+        },
+        {
+            kind: "code",
+            text: `<GlideDataGrid
+  @columns={{this.columns}}
+  @rightElementSticky={{true}}
+  @paddingRight={{8}}
+  ...
+>
+  <:default as |grid|>
+    <GlideSearchBar @api={{grid.api}} @state={{grid.searchState}} />
+  </:default>
+  <:rightElement>
+    <button type="button" {{on "click" this.addColumn}}>+ Add column</button>
+  </:rightElement>
+</GlideDataGrid>`,
+        },
+        {
+            kind: "list",
+            items: [
+                "Without `@rightElementSticky` the panel sits after the last column, so you scroll to the end to reach it. With it, the panel is pinned to the visible edge.",
+                "`@rightElementFill` lets the panel eat whatever horizontal space is left over — which is nothing at all once your columns are wider than the grid, and which fights `grow` columns for the same slack. Source carries the same warning.",
+                "`@paddingRight` is a **gutter beside the panel**, not a stand-in for its width: it is applied both as the panel's margin and as the inset a sticky panel keeps from the edge, so the reserved strip ends up to the *right* of the panel. `@paddingBottom` is its vertical twin.",
+                "Both paddings are subtracted from the area the **visible region** is measured against, so a paged source stops being asked for rows hidden behind the panel. That is the one thing they do that `@overscrollX` / `@overscrollY` do not — without a panel, prefer the overscrolls.",
+                "Once you use named blocks, the default block has to be spelled `<:default>` too, and nothing may sit between the blocks — not even a comment.",
+            ],
+        },
+        {
+            kind: "p",
             text: "**Freezing, overscroll and scroll shadows.** `@freezeColumns={{2}}` pins the first N columns while the rest scroll under them (a row-marker column is frozen on top of that, and counts as one). `@overscrollX` / `@overscrollY` add empty scrollable space past the last column and row, so a trailing column can be scrolled clear of anything floating over the grid's edge.",
         },
         {

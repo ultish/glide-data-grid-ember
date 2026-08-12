@@ -339,6 +339,49 @@ export interface GridHostArgs {
      */
     readonly eventTarget?: HTMLElement | Window | Document | ShadowRoot;
     /**
+     * Host node for the `<:rightElement>` block — a panel at the far end of the horizontal scroll
+     * region, past the last column. The "+ add column" button every spreadsheet grows eventually,
+     * or a summary rail, or a message.
+     *
+     * **Set by `<GlideDataGrid>`, not by consumers.** The component owns a stable `<div>` and renders
+     * the block into it with `{{in-element}}`; the controller only decides where that div lives in
+     * the scroller's DOM. Passing `undefined` means no block was provided and nothing is inserted.
+     */
+    readonly rightElement?: HTMLElement;
+    /**
+     * Keep the right element pinned to the visible edge instead of requiring a scroll to the end to
+     * reveal it. Source's `rightElementProps.sticky`, flattened into its own arg the same way
+     * `experimental`'s keys were.
+     * @defaultValue false
+     */
+    readonly rightElementSticky?: boolean;
+    /**
+     * Let the right element consume whatever horizontal space is left over once the columns are laid
+     * out, rather than sitting immediately after them. Source's `rightElementProps.fill`, and its
+     * warning is worth repeating: **this does not play nicely with `grow` columns**, which are
+     * competing for the same slack.
+     * @defaultValue false
+     */
+    readonly rightElementFill?: boolean;
+    /**
+     * Reserved empty space at the right and bottom of the *scrollable* area, in px. Source's
+     * `experimental.paddingRight` / `paddingBottom`, and they belong with `rightElement`.
+     *
+     * `paddingRight` is a **gutter beside the panel**, applied twice as source applies it: as the
+     * panel's `margin-right`, and as the inset a sticky panel holds from the scrollport's edge. So
+     * the reserved strip ends up to the *right* of the panel — setting it to the panel's own width
+     * parks the panel that far inland with an equally wide void beside it.
+     *
+     * Both are also subtracted from the width and height the visible region is measured against, so
+     * a paged source stops being asked for rows that are behind the panel or below the fold.
+     *
+     * Without a right element these are indistinguishable from `@overscrollX`/`@overscrollY`; prefer
+     * those, which is what they are for.
+     */
+    readonly paddingRight?: number;
+    /** {@inheritDoc GridHostArgs.paddingRight} */
+    readonly paddingBottom?: number;
+    /**
      * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
      * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
      * built-ins are always present, so this is only needed to add custom glyphs or restyle one of
@@ -1062,6 +1105,17 @@ interface ResolvedGridHostArgs {
     /** Already `&&`-ed with the running browser, so the draw path only has to ask "is it on". */
     readonly rescaleWhileScrolling: "firefox" | "safari" | undefined;
     readonly strictVisibleRegion: boolean;
+    readonly rightElement: HTMLElement | undefined;
+    readonly rightElementSticky: boolean;
+    readonly rightElementFill: boolean;
+    /**
+     * Always a number; `0` means none. **Not** `scaleToRem`-adjusted, unlike the overscrolls right
+     * above — source scales `overscrollX`/`Y` in `use-rem-adjuster.ts` and deliberately leaves these
+     * two alone, presumably because they are sized against the right element's own content rather
+     * than against the grid's rows. Matched rather than made consistent.
+     */
+    readonly paddingRight: number;
+    readonly paddingBottom: number;
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
@@ -1940,6 +1994,11 @@ export class GridHostController {
                       ? "safari"
                       : undefined,
             strictVisibleRegion: args.strictVisibleRegion === true,
+            rightElement: args.rightElement,
+            rightElementSticky: args.rightElementSticky === true,
+            rightElementFill: args.rightElementFill === true,
+            paddingRight: args.paddingRight ?? 0,
+            paddingBottom: args.paddingBottom ?? 0,
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
@@ -2856,10 +2915,16 @@ export class GridHostController {
         mappedColumns: readonly MappedGridColumn[],
         freezeColumns: number
     ): Rectangle {
+        // 4.3: `paddingRight` narrows the width the region is computed against, matching source
+        // (`infinite-scroller.tsx:280`, `width: cWidth - paddingRight`). Without it a sticky right
+        // element sits *over* the last column or two and the grid still reports them as visible --
+        // which for a paged source means fetching rows the user cannot see, and for
+        // `@strictVisibleRegion` means the opposite mistake, a region wider than what is on screen.
+        const usableWidth = Math.max(0, this.width - args.paddingRight);
         const effectiveColumns = getEffectiveColumns(
             mappedColumns,
             this.cellXOffset,
-            this.width,
+            usableWidth,
             undefined,
             this.translateX
         );
@@ -2874,7 +2939,10 @@ export class GridHostController {
         const y = Math.min(Math.max(0, this.cellYOffset), rows - 1);
         // `translateY` is <= 0: how much of the first visible row is scrolled off the top, so
         // subtracting it adds that sliver back onto the height still to be covered.
-        const available = Math.max(0, this.height - this.totalHeaderHeight(args)) - this.translateY;
+        // `paddingBottom` narrows this the same way `paddingRight` narrows the width above
+        // (`infinite-scroller.tsx:281`, `height: cHeight - paddingBottom`).
+        const available =
+            Math.max(0, this.height - this.totalHeaderHeight(args) - args.paddingBottom) - this.translateY;
 
         let height = 0;
         const rowHeight = args.rowHeight;
@@ -2964,11 +3032,21 @@ export class GridHostController {
         // nothing drawn into it. Source adds them in exactly this spot
         // (`scrolling-data-grid.tsx:105,115`), and clamps X at zero while letting Y through
         // unclamped; matched rather than tidied.
-        const totalWidth = mappedColumns.reduce((sum, c) => sum + c.width, 0) + Math.max(0, args.overscrollX ?? 0);
+        //
+        // 4.3: `paddingRight`/`paddingBottom` are added on top, in the same place source adds them
+        // (`scrolling-data-grid.tsx:261-262`, `scrollWidth={width + (paddingRight ?? 0)}`). They read
+        // like a second spelling of the overscrolls here and are one, in isolation -- what makes them
+        // their own args is that `paddingRight` is *also* subtracted from the visible-region width
+        // below, so a sticky right element does not cause cells beneath it to be reported as visible.
+        const totalWidth =
+            mappedColumns.reduce((sum, c) => sum + c.width, 0) + Math.max(0, args.overscrollX ?? 0) + args.paddingRight;
         const totalHeight =
             this.totalHeaderHeight(args) +
             totalRowsHeight(this.effectiveRows(args), args.rowHeight) +
-            (args.overscrollY ?? 0);
+            (args.overscrollY ?? 0) +
+            args.paddingBottom;
+
+        this.syncRightElement(args);
 
         this.stackEl.replaceChildren();
 
@@ -2988,6 +3066,59 @@ export class GridHostController {
             h += toAdd;
         }
     }
+
+    /**
+     * Places (or removes) the `<:rightElement>` host inside the scroller, and applies the geometry
+     * that cannot live in CSS. Port of `infinite-scroller.tsx:351-372`.
+     *
+     * The **contents** of that host are Ember's -- `<GlideDataGrid>` renders the block into it with
+     * `{{in-element}}` and owns its lifecycle. This method only ever moves the host itself and sets
+     * styles on it, which is why the host is created by the component rather than here: a node
+     * Glimmer rendered must not be reparented, but a node Glimmer merely renders *into* can live
+     * wherever the controller puts it.
+     *
+     * Source's `.dvn-hidden` on the inner wrapper is reproduced: with no right element the whole
+     * scroll-inner is `visibility: hidden`, since its only job then is to give the scroller its
+     * extent, and a visible empty flex row would sit over the canvas swallowing nothing.
+     */
+    private syncRightElement(args: ResolvedGridHostArgs): void {
+        const el = args.rightElement;
+        this.scrollInnerEl.classList.toggle("dvn-hidden", el === undefined);
+        // Source renders its spacer only alongside a non-filling right element. Here the spacer is a
+        // permanent node (it predates this item and carries the scroller's horizontal extent), so it
+        // is hidden rather than removed when `fill` would otherwise fight it for the same slack.
+        this.spacerEl.style.display = el !== undefined && args.rightElementFill ? "none" : "";
+
+        if (el === undefined) {
+            this.rightElementHost?.remove();
+            this.rightElementHost = undefined;
+            return;
+        }
+
+        if (this.rightElementHost !== el) {
+            this.rightElementHost?.remove();
+            this.rightElementHost = el;
+            el.classList.add("dvn-right-element");
+        }
+        // Always last in the flex row, after the stack and the spacer.
+        this.scrollInnerEl.append(el);
+
+        // Source's inline block, verbatim. `maxHeight` uses the *scroller's* client height so the
+        // panel never outgrows the visible area even though the scroll content is far taller; the
+        // `dpr % 1` term is source's guard against a fractional device pixel ratio rounding the
+        // panel one pixel past the bottom edge and inventing a scrollbar.
+        const dpr = window.devicePixelRatio;
+        Object.assign(el.style, {
+            height: `${this.height}px`,
+            maxHeight: `${this.scrollerEl.clientHeight - Math.ceil(dpr % 1)}px`,
+            marginRight: `${args.paddingRight}px`,
+            flexGrow: args.rightElementFill ? "1" : "",
+            right: args.rightElementSticky ? `${args.paddingRight}px` : "",
+        } satisfies Partial<CSSStyleDeclaration>);
+    }
+
+    /** The node `syncRightElement` last placed, so a changed one can be evicted. */
+    private rightElementHost: HTMLElement | undefined;
 
     // --- scroll handling ---------------------------------------------------------------------------
 
