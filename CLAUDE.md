@@ -146,7 +146,7 @@ offset because no demo had ever switched on both at once.
 cookbook, which is a live page in the test-app. The cookbook is **one chapter per file** in
 `test-app/app/utils/cookbook/`, ordered by that directory's `index.ts`; chapter titles carry **no
 leading number** (the page numbers them from position), so adding a chapter is a one-line edit to
-`index.ts` and several agents can write chapters concurrently. 14 chapters, including *Using the grid
+`index.ts` and several agents can write chapters concurrently. 17 chapters, including *Using the grid
 in Ember* (the old `DATA.md` plus Ember Data/GraphQL/`object-scan`), *Theming*, *Theme reference* and
 *Performance rules*. These docs are the spec for future work — keep them in sync rather than letting
 them go stale, and note the standing lesson in PORTING-NOTES.md: **consumer docs rot in one direction

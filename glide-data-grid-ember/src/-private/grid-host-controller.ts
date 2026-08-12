@@ -111,7 +111,15 @@ import type {
     GroupHeaderClickedEventArgs,
     CellActivatedEventArgs,
     CellActivationBehavior,
+    GridDragEventArgs,
 } from "../rendering/index.ts";
+import {
+    canDragFrom,
+    dragKindForHit,
+    hasDropTargetChanged,
+    isDraggableAttr,
+    type IsDraggable,
+} from "../rendering/external-drag.ts";
 import type { BaseGridMouseEventArgs } from "../rendering/index.ts";
 import {
     headerKind,
@@ -130,7 +138,10 @@ import {
     rectBottomRight,
     type MappedGridColumn,
 } from "../rendering/render/data-grid-lib.ts";
-import { computeHeaderLayout } from "../rendering/render/data-grid-render.header.ts";
+import { computeHeaderLayout, drawHeader } from "../rendering/render/data-grid-render.header.ts";
+// 4.4: the default drag image renders one cell into an offscreen canvas, which is the only place in
+// this controller that paints without going through `drawGrid`.
+import { drawCell } from "../rendering/render/data-grid-render.cells.ts";
 import {
     appendRenameAction,
     hitTestGroupHeaderAction,
@@ -973,6 +984,58 @@ export interface GridHostArgs {
     readonly onGroupHeaderRenamed?: (groupName: string, newValue: string) => void;
 
     /**
+     * 4.4 — external HTML5 drag-and-drop. **Not** the internal column/row reorder drags, which are
+     * plain mouse gestures and are always on: this is the browser's own drag-and-drop, for carrying
+     * data *out of* the grid into another application or another part of your page.
+     *
+     * Setting it puts the `draggable` attribute on the scroll surface. `"cell"` or `"header"`
+     * restricts which band a drag may start from; `true` allows any, the group-header band and the
+     * area past the last row included. Mirrors source's `isDraggable`.
+     *
+     * **Nothing is dragged unless `@onDragStart` calls `setData`** — the callback is where the
+     * payload comes from, and a drag with no payload is cancelled before it begins.
+     * @defaultValue false
+     */
+    readonly isDraggable?: IsDraggable;
+
+    /**
+     * A drag is starting from the grid. Call `setData(mime, payload)` to give it something to
+     * carry — **a drag with no payload is cancelled**, matching source. `preventDefault()` refuses
+     * the drag outright.
+     *
+     * `setDragImage(element, x, y)` overrides what follows the cursor. Left alone, the grid renders
+     * the cell (or header) being dragged into an offscreen canvas and uses that, as source does.
+     *
+     * `location` is in your own column space — a drag starting on the row-marker column is refused
+     * before this fires, so index 0 is always your first column.
+     */
+    readonly onDragStart?: (args: GridDragEventArgs) => void;
+
+    /**
+     * Something is being dragged over `cell`. Fires **on each new cell**, not on every `dragover`
+     * event, so it is a safe place to move a drop indicator. The `dataTransfer` is the live one; per
+     * the HTML spec its *contents* are unreadable until drop, though `types` is available.
+     *
+     * Requires `@onDrop` to be set for the drop itself to be permitted — the grid only calls
+     * `preventDefault()` on the drag-over (which is what marks it a valid drop zone) when there is
+     * an `@onDrop` to receive it, which is source's rule.
+     */
+    readonly onDragOverCell?: (cell: Item, dataTransfer: DataTransfer | null) => void;
+
+    /** A drag left the grid. Pairs with `@onDragOverCell` for clearing a drop indicator. */
+    readonly onDragLeave?: () => void;
+
+    /**
+     * Something was dropped on `cell`, in your own column space. **Providing this is what makes the
+     * grid a drop target** — without it the browser refuses every drop, as it does for any element
+     * that does not cancel its own drag-over.
+     *
+     * Nothing is written for you: read the `dataTransfer` and apply the change through your own
+     * data, exactly as with `@onCellEdited`.
+     */
+    readonly onDrop?: (cell: Item, dataTransfer: DataTransfer | null) => void;
+
+    /**
      * A cell was activated -- Enter, a printable character (when `editOnType` is on), or a click
      * matching {@link cellActivationBehavior}. Fires just before the editor opens (or, for a
      * boolean cell, before it toggles), so it is the hook for "opened an editor" telemetry.
@@ -1224,6 +1287,11 @@ interface ResolvedGridHostArgs {
     readonly onHeaderClicked: ((colIndex: number, event: HeaderClickedEventArgs) => void) | undefined;
     readonly onGroupHeaderClicked: ((colIndex: number, event: GroupHeaderClickedEventArgs) => void) | undefined;
     readonly onGroupHeaderRenamed: ((groupName: string, newValue: string) => void) | undefined;
+    readonly isDraggable: IsDraggable | undefined;
+    readonly onDragStart: ((args: GridDragEventArgs) => void) | undefined;
+    readonly onDragOverCell: ((cell: Item, dataTransfer: DataTransfer | null) => void) | undefined;
+    readonly onDragLeave: (() => void) | undefined;
+    readonly onDrop: ((cell: Item, dataTransfer: DataTransfer | null) => void) | undefined;
     readonly onCellActivated: ((cell: Item, event: CellActivatedEventArgs) => void) | undefined;
     readonly onFinishedEditing: ((newValue: GridCell | undefined, movement: Item) => void) | undefined;
     readonly onColumnAppended: (() => ColumnAppendedResult | Promise<ColumnAppendedResult> | void) | undefined;
@@ -1826,6 +1894,16 @@ export class GridHostController {
         // element keydown targets, but this is a belt-and-suspenders guard matching the brief and
         // makes the gating explicit rather than implicit in DOM focus semantics alone).
         this.root.addEventListener("keydown", this.onKeyDown);
+        // 4.4: external HTML5 drag-and-drop. All four sit on `root`, where source puts them
+        // (`data-grid.tsx:1613,1641,1669,1674`, via its `eventTargetRef`) -- these are drag events
+        // dispatched at the element under the pointer, not window-level ones, so the grid's own
+        // subtree is the right scope and `@eventTarget` does not apply. `dragend` fires on the drag
+        // *source*, so it belongs here too.
+        this.root.addEventListener("dragstart", this.onDragStartExternal);
+        this.root.addEventListener("dragover", this.onDragOverExternal);
+        this.root.addEventListener("dragend", this.onDragEndExternal);
+        this.root.addEventListener("drop", this.onDropExternal);
+        this.root.addEventListener("dragleave", this.onDragLeaveExternal);
         // Mouseup listens on `windowEventTarget`, not `root` -- a drag-extend can end with the
         // pointer outside the grid (mirrors source's `onPointerUp` listening on `windowEventTarget`,
         // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderMenuClick`
@@ -2133,6 +2211,11 @@ export class GridHostController {
             onHeaderClicked: args.onHeaderClicked,
             onGroupHeaderClicked: args.onGroupHeaderClicked,
             onGroupHeaderRenamed: args.onGroupHeaderRenamed,
+            isDraggable: args.isDraggable,
+            onDragStart: args.onDragStart,
+            onDragOverCell: args.onDragOverCell,
+            onDragLeave: args.onDragLeave,
+            onDrop: args.onDrop,
             onCellActivated: args.onCellActivated,
             onFinishedEditing: args.onFinishedEditing,
             onColumnAppended: args.onColumnAppended,
@@ -2687,6 +2770,11 @@ export class GridHostController {
         this.root.removeEventListener("focus", this.onFocus);
         this.root.removeEventListener("blur", this.onBlur);
         this.root.removeEventListener("keydown", this.onKeyDown);
+        this.root.removeEventListener("dragstart", this.onDragStartExternal);
+        this.root.removeEventListener("dragover", this.onDragOverExternal);
+        this.root.removeEventListener("dragend", this.onDragEndExternal);
+        this.root.removeEventListener("drop", this.onDropExternal);
+        this.root.removeEventListener("dragleave", this.onDragLeaveExternal);
         this.removeWindowListener("mouseup", this.onMouseUp);
         this.removeWindowListener("mousemove", this.onWindowMouseMove);
         this.autoscroller.stop();
@@ -3117,6 +3205,13 @@ export class GridHostController {
             args.paddingBottom;
 
         this.syncRightElement(args);
+
+        // 4.4: the scroller is the element the browser starts an HTML5 drag from, so `isDraggable`
+        // is an attribute on it rather than anything the canvas knows about
+        // (`scrolling-data-grid.tsx:260`). Source's "any string counts" test is
+        // `isDraggableAttr` -- an unrecognised string still makes the surface draggable, and
+        // `onDragStartExternal` is what refuses the drag.
+        this.scrollerEl.draggable = isDraggableAttr(args.isDraggable);
 
         this.stackEl.replaceChildren();
 
@@ -3573,6 +3668,263 @@ export class GridHostController {
         };
     }
 
+    // --- 4.4: external HTML5 drag-and-drop --------------------------------------------------------
+    //
+    // The browser's own drag-and-drop, for carrying data out of the grid and dropping data into it.
+    // Distinct from every other drag in this controller (column reorder, row reorder, fill,
+    // drag-extend), which are plain mouse gestures that never leave the page.
+    //
+    // Source splits this across two files: `data-grid.tsx:1457-1674` has the four listeners, and
+    // `data-editor.tsx:2683-2705` wraps `onDragStart` to apply the row-marker offset and to suppress
+    // rect-selection for the duration. Both halves are here.
+
+    /**
+     * A drag this grid started is in flight. Source keeps the same flag
+     * (`data-editor.tsx:2682`) and uses it for one thing: suppressing rect drag-selection, which
+     * would otherwise run off the `mousemove`s the browser still delivers during a drag.
+     *
+     * `mouseDownState` is cleared at `dragstart` as well (source's `setMouseState(undefined)`), so
+     * this is belt-and-braces — but it is what stops a drag that *ends* inside the grid from
+     * resuming a selection on the way out.
+     */
+    private isActivelyDragging = false;
+
+    /** The cell `@onDragOverCell` last reported. `dragover` fires continuously over a stationary
+     *  pointer, so without this the consumer hears about the same cell tens of times a second. */
+    private activeDropTarget: Item | undefined = undefined;
+
+    private readonly onDragStartExternal = (ev: DragEvent): void => {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+
+        // Source's `canvas === null || isDraggable === false || isResizing` (`data-grid.tsx:1460`).
+        // A column resize is a mouse drag on the same surface; letting the browser lift it into an
+        // HTML5 drag would abandon the resize half-finished.
+        if (this.resizeState !== undefined) {
+            ev.preventDefault();
+            return;
+        }
+
+        const hit = this.resolveMouseHit(args, ev);
+        if (!canDragFrom(args.isDraggable, dragKindForHit(hit.kind, hit.location[1]))) {
+            ev.preventDefault();
+            return;
+        }
+
+        // `data-editor.tsx:2685-2688`: a drag off the row-marker column is refused outright rather
+        // than reported with a negative index. Same test as everywhere else in this file -- the
+        // marker occupies mangled column 0 when it is on.
+        const [mangledCol, row] = hit.location;
+        if (mangledCol - args.rowMarkerOffset < 0) {
+            ev.preventDefault();
+            return;
+        }
+
+        let dragMime: string | undefined;
+        let dragData: string | undefined;
+        let dragImage: Element | undefined;
+        let dragImageX: number | undefined;
+        let dragImageY: number | undefined;
+        let prevented = false;
+
+        // An out-of-bounds hit reports itself as such, with no location -- the convention
+        // `buildMouseEventArgs` already established for `@onItemHovered`. Reachable only with
+        // `isDraggable: true`, whose guard short-circuits before the kind is consulted (source's
+        // does too).
+        const item: Item | undefined = hit.kind === "out-of-bounds" ? undefined : hit.location;
+        const dragArgs: GridDragEventArgs = {
+            ...this.buildMouseEventArgs(args, item, {
+                ...this.clickEventBase(hit),
+                localX: hit.localX,
+                localY: hit.localY,
+            }),
+            setData: (mime, payload) => {
+                dragMime = mime;
+                dragData = payload;
+            },
+            setDragImage: (image, x, y) => {
+                dragImage = image;
+                dragImageX = x;
+                dragImageY = y;
+            },
+            preventDefault: () => {
+                prevented = true;
+            },
+            defaultPrevented: () => prevented,
+        };
+
+        args.onDragStart?.(dragArgs);
+
+        // **No payload means no drag.** Source cancels here (`data-grid.tsx:1497,1592`), and it is
+        // the behaviour that makes `isDraggable` safe to switch on before the callback is written:
+        // the grid becomes draggable, and dragging it does nothing.
+        if (prevented || dragMime === undefined || dragData === undefined || ev.dataTransfer === null) {
+            ev.preventDefault();
+            return;
+        }
+
+        ev.dataTransfer.setData(dragMime, dragData);
+        ev.dataTransfer.effectAllowed = "copyLink";
+
+        if (dragImage !== undefined && dragImageX !== undefined && dragImageY !== undefined) {
+            ev.dataTransfer.setDragImage(dragImage, dragImageX, dragImageY);
+        } else if (item !== undefined) {
+            this.setDefaultDragImage(args, ev.dataTransfer, mangledCol, row);
+        }
+
+        // `data-editor.tsx:2697-2698`. Both lines matter: the flag suppresses rect-selection for the
+        // duration, and dropping `mouseDownState` ends the drag-extend gesture this mousedown had
+        // already started -- otherwise the selection grows behind the drag.
+        this.isActivelyDragging = true;
+        this.mouseDownState = undefined;
+    };
+
+    /**
+     * Renders the dragged cell (or header) into an offscreen canvas and hands it to the browser as
+     * the drag image. Port of `data-grid.tsx:1502-1590`.
+     *
+     * Without this the browser drags a snapshot of the whole scroll surface, which for a grid means
+     * a translucent copy of the entire viewport. The canvas is attached offscreen because
+     * `setDragImage` requires an element that is *in* the document, and removed on the next tick
+     * because by then the browser has taken its snapshot — both of which are source's.
+     */
+    private setDefaultDragImage(
+        args: ResolvedGridHostArgs,
+        dataTransfer: DataTransfer,
+        mangledCol: number,
+        row: number
+    ): void {
+        const bounds = this.computeCellRect(args, mangledCol, row);
+        if (bounds.width <= 0 || bounds.height <= 0) return;
+
+        const offscreen = document.createElement("canvas");
+        const dpr = Math.ceil(window.devicePixelRatio ?? 1);
+        offscreen.width = bounds.width * dpr;
+        offscreen.height = bounds.height * dpr;
+        const ctx = offscreen.getContext("2d");
+        if (ctx === null) return;
+
+        const theme = this.mergedTheme(args);
+        ctx.scale(dpr, dpr);
+        ctx.textBaseline = "middle";
+
+        if (row === -1 || row === -2) {
+            const { mappedColumns } = this.computeMangledLayout(args);
+            const column = mappedColumns[mangledCol];
+            if (column === undefined) return;
+            ctx.font = theme.headerFontFull;
+            ctx.fillStyle = theme.bgHeader;
+            ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+            drawHeader(
+                ctx,
+                0,
+                0,
+                bounds.width,
+                bounds.height,
+                column,
+                false,
+                theme,
+                false,
+                undefined,
+                undefined,
+                false,
+                0,
+                this.spriteManager,
+                args.drawHeader,
+                false
+            );
+        } else {
+            ctx.font = theme.baseFontFull;
+            ctx.fillStyle = theme.bgCell;
+            ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+            drawCell(
+                ctx,
+                this.mangledGetCellContent(args)([mangledCol, row]),
+                0,
+                row,
+                false,
+                false,
+                0,
+                0,
+                bounds.width,
+                bounds.height,
+                false,
+                theme,
+                theme.bgCell,
+                this.imageLoader,
+                this.spriteManager,
+                0,
+                undefined,
+                false,
+                0,
+                args.drawCell,
+                undefined,
+                undefined,
+                this.renderStateProvider,
+                args.getCellRenderer,
+                () => undefined
+            );
+        }
+
+        offscreen.style.left = "-100%";
+        offscreen.style.position = "absolute";
+        offscreen.style.width = `${bounds.width}px`;
+        offscreen.style.height = `${bounds.height}px`;
+        document.body.append(offscreen);
+
+        dataTransfer.setDragImage(offscreen, bounds.width / 2, bounds.height / 2);
+
+        window.setTimeout(() => {
+            offscreen.remove();
+        }, 0);
+    }
+
+    private readonly onDragOverExternal = (ev: DragEvent): void => {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+
+        // Cancelling the drag-over is what marks an element a valid drop target; without it the
+        // browser refuses the drop and shows the "no entry" cursor. Source ties it to `onDrop`
+        // being set (`data-grid.tsx:1620-1623`), so a grid with only `@onDragOverCell` observes
+        // drags passing over it without claiming them.
+        if (args.onDrop !== undefined) ev.preventDefault();
+        if (args.onDragOverCell === undefined) return;
+
+        const target = this.dropTargetFor(args, ev);
+        if (!hasDropTargetChanged(this.activeDropTarget, target)) return;
+        this.activeDropTarget = target;
+        args.onDragOverCell(target, ev.dataTransfer);
+    };
+
+    private readonly onDropExternal = (ev: DragEvent): void => {
+        if (this.destroyed) return;
+        const args = this.resolveArgs();
+        if (args.onDrop === undefined) return;
+
+        // Source: "Default can mess up sometimes" (`data-grid.tsx:1659`) -- a dropped file or URL
+        // otherwise navigates the page out from under the grid.
+        ev.preventDefault();
+        args.onDrop(this.dropTargetFor(args, ev), ev.dataTransfer);
+    };
+
+    private readonly onDragLeaveExternal = (): void => {
+        if (this.destroyed) return;
+        this.resolveArgs().onDragLeave?.();
+    };
+
+    /** `dragend` fires on the *source* of a drag, whether or not it was dropped anywhere. */
+    private readonly onDragEndExternal = (): void => {
+        this.activeDropTarget = undefined;
+        this.isActivelyDragging = false;
+    };
+
+    /** The drop target in consumer space. Headers stay reachable (rows -1/-2), matching source,
+     *  which subtracts the marker offset and does nothing else. */
+    private dropTargetFor(args: ResolvedGridHostArgs, ev: DragEvent): Item {
+        const hit = this.resolveMouseHit(args, ev);
+        return [hit.location[0] - args.rowMarkerOffset, hit.location[1]];
+    }
+
     // --- Phase 9g: click notifications ------------------------------------------------------------
     //
     // All three fire from `onMouseUp`, gated on the mouseup landing on the same target as the
@@ -3832,7 +4184,10 @@ export class GridHostController {
             return;
         }
 
-        if (this.mouseDownState !== undefined) {
+        // 4.4: `!isActivelyDragging` is source's own guard on this branch
+        // (`data-editor.tsx:2753`). An HTML5 drag started from inside the grid keeps delivering
+        // `mousemove`s, and without this they would extend the selection under the drag.
+        if (this.mouseDownState !== undefined && !this.isActivelyDragging) {
             this.handleDragMove(args, this.mouseDownState, location);
         }
     }

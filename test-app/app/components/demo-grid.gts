@@ -78,6 +78,8 @@ import {
     type PasteBehavior,
     type CellActivatedEventArgs,
     type CellActivationBehavior,
+    type IsDraggable,
+    type GridDragEventArgs,
     type GroupHeaderClickedEventArgs,
     type GroupDetails,
 } from "glide-data-grid-ember/rendering/index";
@@ -276,6 +278,11 @@ const EMPTY_GRID_SELECTION: GridSelection = {
 // 4.5: `@onPaste`'s three shapes. `"single-cell"` is the callback form refusing anything wider than
 // one cell, which is the realistic use — a consumer whose backend writes one field at a time.
 const PASTE_MODES = ["allow", "single-cell", "off"] as const;
+
+// 4.4: `@isDraggable`'s three states. "headers" is the interesting one — it is the case where a
+// drag started from a *cell* must do nothing at all, which is the half of the arg a "does dragging
+// work?" check never covers.
+const DRAG_MODES = ["off", "cells", "headers"] as const;
 
 // 9g. Only `"second-click"` existed before -- `"single-click"` opens the editor on the very first
 // click, `"double-click"` needs a real double-click on the already-selected cell.
@@ -1109,6 +1116,106 @@ export default class DemoGrid extends Component {
         };
     }
 
+    // --- 4.4: external HTML5 drag-and-drop --------------------------------------------------------
+    // The browser's own drag-and-drop, not the internal column/row reorder gestures above. The
+    // demo's two halves are deliberately different shapes: dragging *out* puts real `text/plain` on
+    // the clipboard-equivalent, so it can be dropped into any other application; dropping *in*
+    // writes through the same `handleCellsEdited` path an ordinary edit uses, so a drop that lands
+    // on the wrong record would be as visible as a mis-mapped paste.
+    @tracked dragModeIndex = 0;
+    /** What the last drag event reported. Rendered in the status row — an `@onDragOverCell` that
+     *  fires per pixel instead of per cell is invisible without it. */
+    @tracked lastDrag: string | undefined;
+
+    get dragMode(): (typeof DRAG_MODES)[number] {
+        return DRAG_MODES[this.dragModeIndex] ?? "off";
+    }
+
+    cycleDragMode = (): void => {
+        this.dragModeIndex = (this.dragModeIndex + 1) % DRAG_MODES.length;
+        this.lastDrag = undefined;
+    };
+
+    get isDraggable(): IsDraggable | undefined {
+        if (this.dragMode === "off") return undefined;
+        return this.dragMode === "cells" ? "cell" : "header";
+    }
+
+    handleDragStart = (args: GridDragEventArgs): void => {
+        const payload = this.dragPayloadFor(args);
+        if (payload === undefined) {
+            // Refusing here rather than letting the drag run with no payload: both cancel it, but
+            // this way the status row says which one happened.
+            args.preventDefault();
+            this.lastDrag = `nothing to drag from a ${args.kind}`;
+            return;
+        }
+        args.setData("text/plain", payload);
+        this.lastDrag = `dragging "${payload}" out of a ${args.kind}`;
+    };
+
+    private dragPayloadFor(args: GridDragEventArgs): string | undefined {
+        if (args.kind === "cell") {
+            const cell = this.getCellContent(args.location);
+            // `displayData` is a `string[]` on a drilldown cell, hence the join rather than a cast.
+            const raw = "displayData" in cell ? cell.displayData : "data" in cell ? cell.data : undefined;
+            const text = Array.isArray(raw) ? raw.join(", ") : String(raw ?? "");
+            return text === "" ? undefined : text;
+        }
+        if (args.kind === "header") return this.columns[args.location[0]]?.title;
+        if (args.kind === "group-header") return args.group === "" ? undefined : args.group;
+        return undefined;
+    }
+
+    handleDragOverCell = (cell: Item): void => {
+        this.lastDrag = `over col ${cell[0]}, row ${cell[1]}`;
+    };
+
+    handleDragLeave = (): void => {
+        this.lastDrag = "the drag left the grid";
+    };
+
+    handleDrop = (cell: Item, dataTransfer: DataTransfer | null): void => {
+        const text = dataTransfer?.getData("text/plain").trim() ?? "";
+        if (text === "") {
+            this.lastDrag = "dropped something with no text/plain payload";
+            return;
+        }
+        if (cell[1] < 0) {
+            this.lastDrag = `refused a drop on the header of col ${cell[0]}`;
+            return;
+        }
+        // Which cells accept a dropped string is the consumer's decision, not the grid's: anything
+        // whose `data` *is* a string takes it (text, markdown, uri), and dropping onto a number or a
+        // sparkline fails loudly rather than coercing. Note this is deliberately not a `kind` check
+        // -- a row-id cell is string-backed too and is still refused below, because it is an
+        // identifier rather than a field.
+        const existing = this.getCellContent(cell);
+        const writable =
+            existing.kind === GridCellKind.Text ||
+            existing.kind === GridCellKind.Markdown ||
+            existing.kind === GridCellKind.Uri;
+        if (!writable) {
+            this.lastDrag = `refused a drop on a ${existing.kind} cell`;
+            return;
+        }
+        this.handleCellsEdited([
+            {
+                location: cell,
+                // `displayData` only exists on some of the three, and `normalizeEditedCell` (called
+                // by `handleCellsEdited`) recomputes the derived fields this demo owns.
+                value: { ...existing, data: text, ...("displayData" in existing ? { displayData: text } : {}) },
+            },
+        ]);
+        // **Required, and the reason this demo exists.** A drop is a write the *consumer* initiates,
+        // so nothing has told the grid to repaint: `getCellContent` reads `this.edits` lazily at
+        // paint time, which is exactly the read autotracking never sees (TODO.md's rule 2). An edit
+        // made through the grid damages its own cell; this one has to say so. Without this line the
+        // callback fires, the data changes, and the cell goes on showing its old value.
+        this.gridApi?.updateCells([{ cell }]);
+        this.lastDrag = `dropped "${text}" into col ${cell[0]}, row ${cell[1]}`;
+    };
+
     // --- Phase 10a: the notification-only args, surfaced as a live status line ------------------
     // `@onSelectionChanged` and `@onVisibleRegionChanged` are pure notifications. Rendering them
     // costs nothing and turns two otherwise-invisible callbacks into something a regression can
@@ -1562,6 +1669,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-drag-mode-toggle
+                    {{on "click" this.cycleDragMode}}
+                >
+                    Drag out:
+                    <b>{{this.dragMode}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-paste-mode-toggle
                     {{on "click" this.cyclePasteMode}}
                 >
@@ -1692,6 +1808,8 @@ export default class DemoGrid extends Component {
                 {{! Phase 9g: an edit that is silently refused is indistinguishable from a broken
                     grid, so every guard decision is reported. }}
                 {{#if this.lastGuard}}<span>Guard: <b data-test-last-guard>{{this.lastGuard}}</b></span>{{/if}}
+                {{! 4.4: drops are always live; dragging out needs the toggle. }}
+                {{#if this.lastDrag}}<span>Drag: <b data-test-last-drag>{{this.lastDrag}}</b></span>{{/if}}
                 {{#if this.lastApiResult}}<span>API:
                         <b data-test-last-api-result>{{this.lastApiResult}}</b></span>{{/if}}
                 <span>Click: <b data-test-last-click>{{this.lastClick}}</b></span>
@@ -1845,6 +1963,14 @@ export default class DemoGrid extends Component {
                     @onFinishedEditing={{this.handleFinishedEditing}}
                     @onColumnAppended={{this.handleColumnAppended}}
                     @onRowMoved={{this.onRowMovedIfAvailable}}
+                    {{! 4.4: external HTML5 drag-and-drop. `@isDraggable` makes the surface
+                        draggable; `@onDrop` is separately what makes it a drop target, so dropping
+                        works even with dragging switched off. }}
+                    @isDraggable={{this.isDraggable}}
+                    @onDragStart={{this.handleDragStart}}
+                    @onDragOverCell={{this.handleDragOverCell}}
+                    @onDragLeave={{this.handleDragLeave}}
+                    @onDrop={{this.handleDrop}}
                     @fillHandle={{this.useFillHandle}}
                     @allowedFillDirections={{this.allowedFillDirections}}
                     @onFillPattern={{this.handleFillPattern}}

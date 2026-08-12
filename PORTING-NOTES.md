@@ -5508,3 +5508,97 @@ TODO.md listed `previousSelection` as unported alongside these. It is not, and w
 mouse-down state at `grid-host-controller.ts:1382-1386`, mangled to match `hit.location`, and it has
 driven the fill-handle path since 9h. Source's `previousSelection` is likewise internal (`MouseState`),
 not a consumer-facing prop. The entry was wrong.
+
+## 4.4 — external HTML5 drag-and-drop (COMPLETE, browser-verified, 2026-08-13)
+
+`@isDraggable`, `@onDragStart`, `@onDragOverCell`, `@onDragLeave`, `@onDrop`. The browser's own
+drag-and-drop — carrying data *out of* the grid and dropping data *into* it — which is unrelated to
+the internal column/row reorder and fill drags despite the shared word.
+
+Source splits it across two files, and both halves matter:
+
+- `data-grid.tsx:1457-1674` — the four listeners, the two `isDraggable` guards, and the default
+  drag image.
+- `data-editor.tsx:2683-2705` — the wrapper that applies the row-marker offset, refuses a drag off
+  the marker column, and sets `isActivelyDragging`.
+
+### What was extracted for tests
+
+`rendering/external-drag.ts` (11 tests). Two of its four functions exist only because a reasonable
+rewrite gets them wrong:
+
+- **`canDragFrom`** — `isDraggable: true` allows a drag from **out-of-bounds**, because source's
+  guard is `isDraggable !== true && args.kind !== isDraggable` and `true` short-circuits before the
+  kind is consulted.
+- **`dragKindForHit`** — `isDraggable: "header"` must **not** match the group-header band. This port's
+  `resolveMouseHit` folds both header bands into `kind: "header"` and distinguishes them by row
+  (-1 vs -2); source keeps `"group-header"` as its own kind and compares `isDraggable` against it
+  directly. Folding them here would silently make this port's `"header"` mean one thing more than
+  upstream's. This is the only place in the controller where that distinction is load-bearing.
+
+### Three things worth knowing before touching this code
+
+**A drag with no payload is cancelled.** If `@onDragStart` does not call `setData`, the handler
+calls `ev.preventDefault()` and the drag never starts (`data-grid.tsx:1497,1592`). That is what makes
+`@isDraggable` safe to switch on before the callback is written, and it is the first thing to check
+when "dragging does nothing".
+
+**Source's conditional `preventDefault` on pointerdown has nothing to port.** At
+`data-grid.tsx:1113-1120` source suppresses the default action on mousedown *except* when the grid is
+draggable — because preventing the default kills the native drag. This port's `onMouseDown` never
+calls `preventDefault()` at all, so there was nothing to make conditional. Worth stating, because the
+guard looks like an omission when diffing against source.
+
+**The default drag image is the only place in this controller that paints outside `drawGrid`.**
+`setDefaultDragImage` renders the dragged cell (or header) into an offscreen canvas with the same
+`drawCell`/`drawHeader` this port already has, appends it at `left: -100%`, hands it to
+`setDragImage`, and removes it on a `setTimeout(0)` — all source's, including the timeout, which is
+there because the browser takes its snapshot synchronously. Without it the browser drags a
+translucent copy of the entire scroll surface.
+
+### `draggable` is an attribute on the scroller, not the canvas
+
+Set in `rebuildScrollContent` from `isDraggableAttr(args.isDraggable)`, matching
+`scrolling-data-grid.tsx:260` — and note the test is "`true` or *any* string", so an unrecognised
+string still makes the surface draggable and `onDragStartExternal` is what refuses the drag.
+
+### Listeners are on `root`, and `@eventTarget` deliberately does not apply
+
+All five (`dragstart`/`dragover`/`dragend`/`drop`/`dragleave`) sit on `root`, where source puts them.
+These are dispatched at the element under the pointer rather than at the window, so unlike the three
+pointer listeners `@eventTarget` redirects (4.5), the grid's own subtree is the correct scope.
+
+### Browser verification, and two harness traps re-earned
+
+Verified by dispatching real `DragEvent`s with a real `DataTransfer` from one `javascript_tool`
+script — which, unlike the synthetic `paste`/`keydown` case TODO.md warns about, **does** produce a
+real write, because the write is the consumer's own tracked-state update rather than the addon's
+clipboard machinery. Semantic assertions, not numeric ones: the cell drag's payload came back as
+`"Escalated to **Owner**"` (the actual content of the cell dragged), the header drag's as `"Notes"`,
+and the drop turned row 2's Notes cell from `Escalated to **Owner**` into `DROPPED-OK`.
+
+Both traps that produced false readings mid-test are already in TODO.md and both re-fired here:
+
+1. **The status row rewraps as its own text changes**, moving the grid ~24px. A `dragover` and a
+   `drop` at *identical* client coordinates reported row 4 and row 5 — because the `dragover`'s own
+   readout changed the layout before the `drop` was dispatched. Firing both **synchronously**, with
+   no `await` between them so Ember cannot re-render, makes them agree. Use that shape for any two
+   events that must see one layout.
+2. **The occlusion trap re-fires after every Vite HMR update**, not just after navigation. A drop
+   dispatched right after an HMR reload reported `col 49` — the out-of-bounds clamp
+   (`mappedColumns.length - 1` minus the marker offset), i.e. the canvas was still 0×0. Take a
+   screenshot to wake the tab *before* measuring, exactly as after a navigation.
+
+### The demo found a real gap — in the demo, not the addon
+
+`<DemoGrid>`'s drop handler wrote `this.edits` and the cell went on showing its old value. Nothing
+had told the grid to repaint: a drop is a **consumer-initiated** write, and `getCellContent` reads
+that tracked state lazily at paint time, which is precisely the read autotracking never records
+(TODO.md's rule 2). The fix is one line — `this.gridApi?.updateCells([{ cell }])` — and it is the
+most instructive part of the feature, so the cookbook chapter leads its note with it. An edit made
+*through* the grid damages its own cell, which is why this only shows up on a consumer-initiated
+write.
+
+Also: the demo's first drop handler accepted `GridCellKind.Text` only, and the full-grid demo has no
+plain text column on screen — so every drop was refused. It now accepts text, markdown and URI cells
+(anything string-backed), which is what makes the write path visible at all.

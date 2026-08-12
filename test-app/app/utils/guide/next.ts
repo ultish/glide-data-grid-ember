@@ -22,6 +22,7 @@ export const nextSection: Section = {
                     "read or control the selection, add row markers, drag rows, use the fill handle",
                     "**Selection, row markers, reordering, fill**",
                 ],
+                ["drag a value out to another app, or accept a drop onto a cell", "**Dragging data in and out**"],
                 ["sort, and build the header dropdown that drives it", "**Sorting, and the header menu**"],
                 [
                     "restyle it, or drive the canvas from your app's CSS variables",

@@ -81,6 +81,8 @@ import type {
     CellActivatedEventArgs,
     CellActivationBehavior,
     ScrollToParams,
+    IsDraggable,
+    GridDragEventArgs,
 } from "../rendering/index.ts";
 
 /**
@@ -536,6 +538,23 @@ export interface GlideDataGridSignature {
          * `GridHostArgs.onGroupHeaderRenamed` for why that differs from source.
          */
         onGroupHeaderRenamed?: (groupName: string, newValue: string) => void;
+
+        // 4.4: external HTML5 drag-and-drop -- dragging data *out of* the grid and dropping data
+        // *into* it. Nothing to do with `@onColumnMoved`/`@onRowMoved`, which are internal mouse
+        // gestures. `@isDraggable` is what makes the surface draggable at all, and `@onDrop` is what
+        // makes it a drop target; the two halves are independent.
+        /** `true`, or `"cell"`/`"header"` to restrict which band a drag may start from. See
+         *  `GridHostArgs.isDraggable`. */
+        isDraggable?: IsDraggable;
+        /** Give the drag its payload with `setData(mime, payload)` — **a drag that sets none is
+         *  cancelled**. `setDragImage` overrides the rendered-cell image the grid supplies. */
+        onDragStart?: (args: GridDragEventArgs) => void;
+        /** Fires once per new cell under the pointer, not per `dragover` event. */
+        onDragOverCell?: (cell: Item, dataTransfer: DataTransfer | null) => void;
+        onDragLeave?: () => void;
+        /** Providing this is what lets the browser drop on the grid at all. Nothing is written for
+         *  you. */
+        onDrop?: (cell: Item, dataTransfer: DataTransfer | null) => void;
         onCellActivated?: (cell: Item, event: CellActivatedEventArgs) => void;
         onFinishedEditing?: (newValue: GridCell | undefined, movement: Item) => void;
         /** Tab in an editor on the last column. Setting it is what enables that gesture. Return
@@ -736,6 +755,11 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onHeaderClicked: this.args.onHeaderClicked,
         onGroupHeaderClicked: this.args.onGroupHeaderClicked,
         onGroupHeaderRenamed: this.args.onGroupHeaderRenamed,
+        isDraggable: this.args.isDraggable,
+        onDragStart: this.args.onDragStart,
+        onDragOverCell: this.args.onDragOverCell,
+        onDragLeave: this.args.onDragLeave,
+        onDrop: this.args.onDrop,
         onCellActivated: this.args.onCellActivated,
         onFinishedEditing: this.args.onFinishedEditing,
         onColumnAppended: this.args.onColumnAppended,

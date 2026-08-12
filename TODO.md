@@ -18,24 +18,22 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-12:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 876 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
+**State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
+GitHub Pages. 887 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
-**Published vs unpublished.** **v0.2.0 is on npm** and contains 4.2 (`@getGroupDetails`) plus every
-§4.5 row that was going to be ported — `@onPaste`, scroll shadows, overscroll, the flattened
-`experimental` args, `@strictVisibleRegion`, `@eventTarget`. **Three commits have landed since that
-tag and are not released:** `@onGroupHeaderRenamed` (4.2's remainder), `<:rightElement>` + the two
-paddings (4.3), and controlled selection (`@selection` / `@onSelectionCleared`, 4.6). All three are
-browser-verified with write-ups in PORTING-NOTES.md. Cutting **v0.2.1** — bump, CHANGELOG, tag, push —
-is a decision, not a leftover; §5.3 has the procedure.
+**Published vs unpublished.** **v0.2.1 is on npm** (tagged and pushed 2026-08-13) and contains
+everything through 4.6's controlled selection: 4.2 (`@getGroupDetails`, `@onGroupHeaderRenamed`),
+4.3 (`<:rightElement>` + the two paddings), every §4.5 row, and `@selection` /
+`@onSelectionCleared`. **Unreleased since that tag:** §4.4, external HTML5 drag-and-drop. §5.3 has
+the release procedure.
 
-**The `experimental` bag is now fully closed**, and with 4.3 done the only `M`/`L` parity items left
-are row grouping (§4.1), external HTML5 drag-and-drop (§4.4), and the rest of §4.6.
+**The `experimental` bag is now fully closed**, and with 4.3 and 4.4 done the only `M`/`L` parity
+items left are row grouping (§4.1) and the rest of §4.6.
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 861 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 887 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -242,15 +240,17 @@ the parent it recorded at insertion, so reparenting turns teardown into a `NotFo
 write-up, including the template-comment truncation trap that cost an hour, in **PORTING-NOTES.md →
 "4.3 — `<:rightElement>`"**.
 
-### 4.4 External HTML5 drag-and-drop — `M`
+### 4.4 External HTML5 drag-and-drop — DONE (2026-08-13)
 
-`isDraggable: boolean | "header" | "cell"`, `onDragStart`, `onDrop`, `onDragOverCell`,
-`onDragLeave`. Source: `data-editor.tsx:2683-2699` (`onDragStartImpl`) plus passthroughs at
-`:4235-4296`.
-
-**Not the same thing** as the internal column/row reorder drags already implemented — this is the
-browser's HTML5 DnD, for dragging data *out of* and *into* the grid. Four listeners on `root`,
-reusing the existing `resolveMouseHit` for the cell target.
+Shipped as `@isDraggable` (`true | "cell" | "header"`), `@onDragStart`, `@onDragOverCell`,
+`@onDragLeave` and `@onDrop`. Both of source's halves are ported — `data-grid.tsx:1457-1674`'s
+listeners and default drag image, and `data-editor.tsx:2683-2705`'s row-marker refusal plus the
+`isActivelyDragging` flag that stops rect-selection running underneath a drag. The two guards live
+in `rendering/external-drag.ts` (11 tests), where `isDraggable: "header"` deliberately does **not**
+match the group-header band, as upstream. Browser-verified in both directions; full write-up,
+including the two harness traps it re-earned and the one-line `updateCells` gap it exposed in
+`<DemoGrid>`, in **PORTING-NOTES.md → "4.4 — external HTML5 drag-and-drop"**. New cookbook chapter:
+*Dragging data in and out*.
 
 ### 4.5 Smaller N-items from the Storybook audit
 

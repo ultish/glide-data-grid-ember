@@ -250,7 +250,12 @@ export type {
     CellClickedEventArgs,
     HeaderClickedEventArgs,
     GroupHeaderClickedEventArgs,
+    // 4.4: external HTML5 drag-and-drop. `DragHandler` is what `@onDragStart` adds on top of the
+    // ordinary mouse args -- `setData`/`setDragImage` are how a drag gets a payload at all.
+    DragHandler,
+    GridDragEventArgs,
 } from "./event-args.ts";
+export type { IsDraggable } from "./external-drag.ts";
 // Value exports, not types: these are the discriminants of the `GridMouseEventArgs` union, so a
 // consumer narrowing an `@onItemHovered` event needs them at runtime. Unexported until N2 landed,
 // because until then nothing in this addon ever constructed that union.
