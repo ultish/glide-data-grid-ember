@@ -266,6 +266,13 @@ const HAIRLINE_MODES = ["off", "8px, floor 10", "8px, floor 1"] as const;
 // neither flag — you have to scroll past the last column to reach it.
 const RIGHT_ELEMENT_MODES = ["off", "scroll", "sticky", "fill"] as const;
 
+// 4.6: the seed value for controlled selection, and what a refused selection falls back to.
+const EMPTY_GRID_SELECTION: GridSelection = {
+    current: undefined,
+    rows: CompactSelection.empty(),
+    columns: CompactSelection.empty(),
+};
+
 // 4.5: `@onPaste`'s three shapes. `"single-cell"` is the callback form refusing anything wider than
 // one cell, which is the realistic use — a consumer whose backend writes one field at a time.
 const PASTE_MODES = ["allow", "single-cell", "off"] as const;
@@ -1143,7 +1150,14 @@ export default class DemoGrid extends Component {
     };
 
     handleSelectionChanged = (selection: GridSelection): void => {
-        const current = selection.current;
+        // 4.6: in controlled mode the argument is what the grid *asked for*, not what is selected —
+        // the grid changed nothing. So decide the effective selection first, store it, and summarise
+        // that. Summarising the request instead would make a refused selection look like it landed,
+        // which is exactly the bug this arg exists to let a consumer avoid.
+        const effective = this.controlSelection ? this.vetoColumnZero(selection) : selection;
+        if (this.controlSelection) this.ownedSelection = effective;
+
+        const current = effective.current;
         const parts: string[] = [];
         this.selectedColumn = current === undefined ? undefined : current.cell[0];
         if (current !== undefined) {
@@ -1152,9 +1166,42 @@ export default class DemoGrid extends Component {
                 r.width * r.height === 1 ? `cell ${r.x},${r.y}` : `range ${r.width}x${r.height} at ${r.x},${r.y}`
             );
         }
-        if (selection.rows.length > 0) parts.push(`${selection.rows.length} row(s)`);
-        if (selection.columns.length > 0) parts.push(`${selection.columns.length} col(s)`);
+        if (effective.rows.length > 0) parts.push(`${effective.rows.length} row(s)`);
+        // The indices, not just the count: "1 col(s)" cannot tell a refused selection from an
+        // accepted one, and that distinction is the whole demonstration.
+        const cols = [...effective.columns];
+        if (cols.length > 0) parts.push(`col(s) [${cols.join(", ")}]`);
         this.selectionSummary = parts.length > 0 ? parts.join(", ") : "none";
+    };
+
+    // 4.6: controlled selection. Off by default so the default demo behaviour is unchanged.
+    @tracked controlSelection = false;
+    @tracked ownedSelection: GridSelection | undefined;
+    @tracked lastCleared = "—";
+
+    toggleControlSelection = (): void => {
+        this.controlSelection = !this.controlSelection;
+        // Seed from wherever the grid had got to, so switching mid-session does not jump.
+        this.ownedSelection = this.controlSelection ? EMPTY_GRID_SELECTION : undefined;
+    };
+
+    /**
+     * The demonstration, and the reason a pass-through handler would prove nothing: **column 0 is
+     * not selectable in controlled mode.** Click its header and the grid asks, this refuses, and
+     * because the grid holds no state of its own the selection simply does not move. In uncontrolled
+     * mode the same click always wins.
+     */
+    private vetoColumnZero(requested: GridSelection): GridSelection {
+        if (requested.columns.hasIndex(0)) {
+            this.lastActivity = "controlled selection: refused column 0";
+            return this.ownedSelection ?? EMPTY_GRID_SELECTION;
+        }
+        return requested;
+    }
+
+    /** Fires only for a click *outside* the grid's content, not for every empty selection. */
+    handleSelectionCleared = (): void => {
+        this.lastCleared = `cleared at ${new Date().toLocaleTimeString()}`;
     };
 
     handleVisibleRegionChanged = (region: Rectangle): void => {
@@ -1470,6 +1517,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-control-selection-toggle
+                    {{on "click" this.toggleControlSelection}}
+                >
+                    Own selection:
+                    <b>{{if this.controlSelection "on (col 0 refused)" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-right-element-toggle
                     {{on "click" this.cycleRightElement}}
                 >
@@ -1631,6 +1687,7 @@ export default class DemoGrid extends Component {
                 <span>Selection: <b data-test-selection-summary>{{this.selectionSummary}}</b></span>
                 <span>Hover: <b data-test-hover-summary>{{this.hoverSummary}}</b></span>
                 <span>Visible: <b data-test-visible-region>{{this.visibleRegionSummary}}</b></span>
+                <span>Cleared: <b data-test-selection-cleared>{{this.lastCleared}}</b></span>
                 {{#if this.lastFill}}<span>Last fill: <b data-test-last-fill>{{this.lastFill}}</b></span>{{/if}}
                 {{! Phase 9g: an edit that is silently refused is indistinguishable from a broken
                     grid, so every guard decision is reported. }}
@@ -1801,7 +1858,12 @@ export default class DemoGrid extends Component {
                     @showSearch={{this.showSearch}}
                     @onReady={{this.handleReady}}
                     @onSearchStateChange={{this.handleSearchStateChange}}
+                    {{! 4.6: with @selection passed the grid keeps no selection of its own — this
+                        component's handler is the only thing that can move it, and it refuses
+                        column 0 to prove the grid is deferring rather than echoing. }}
+                    @selection={{this.ownedSelection}}
                     @onSelectionChanged={{this.handleSelectionChanged}}
+                    @onSelectionCleared={{this.handleSelectionCleared}}
                     @onItemHovered={{this.handleItemHovered}}
                     @onVisibleRegionChanged={{this.handleVisibleRegionChanged}}
                     @onHeaderMenuClick={{this.handleHeaderMenuClick}}

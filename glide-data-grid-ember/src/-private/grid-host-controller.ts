@@ -416,6 +416,38 @@ export interface GridHostArgs {
      * blit fast path. The layout cache keys on this object's identity for exactly that reason.
      */
     readonly rowMarkerTheme?: Partial<Theme>;
+    /**
+     * Take ownership of the selection (4.6). Pass it and the grid stops keeping its own: every
+     * gesture that would change the selection instead reports the *requested* selection through
+     * {@link onSelectionChanged} and changes nothing on screen until you pass a new value back.
+     * Source's `gridSelection`, paired with `onGridSelectionChange`.
+     *
+     * That round trip is the feature: it is what lets you reject a selection, snap it to whole rows,
+     * keep it in sync with a sidebar or the URL, or drive it from elsewhere in your app.
+     *
+     * **Omit it and nothing changes** — the grid owns its selection as it always has, and
+     * `@onSelectionChanged` stays a plain notification.
+     *
+     * Coordinates are the consumer's own space (no row-marker column), the same space
+     * `@onSelectionChanged` reports and `getCellContent` speaks.
+     *
+     * **Divergence from source, and a simplification:** upstream splits this across two props —
+     * `gridSelection` controls reads and `onGridSelectionChange` controls writes — so supplying only
+     * the callback yields a grid whose selection can never change. Here the presence of `@selection`
+     * alone decides it. Both of source's *useful* configurations are still reachable: `@selection`
+     * with a handler is a controlled grid, `@selection` without one is a frozen selection, and a
+     * handler without `@selection` is the uncontrolled notify-only grid this addon already had.
+     */
+    readonly selection?: GridSelection;
+    /**
+     * The user cleared the selection by clicking **outside the grid's content** — past the last row
+     * or column, on no cell at all. Fires in addition to {@link onSelectionChanged}.
+     *
+     * Read the guard, not the name: source fires this from exactly one place, its out-of-bounds
+     * mouse branch (`data-editor.tsx:2051-2054`), and *not* on the many other ways a selection ends
+     * up empty (Escape, a delete, a programmatic clear). Reproduced as narrowly as that.
+     */
+    readonly onSelectionCleared?: () => void;
     /** @defaultValue "multi" */
     readonly rowSelect?: "none" | "single" | "multi";
     /** @defaultValue "multi" */
@@ -1132,6 +1164,9 @@ interface ResolvedGridHostArgs {
     readonly rowSelectionBlending: SelectionBlending;
     readonly rowSelectionMode: "auto" | "multi";
     readonly columnSelectionMode: "auto" | "multi";
+    /** Already branded: consumer space is what `@selection` documents and what the brands encode. */
+    readonly selection: ConsumerSelection | undefined;
+    readonly onSelectionCleared: (() => void) | undefined;
     readonly onSelectionChanged: ((selection: GridSelection) => void) | undefined;
     readonly onHeaderMenuClick: ((col: number, bounds: Rectangle) => void) | undefined;
     readonly onCellsEdited: ((edits: readonly { location: Item; value: GridCell }[]) => void) | undefined;
@@ -1552,7 +1587,27 @@ export class GridHostController {
     // `mangledSelection(args)` / `applyMangledSelection(args, ...)` instead. Those two are the only
     // conversion points, and `-private/selection-space.ts`'s branded `MangledSelection` type is what
     // makes a missed conversion a compile error rather than a silent off-by-one column.
-    private selection: ConsumerSelection = EMPTY_SELECTION;
+    /**
+     * The grid's own selection state, used **only** when the consumer has not taken ownership with
+     * `@selection`. Read through the {@link selection} getter, never directly: in controlled mode
+     * this field goes stale on purpose, because the consumer's arg is the truth.
+     */
+    private internalSelection: ConsumerSelection = EMPTY_SELECTION;
+
+    /**
+     * The consumer's `@selection`, refreshed by `resolveArgs`. Cached in a field rather than read
+     * from args on demand because {@link selection} is read on hot paths -- the mangled cell-content
+     * closure asks it for every row-marker cell, every frame -- and `resolveArgs` allocates.
+     */
+    private controlledSelection: ConsumerSelection | undefined;
+
+    /**
+     * The selection in force: the consumer's when they own it, the grid's otherwise. Every read site
+     * in this file goes through here, so "who owns the selection" is decided in exactly one place.
+     */
+    private get selection(): ConsumerSelection {
+        return this.controlledSelection ?? this.internalSelection;
+    }
     private readonly mangledSelectionCache = new MangledSelectionCache();
     // Set on mousedown (any kind except a header-menu click), cleared on mouseup. Mirrors source's
     // `mouseDownData.current` (location) + `mouseState.previousSelection`
@@ -1960,6 +2015,11 @@ export class GridHostController {
         );
         const rowMarkers = args.rowMarkers ?? "none";
         const hasRowMarkers = rowMarkers !== "none";
+        // 4.6: refreshed on every resolve, which is what makes `this.selection` see a controlled
+        // value the moment the consumer hands one back. Cached on the instance because the getter
+        // that reads it is on hot paths and this method allocates.
+        const controlledSelection = args.selection === undefined ? undefined : asConsumerSelection(args.selection);
+        this.controlledSelection = controlledSelection;
         return {
             columns: args.columns,
             getCellContent: args.getCellContent,
@@ -2015,6 +2075,10 @@ export class GridHostController {
             rowSelectionBlending: args.rowSelectionBlending ?? DEFAULT_SELECTION_BLENDING,
             rowSelectionMode: args.rowSelectionMode ?? DEFAULT_SELECTION_MODE,
             columnSelectionMode: args.columnSelectionMode ?? DEFAULT_SELECTION_MODE,
+            // 4.6. Branded here, at the boundary, because this is one of the three places a
+            // consumer-space selection is minted -- see `-private/selection-space.ts`.
+            selection: controlledSelection,
+            onSelectionCleared: args.onSelectionCleared,
             onSelectionChanged: args.onSelectionChanged,
             onHeaderMenuClick: args.onHeaderMenuClick,
             onCellsEdited: args.onCellsEdited,
@@ -2482,8 +2546,14 @@ export class GridHostController {
     // originates from `mangledSelection()` and stays branded through the space-preserving writers
     // in `selection-behavior.ts`, so those sites cannot be fed an unconverted value.
     private applySelection(newSelection: ConsumerSelection): void {
-        this.selection = newSelection;
         const args = this.resolveArgs();
+        // Controlled mode (4.6): the consumer owns the state, so this is a *request*, not a write.
+        // Nothing changes on screen until they hand a new `@selection` back — which is the whole
+        // point, since it is what lets them veto or adjust a selection. Source draws the same line
+        // (`data-editor.tsx:1006-1013`): with a change handler it calls out and skips `setState`.
+        if (args.selection === undefined) {
+            this.internalSelection = newSelection;
+        }
         args.onSelectionChanged?.(newSelection);
         this.scheduleFullRedraw();
     }
@@ -4279,6 +4349,11 @@ export class GridHostController {
             }
         } else if (!hit.isMaybeScrollbar) {
             this.clearSelection();
+            // 4.6. Source fires `onSelectionCleared` from exactly here and nowhere else
+            // (`data-editor.tsx:2051-2054`) -- not from Escape, a delete, or any other route to an
+            // empty selection. Narrow on purpose: it means "the user clicked away", which is a
+            // different intent from "the selection happens to be empty now".
+            args.onSelectionCleared?.();
         }
     };
 

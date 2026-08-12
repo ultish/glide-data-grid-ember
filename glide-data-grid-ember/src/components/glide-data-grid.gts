@@ -374,7 +374,20 @@ export interface GlideDataGridSignature {
         rowSelectionBlending?: SelectionBlending;
         rowSelectionMode?: "auto" | "multi";
         columnSelectionMode?: "auto" | "multi";
+        /**
+         * Take ownership of the selection. Pass it and the grid keeps none of its own: every gesture
+         * reports the *requested* selection through `@onSelectionChanged` and nothing moves until you
+         * pass a new value back — which is what lets you reject it, snap it to whole rows, or keep it
+         * in sync with the rest of your UI. Omit it and the grid owns its selection as before.
+         */
+        selection?: GridSelection;
         onSelectionChanged?: (selection: GridSelection) => void;
+        /**
+         * The user clicked **outside the grid's content** — past the last row or column — clearing
+         * the selection. Deliberately narrow: it does not fire for Escape, a delete, or any other
+         * route to an empty selection, matching source.
+         */
+        onSelectionCleared?: () => void;
         onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
         onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
         onColumnResizeStart?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
@@ -677,7 +690,9 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         rowSelectionBlending: this.args.rowSelectionBlending,
         rowSelectionMode: this.args.rowSelectionMode,
         columnSelectionMode: this.args.columnSelectionMode,
+        selection: this.args.selection,
         onSelectionChanged: this.args.onSelectionChanged,
+        onSelectionCleared: this.args.onSelectionCleared,
         onHeaderMenuClick: this.args.onHeaderMenuClick,
         onCellsEdited: this.args.onCellsEdited,
         onColumnResizeStart: this.args.onColumnResizeStart,

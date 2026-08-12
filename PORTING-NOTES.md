@@ -5437,3 +5437,74 @@ with it — both axes.
 so there is none and the toggle looks inert. That is source's own caveat ("if any") and its warning
 that fill "does not play nice with growing columns" — they compete for the same slack. Recorded here
 rather than treated as a defect; the inline `flex-grow: 1` is confirmed applied.
+
+## 4.6 — controlled selection (`@selection`, `@onSelectionCleared`) (COMPLETE, browser-verified, 2026-08-12)
+
+### One flag, not two
+
+Source splits control across two props: `gridSelection` decides where *reads* come from
+(`data-editor.tsx:972`, `gridSelectionOuterMangled ?? gridSelectionInner`) and `onGridSelectionChange`
+decides whether *writes* go to the consumer or to internal state (`:1006-1013`). Here the presence of
+`@selection` decides both.
+
+That is a simplification, not a loss. Source's four combinations reduce to three useful ones, all
+reachable: `@selection` + a handler is a controlled grid; `@selection` alone is a frozen selection
+(gestures reported, nothing moves); a handler alone is the uncontrolled notify-only grid this addon
+already had. The fourth — source's `onGridSelectionChange` with no `gridSelection` — produces a grid
+whose selection can never change no matter what the consumer does, which is a misconfiguration rather
+than a feature.
+
+### Shape
+
+The field became `internalSelection` and `selection` became a **getter** returning
+`controlledSelection ?? internalSelection`. That was the cheap way to do it: there are 48 read sites
+and exactly **one** write site (`applySelection`), so the getter left every reader untouched and put
+the ownership decision in one place.
+
+`controlledSelection` is cached on the instance and refreshed by `resolveArgs` rather than read from
+args on demand — `selection` is read on hot paths (the mangled cell-content closure asks it for every
+row-marker cell, every frame) and `resolveArgs` allocates. It is branded with `asConsumerSelection`
+at that boundary, which is one of the three places in the codebase allowed to mint a branded value.
+
+### `onSelectionCleared` is narrower than its name
+
+Source fires it from exactly one place: the out-of-bounds mouse branch, `!isMaybeScrollbar`
+(`data-editor.tsx:2051-2054`). Not from Escape, not from a delete, not from a programmatic clear. It
+means "the user clicked away", which is a different intent from "the selection is empty now".
+Reproduced at exactly that narrowness, and both halves browser-checked: an off-grid click fires it,
+Escape does not.
+
+### The demo needed a *veto*, not a pass-through
+
+A controlled-selection demo that stores whatever it is handed is indistinguishable from an
+uncontrolled grid — it looks identical and proves nothing. `<DemoGrid>`'s handler therefore **refuses
+column 0**, which is only possible if the grid is genuinely holding no state of its own.
+
+Finding the assertion took two tries, and both failures are the ones TODO.md's working-practices list
+already warns about:
+
+- The status readout said `1 col(s)` for every outcome — a count cannot distinguish a refused
+  selection from an accepted one. It now prints the indices.
+- Worse, it summarised the callback's *argument*. In controlled mode that argument is a **request**,
+  so a refused selection rendered as though it had landed. The handler now decides the effective
+  selection first and summarises that. This is a mistake a consumer will make too, so it is called
+  out in the cookbook.
+
+Final browser trace, which is the semantic assertion: uncontrolled, clicking column 0's header gives
+`col(s) [0]`; controlled, column 3 is accepted (`[3]`), column 0 is refused (stays `[3]`), column 5 is
+accepted (`[5]`), column 0 refused again (stays `[5]`). Accepted selections still flow, so it is
+deferring rather than frozen.
+
+### No unit tests, deliberately
+
+There is no pure logic here to extract — the feature is one branch in `applySelection` plus a getter,
+and a test asserting `a ?? b` would test the language. The behaviour that *could* go wrong is the
+controller's, which vitest cannot import (see TODO.md's working practices). Verified in the browser
+instead.
+
+### Correction to this file's own backlog
+
+TODO.md listed `previousSelection` as unported alongside these. It is not, and was not: it is the
+mouse-down state at `grid-host-controller.ts:1382-1386`, mangled to match `hit.location`, and it has
+driven the fill-handle path since 9h. Source's `previousSelection` is likewise internal (`MouseState`),
+not a consumer-facing prop. The entry was wrong.

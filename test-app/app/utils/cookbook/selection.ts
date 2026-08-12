@@ -66,6 +66,33 @@ handleRowMoved = (from, to) => {
         },
         {
             kind: "p",
+            text: "**Owning the selection.** By default the grid keeps its own selection and `@onSelectionChanged` is a notification. Pass `@selection` and that flips: the grid keeps none, every gesture reports the *requested* selection, and nothing moves until you hand a new value back. That round trip is the point \u2014 it is what lets you refuse a selection, snap it to whole rows, or keep it in step with a sidebar or the URL.",
+        },
+        {
+            kind: "code",
+            text: `@tracked selection = { current: undefined, rows: CompactSelection.empty(), columns: CompactSelection.empty() };
+
+// The grid changed nothing. This handler is the only thing that can move the selection.
+handleSelectionChanged = (requested) => {
+  if (requested.columns.hasIndex(0)) return;   // refuse: selection simply does not move
+  this.selection = requested;
+};`,
+        },
+        {
+            kind: "list",
+            items: [
+                "Coordinates are your own space \u2014 no row-marker column \u2014 the same space `getCellContent` speaks.",
+                "**Summarise what you stored, not what you were handed.** In controlled mode the callback's argument is a request; treating it as the current selection makes a refused one look like it landed.",
+                "Passing `@selection` without a handler is a frozen selection: gestures are reported and nothing ever changes.",
+                "**Porting from React:** source splits this across `gridSelection` (reads) and `onGridSelectionChange` (writes), so supplying only the callback yields a grid whose selection can never change. Here `@selection` alone decides it.",
+            ],
+        },
+        {
+            kind: "p",
+            text: '**`@onSelectionCleared`** fires when the user clicks *outside the grid\'s content* \u2014 past the last row or column. It is deliberately narrow, matching source: it does not fire for Escape, a delete, or any other route to an empty selection, so it means "the user clicked away" rather than "the selection is empty now".',
+        },
+        {
+            kind: "p",
             text: "**Fill handle.** Off by default. When on, dragging the small square at the selection's bottom-right corner tiles the selected pattern across the dragged region and reports the writes through `@onCellsEdited` — so the handler above is all you need.",
         },
         {

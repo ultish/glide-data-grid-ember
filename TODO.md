@@ -272,10 +272,12 @@ the menu a real item that *is* a grid concern, e.g. hide/auto-size the column.
 
 ### 4.6 Interaction gaps (formerly 9h)
 
-- **Controlled-selection mode** — `M`. No `GridHostArgs.selection` for a consumer to own externally
-  (source's `gridSelection`/`onGridSelectionChange`). Implementation already sketched: an optional
-  arg that makes `applySelection` skip mutating `this.selection` and rely on the caller re-supplying
-  it. Also unported: `onSelectionCleared`, `previousSelection`.
+- **Controlled-selection mode** — DONE (2026-08-12). `@selection` + `@onSelectionCleared`. The
+  presence of `@selection` alone decides ownership, where source splits it across `gridSelection`
+  (reads) and `onGridSelectionChange` (writes); both of source's *useful* configurations are still
+  reachable. `onSelectionCleared` is deliberately as narrow as upstream's — the out-of-bounds click
+  only. **`previousSelection` was already ported** (the mouse-down state, `grid-host-controller.ts`
+  around `:1382`); this list was wrong about it. See PORTING-NOTES.md → "4.6 — controlled selection".
 - **Span/merged-cell selection** — `L`. `expandSelection`, `spanRangeBehavior`. No cell type uses
   `GridCell.span` yet, so there is nothing to exercise it against. The `expand` flag is already
   carried unused through `SetCurrentResult`.
