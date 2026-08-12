@@ -19,21 +19,22 @@ directly**; every item below cites file:line in it.
 is also what deploys to GitHub Pages. pnpm workspace.
 
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 887 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
+GitHub Pages. 903 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
 **Published vs unpublished.** **v0.2.1 is on npm** (tagged and pushed 2026-08-13) and contains
 everything through 4.6's controlled selection: 4.2 (`@getGroupDetails`, `@onGroupHeaderRenamed`),
 4.3 (`<:rightElement>` + the two paddings), every §4.5 row, and `@selection` /
-`@onSelectionCleared`. **Unreleased since that tag:** §4.4, external HTML5 drag-and-drop. §5.3 has
-the release procedure.
+`@onSelectionCleared`. **Unreleased since that tag:** §4.4 (external HTML5 drag-and-drop) and §4.6 (`@keybindings`, the nav
+variants, the `onSelect` hook) plus §4.5b. §5.3 has the release procedure.
 
-**The `experimental` bag is now fully closed**, and with 4.3 and 4.4 done the only `M`/`L` parity
-items left are row grouping (§4.1) and the rest of §4.6.
+**The `experimental` bag is now fully closed.** With 4.3, 4.4, 4.5, 4.5b and all of 4.6 except
+span selection done, the only substantial parity items left are **row grouping (§4.1)** and
+**span/merged-cell selection (§4.6)** — and the latter is blocked on span *rendering* existing first.
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 887 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 903 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -264,16 +265,14 @@ including the two harness traps it re-earned and the one-line `updateCells` gap 
 | **`experimental.strict`** | DONE (2026-08-12) | Shipped as `@strictVisibleRegion`. The rule is `isOutsideStrictRegion` (`rendering/strict-region.ts`, 8 tests) — source's inclusive bounds reproduced, with its two escape hatches (the selected cell, and the frozen columns the reported region deliberately excludes). The controller now tracks its visible region on **every** draw whether or not `@onVisibleRegionChanged` is wired, and does so **before** the draw rather than after: computed after, a strict grid's first frame would consult a region that did not exist yet and paint all-Loading with nothing scheduled to fix it. **Narrower than source on purpose:** the check sits in the mangled cell-content closure, and this port's copy/search/auto-size sweeps read `getCellContent` directly, so they are unaffected — turning it on cannot break a copy of an off-screen range. |
 | **`experimental.eventTarget`** | DONE (2026-08-12) | Shipped as `@eventTarget`. Redirects the three **pointer** listeners that must outlive the grid's bounds: drag-end `mouseup`, 9h's window `mousemove`, and the overlay editor's outside-click `mousedown`. **Clipboard stays on `window`** — source keeps `copy`/`cut`/`paste` on `safeWindow` too (`data-editor.tsx:3767,3877,3908`), because a clipboard event is dispatched at the focused document regardless of where the grid sits; an earlier revision of this row said otherwise. Unset, the target is resolved from `root.getRootNode()` as source does, so **a grid inside a shadow root works without the arg** (which also retires most of the "Shadow DOM" row below). Read once, at setup: source re-binds on change only as a side effect of React re-running `useEventListener`, so that is not treated as contract. |
 | **`experimental.paddingRight`/`paddingBottom`** | DONE (2026-08-12) | Landed with 4.3 as `@paddingRight`/`@paddingBottom`. Added to the scroller's extent and subtracted from the width **and** height the visible region is measured against. `paddingRight` is a *gutter beside* the right panel, not a stand-in for its width — source applies it twice, as the panel's `margin-right` and as a sticky panel's inset from the edge. Not `scaleToRem`-scaled, matching source, which scales the overscrolls but not these. |
-| **Shadow DOM** | `S` to check | Still never tried in a browser, but **the pointer-listener half is now handled**: `@eventTarget`'s default resolves `root.getRootNode()`, so the three window-level mouse listeners bind to the `ShadowRoot` automatically. What remains unverified is the measurement canvas appended to `document.documentElement` and the `window`-scoped clipboard listeners (which source also leaves on `window`). Overlay editors append to the grid root, which is the good case. |
+| **Shadow DOM** | DONE (2026-08-13) | Checked in a browser at last, via the new **Shadow DOM** tab (`<ShadowDomDemo>`, `{{in-element}}` into an open shadow root): `getRootNode() === shadowRoot`, both canvases inside it, correct hit-testing on click, and arrow-key nav working — so pointer listeners, focus and measurement are all fine. **The one real finding is styles:** the addon's stylesheets land in the *document* head, which a shadow boundary blocks, so a grid in a shadow root renders unstyled until the consumer adopts them. That is not fixable from inside the addon. See PORTING-NOTES.md. |
 
-### 4.5b `<DemoGrid>`'s header menu offers nothing — `S`
+### 4.5b `<DemoGrid>`'s header menu offers nothing — DONE (2026-08-13)
 
-Its `@onHeaderMenuClick` menu has a single "Close" item, so opening it reads as a broken feature. The
-split is deliberate — `<DemoGrid>` demos grid *args*, and sorting is a data-source decorator
-(`withColumnSort`), demoed in `<GlideDemo>` — but a menu with nothing in it is a poor advert for the
-callback either way. Either wire `withColumnSort` into `<DemoGrid>` (it composes with the tracked
-cell data, row markers and column reorder already there, so the write path needs threading) or give
-the menu a real item that *is* a grid concern, e.g. hide/auto-size the column.
+The menu now names its column and carries auto-size (`api.remeasureColumns`) and hide/show-hidden —
+both grid concerns, so the deliberate split stands: sorting stays in `<GlideDemo>` because it is a
+data-source decorator. Hiding is just removing the column from the array, since cell content is
+looked up by column `id` rather than position.
 
 ### 4.6 Interaction gaps (formerly 9h)
 
@@ -283,15 +282,24 @@ the menu a real item that *is* a grid concern, e.g. hide/auto-size the column.
   reachable. `onSelectionCleared` is deliberately as narrow as upstream's — the out-of-bounds click
   only. **`previousSelection` was already ported** (the mouse-down state, `grid-host-controller.ts`
   around `:1382`); this list was wrong about it. See PORTING-NOTES.md → "4.6 — controlled selection".
-- **Span/merged-cell selection** — `L`. `expandSelection`, `spanRangeBehavior`. No cell type uses
-  `GridCell.span` yet, so there is nothing to exercise it against. The `expand` flag is already
-  carried unused through `SetCurrentResult`.
-- **`onSelect` renderer hook** — `S`. Typed at `rendering/cell-types.ts:92`; **nothing calls it**.
-  Cell renderers cannot intercept or suppress a click's selection.
-- **Keybinding remapping** — `M`. Source's `common/is-hotkey.ts` (86 lines) +
-  `data-editor-keybindings.ts` (198). Only hardcoded defaults work here.
-- **Nav variants** — `S`, all in `onKeyDown`. Tab/Shift+Tab aliasing, alt+Arrow free move,
-  primary+shift jump-to-edge, row/column space-bar select.
+- **Keybinding remapping** — DONE (2026-08-13). `@keybindings`, built on ports of source's
+  `is-hotkey.ts` and `data-editor-keybindings.ts` into `rendering/` (16 tests). Same string syntax as
+  upstream, so a React `keybindings` map transfers unchanged. **`search` defaults to on here and off
+  upstream** — this port has had Cmd/Ctrl+F since 9e. `downFill`/`rightFill` and `acceptOverlay*` are
+  deliberately absent (nothing to bind them to); see the module header.
+- **Nav variants** — DONE (2026-08-13), as map entries rather than new branches: Tab/shift+Tab,
+  alt+Arrow free move, primary+shift jump-to-edge, space-bar row/column select — plus PageUp/PageDown,
+  primary+Enter and **Escape to clear**, which were missing too. `adjustSelection` gained source's
+  `±2` cases; `moveActiveCell` gained `freeMove`.
+- **`onSelect` renderer hook** — DONE (2026-08-13). Wired at source's own spot in the mousedown
+  selection path; `preventDefault()` refuses the selection change. Demoed by `<DemoGrid>`'s "Select
+  hook" toggle. **Trap worth knowing:** swap a renderer by *identity*, not by `kind` — every
+  `CustomRenderer` carries `kind: GridCellKind.Custom`.
+- **Span/merged-cell selection** — `L`. **Still open, deliberately.** `expandSelection`,
+  `spanRangeBehavior`. No cell type in this port sets `GridCell.span`, so implementing it would add a
+  feature no demo can switch on — rule 5 says that is unverified code by construction. Do the span
+  *rendering* first, or leave it. The `expand` flag is already carried unused through
+  `SetCurrentResult`.
 
 ---
 

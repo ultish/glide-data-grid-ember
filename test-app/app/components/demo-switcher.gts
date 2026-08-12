@@ -44,11 +44,22 @@ import AsyncDemo from "test-app/components/async-demo";
 import ComposedDemo from "test-app/components/composed-demo";
 import ApolloDemo from "test-app/components/apollo-demo";
 import DaisyDemo from "test-app/components/daisy-demo";
+import ShadowDomDemo from "test-app/components/shadow-dom-demo";
 import CookbookPage from "test-app/components/cookbook-page";
 import GuidePage from "test-app/components/guide-page";
 
 type DemoTab =
-    "full-grid" | "tracking" | "glide" | "streaming" | "composed" | "async" | "apollo" | "daisy" | "guide" | "cookbook";
+    | "full-grid"
+    | "tracking"
+    | "glide"
+    | "streaming"
+    | "composed"
+    | "async"
+    | "apollo"
+    | "daisy"
+    | "shadow"
+    | "guide"
+    | "cookbook";
 
 export default class DemoSwitcher extends Component {
     @tracked tab: DemoTab = "full-grid";
@@ -83,6 +94,10 @@ export default class DemoSwitcher extends Component {
 
     showDaisyDemo = (): void => {
         this.tab = "daisy";
+    };
+
+    showShadowDemo = (): void => {
+        this.tab = "shadow";
     };
 
     showGuide = (): void => {
@@ -123,6 +138,10 @@ export default class DemoSwitcher extends Component {
 
     get isApollo(): boolean {
         return this.tab === "apollo";
+    }
+
+    get isShadow(): boolean {
+        return this.tab === "shadow";
     }
 
     get isGuide(): boolean {
@@ -206,6 +225,14 @@ export default class DemoSwitcher extends Component {
                     DaisyUI theming
                 </button>
                 <button
+                    class="btn btn-xs btn-ghost {{if this.isShadow 'btn-active'}}"
+                    type="button"
+                    data-test-tab-shadow
+                    {{on "click" this.showShadowDemo}}
+                >
+                    Shadow DOM
+                </button>
+                <button
                     class="btn btn-xs btn-ghost {{if this.isGuide 'btn-active'}}"
                     type="button"
                     data-test-show-guide
@@ -237,6 +264,8 @@ export default class DemoSwitcher extends Component {
                     <ApolloDemo />
                 {{else if this.isDaisy}}
                     <DaisyDemo />
+                {{else if this.isShadow}}
+                    <ShadowDomDemo />
                 {{else if this.isGuide}}
                     <GuidePage />
                 {{else if this.isCookbook}}

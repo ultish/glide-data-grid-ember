@@ -9,6 +9,7 @@ import { emberSection } from "./ember.ts";
 import { editingSection } from "./editing.ts";
 import { selectionSection } from "./selection.ts";
 import { dragAndDropSection } from "./drag-and-drop.ts";
+import { keyboardSection } from "./keyboard.ts";
 import { sortingSection } from "./sorting.ts";
 import { composingSection } from "./composing.ts";
 import { hoverSection } from "./hover.ts";
@@ -28,6 +29,7 @@ export const SECTIONS: readonly Section[] = [
     editingSection,
     selectionSection,
     dragAndDropSection,
+    keyboardSection,
     sortingSection,
     composingSection,
     hoverSection,

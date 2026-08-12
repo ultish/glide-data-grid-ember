@@ -256,6 +256,10 @@ export type {
     GridDragEventArgs,
 } from "./event-args.ts";
 export type { IsDraggable } from "./external-drag.ts";
+// 4.6: the configurable keybinding map. `Keybinds` is what `@keybindings` takes a Partial of;
+// `keybindingDefaults` is exported so a consumer can read a default rather than guess it.
+export type { Keybind, Keybinds, ConfigurableKeybinds, RealizedKeybinds } from "./keybindings.ts";
+export { keybindingDefaults } from "./keybindings.ts";
 // Value exports, not types: these are the discriminants of the `GridMouseEventArgs` union, so a
 // consumer narrowing an `@onItemHovered` event needs them at runtime. Unexported until N2 landed,
 // because until then nothing in this addon ever constructed that union.

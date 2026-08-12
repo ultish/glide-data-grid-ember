@@ -50,6 +50,10 @@ import {
     outOfBoundsKind,
 } from "glide-data-grid-ember/rendering/index";
 import { cached } from "@glimmer/tracking";
+// 4.6: the individual extra-cell renderers live in their own barrel; `rendering/index` re-exports
+// only the combined `allExtraCells`. Importing the star renderer directly is what lets the demo
+// wrap it with an `onSelect`.
+import { starCellRenderer, type StarCell } from "glide-data-grid-ember/rendering/extra-cells/index";
 import {
     allExtraCells,
     CompactSelection,
@@ -78,6 +82,8 @@ import {
     type PasteBehavior,
     type CellActivatedEventArgs,
     type CellActivationBehavior,
+    type Keybinds,
+    type CustomRenderer,
     type IsDraggable,
     type GridDragEventArgs,
     type GroupHeaderClickedEventArgs,
@@ -278,6 +284,42 @@ const EMPTY_GRID_SELECTION: GridSelection = {
 // 4.5: `@onPaste`'s three shapes. `"single-cell"` is the callback form refusing anything wider than
 // one cell, which is the realistic use — a consumer whose backend writes one field at a time.
 const PASTE_MODES = ["allow", "single-cell", "off"] as const;
+
+// 4.6: `@keybindings`. Three states rather than a boolean, because the interesting half of the arg
+// is *disabling* a gesture — a remap that works is easy to see, a disable that silently does nothing
+// is not. "remapped" moves vertical nav onto ctrl+j / ctrl+k (and leaves the arrows alone, so the
+// difference is observable); "restricted" switches select-all and the page keys off entirely.
+const KEYBINDING_MODES = ["default", "remapped", "restricted"] as const;
+
+// 4.6: `CellRenderer.onSelect`. A renderer-level hook, so demoing it means shipping a renderer —
+// this wraps the addon's own star cell rather than inventing a cell type, which keeps the demo
+// about the hook. `onSelect` is the only thing in the grid that can *refuse* a selection change,
+// and refusing on a modifier-free click is the clearest way to see that it ran.
+//
+// Module scope: `@extraCells` feeds `getCellRenderer`, which the blit fast path identity-compares.
+const STAR_RENDERER_WITH_SELECT_HOOK: CustomRenderer<StarCell> = {
+    ...starCellRenderer,
+    onSelect: args => {
+        // Only refuse the plain click; shift-click still extends a range onto the column, so the
+        // cell is not simply unreachable.
+        if (args.shiftKey || args.ctrlKey || args.metaKey) return;
+        args.preventDefault();
+        selectHookListener?.(`onSelect refused the selection of a ${args.cell.data.kind} cell`);
+    },
+};
+
+// Set by the component instance so the module-scope renderer above can report into the status row
+// without being rebuilt per instance (which would cost the blit fast path).
+let selectHookListener: ((message: string) => void) | undefined;
+
+// Swapped **by identity**, not by `kind`: every `CustomRenderer` carries `kind: GridCellKind.Custom`
+// (the *cell's* `data.kind` is what distinguishes a star cell), so filtering on `kind` would remove
+// nothing and leave the original renderer ahead of the wrapper in `isMatch` order — which is exactly
+// the bug that made the hook look unported the first time this demo ran.
+const EXTRA_CELLS_WITH_SELECT_HOOK = [
+    ...allExtraCells.filter(r => r !== starCellRenderer),
+    STAR_RENDERER_WITH_SELECT_HOOK,
+];
 
 // 4.4: `@isDraggable`'s three states. "headers" is the interesting one — it is the case where a
 // drag started from a *cell* must do nothing at all, which is the half of the arg a "does dragging
@@ -1116,6 +1158,45 @@ export default class DemoGrid extends Component {
         };
     }
 
+    // --- 4.6: the renderer `onSelect` hook -------------------------------------------------------
+    @tracked useSelectHook = false;
+
+    toggleSelectHook = (): void => {
+        this.useSelectHook = !this.useSelectHook;
+        selectHookListener = this.useSelectHook ? message => (this.lastGuard = message) : undefined;
+    };
+
+    /** Both arms are module-scope constants: `@extraCells` composes into `getCellRenderer`, which
+     *  `computeCanBlit` identity-compares, so a fresh array per read would silently disable the
+     *  scroll blit fast path (TODO.md's rule 1). */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches `@extraCells`'s own
+    // signature, which is heterogeneous by nature: one array, many unrelated cell payloads.
+    get extraCells(): readonly CustomRenderer<any>[] {
+        return this.useSelectHook ? EXTRA_CELLS_WITH_SELECT_HOOK : allExtraCells;
+    }
+
+    // --- 4.6: configurable keybindings -----------------------------------------------------------
+    @tracked keybindingModeIndex = 0;
+
+    get keybindingMode(): (typeof KEYBINDING_MODES)[number] {
+        return KEYBINDING_MODES[this.keybindingModeIndex] ?? "default";
+    }
+
+    cycleKeybindingMode = (): void => {
+        this.keybindingModeIndex = (this.keybindingModeIndex + 1) % KEYBINDING_MODES.length;
+    };
+
+    /** A getter, so flipping the toggle rebuilds it. Safe here: `@keybindings` is read on each
+     *  keydown through a cache keyed on this object's identity, and it is not a `DrawGridArg`
+     *  field, so churning it costs a map rebuild on the next keypress and nothing else. */
+    get keybindings(): Partial<Keybinds> | undefined {
+        if (this.keybindingMode === "default") return undefined;
+        if (this.keybindingMode === "remapped") {
+            return { goDownCell: "ArrowDown|ctrl+j", goUpCell: "ArrowUp|ctrl+k" };
+        }
+        return { selectAll: false, goToNextPage: false, goToPreviousPage: false };
+    }
+
     // --- 4.4: external HTML5 drag-and-drop --------------------------------------------------------
     // The browser's own drag-and-drop, not the internal column/row reorder gestures above. The
     // demo's two halves are deliberately different shapes: dragging *out* puts real `text/plain` on
@@ -1341,6 +1422,56 @@ export default class DemoGrid extends Component {
 
     closeHeaderMenu = (): void => {
         this.headerMenu = undefined;
+    };
+
+    // --- 4.5b: the header menu's real items -------------------------------------------------------
+    // The menu used to hold nothing but "Close", which read as a broken callback. Both items below
+    // are deliberately *grid* concerns — auto-sizing and column visibility — because <DemoGrid> demos
+    // grid args, and sorting is a data-source decorator (`withColumnSort`) demoed in <GlideDemo>.
+    //
+    // Hiding is just removing the column from the array the grid is given: cell content is looked up
+    // by column `id` (`naturalDemoColumnIndex`), not by position, so nothing else has to change —
+    // the same property that makes column reordering work.
+    @tracked hiddenColumns: readonly GridColumn[] = [];
+
+    get headerMenuColumnTitle(): string {
+        const menu = this.headerMenu;
+        if (menu === undefined) return "";
+        return this.columns[menu.col]?.title ?? `Column ${menu.col}`;
+    }
+
+    get hiddenColumnTitles(): string {
+        return this.hiddenColumns.map(c => c.title).join(", ");
+    }
+
+    autoSizeMenuColumn = (): void => {
+        const menu = this.headerMenu;
+        if (menu === undefined) return;
+        // `remeasureColumns` takes displayed indices, which is what `@onHeaderMenuClick` reports.
+        this.gridApi?.remeasureColumns([menu.col]);
+        this.lastApiResult = `remeasureColumns([${menu.col}]) from the header menu`;
+        this.closeHeaderMenu();
+    };
+
+    hideMenuColumn = (): void => {
+        const menu = this.headerMenu;
+        const column = this.columns[menu?.col ?? -1];
+        if (menu === undefined || column === undefined) return;
+        this.hiddenColumns = [...this.hiddenColumns, column];
+        this.columns = this.columns.filter((_, i) => i !== menu.col);
+        this.closeHeaderMenu();
+    };
+
+    unhideAllColumns = (): void => {
+        if (this.hiddenColumns.length === 0) return;
+        // Restored in the demo's natural column order rather than at the end, so repeatedly hiding
+        // and showing does not slowly shuffle the grid.
+        const restored = [...this.columns, ...this.hiddenColumns].sort(
+            (a, b) => naturalDemoColumnIndex(a, 0) - naturalDemoColumnIndex(b, 0)
+        );
+        this.hiddenColumns = [];
+        this.columns = restored;
+        this.closeHeaderMenu();
     };
 
     get headerMenuStyle(): ReturnType<typeof htmlSafe> {
@@ -1669,6 +1800,24 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-select-hook-toggle
+                    {{on "click" this.toggleSelectHook}}
+                >
+                    Select hook:
+                    <b>{{if this.useSelectHook "on (Rating refuses)" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-keybinding-mode-toggle
+                    {{on "click" this.cycleKeybindingMode}}
+                >
+                    Keys:
+                    <b>{{this.keybindingMode}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-drag-mode-toggle
                     {{on "click" this.cycleDragMode}}
                 >
@@ -1892,7 +2041,9 @@ export default class DemoGrid extends Component {
                 <GlideDataGrid
                     @columns={{this.effectiveColumns}}
                     @getCellContent={{this.getCellContent}}
-                    @extraCells={{allExtraCells}}
+                    {{! 4.6: with the Select hook toggle on, this array swaps the star-cell renderer
+                        for one carrying an `onSelect` that refuses a plain click. }}
+                    @extraCells={{this.extraCells}}
                     @rows={{this.rows}}
                     @theme={{this.theme}}
                     @getRowThemeOverride={{this.getRowThemeOverride}}
@@ -1966,6 +2117,8 @@ export default class DemoGrid extends Component {
                     {{! 4.4: external HTML5 drag-and-drop. `@isDraggable` makes the surface
                         draggable; `@onDrop` is separately what makes it a drop target, so dropping
                         works even with dragging switched off. }}
+                    {{! 4.6: remap or disable any keyboard gesture. }}
+                    @keybindings={{this.keybindings}}
                     @isDraggable={{this.isDraggable}}
                     @onDragStart={{this.handleDragStart}}
                     @onDragOverCell={{this.handleDragOverCell}}
@@ -2037,7 +2190,36 @@ export default class DemoGrid extends Component {
                     {{! `bounds` is grid-root-relative, and this div is a child of the grid's own
                         (positioned) container -- so the coordinates need no translation. }}
                     <div class="gdg-demo-sort-menu" role="menu" data-test-header-menu style={{this.headerMenuStyle}}>
-                        <div class="gdg-demo-sort-menu__title">Column {{this.headerMenu.col}}</div>
+                        <div class="gdg-demo-sort-menu__title">{{this.headerMenuColumnTitle}}</div>
+                        {{! 4.5b: a menu whose only item was "Close" read as a broken feature. These
+                            two are grid concerns rather than data-source ones, which is what keeps
+                            sorting (a `withColumnSort` decorator) demoed in <GlideDemo> instead. }}
+                        <button
+                            type="button"
+                            class="gdg-demo-sort-menu__item"
+                            data-test-header-menu-autosize
+                            {{on "click" this.autoSizeMenuColumn}}
+                        >
+                            Auto-size this column
+                        </button>
+                        <button
+                            type="button"
+                            class="gdg-demo-sort-menu__item"
+                            data-test-header-menu-hide
+                            {{on "click" this.hideMenuColumn}}
+                        >
+                            Hide this column
+                        </button>
+                        {{#if this.hiddenColumnTitles}}
+                            <button
+                                type="button"
+                                class="gdg-demo-sort-menu__item"
+                                data-test-header-menu-unhide
+                                {{on "click" this.unhideAllColumns}}
+                            >
+                                Show hidden ({{this.hiddenColumnTitles}})
+                            </button>
+                        {{/if}}
                         <button type="button" class="gdg-demo-sort-menu__item" {{on "click" this.closeHeaderMenu}}>
                             Close
                         </button>

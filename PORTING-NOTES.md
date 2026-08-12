@@ -5602,3 +5602,106 @@ write.
 Also: the demo's first drop handler accepted `GridCellKind.Text` only, and the full-grid demo has no
 plain text column on screen — so every drop was refused. It now accepts text, markdown and URI cells
 (anything string-backed), which is what makes the write path visible at all.
+
+## 4.6 — keybindings, nav variants, the `onSelect` hook; 4.5's Shadow DOM check (COMPLETE, browser-verified, 2026-08-13)
+
+Four items in one pass, because the first subsumes the second: porting source's keybinding DSL turns
+the "missing nav variants" into entries in a map rather than new branches.
+
+### The two new pure modules
+
+- **`rendering/is-hotkey.ts`** — source's matcher, near-verbatim. Its `HotkeyEvent` is structural, so
+  a DOM `KeyboardEvent` satisfies it directly and the controller passes `ev` unwrapped.
+- **`rendering/keybindings.ts`** — the map, its defaults, and `resolveKeybindings`.
+
+16 tests. The cases worth having are the ones a rewrite gets wrong: **exact** modifier matching (what
+stops `goDownCell` and `selectGrowDown` both firing on shift+ArrowDown), the `_68` keyCode form, the
+a–z-by-keyCode form, `any`, `|` alternatives, and `""` (a disabled binding) never matching.
+
+**Two deliberate omissions from source's map**, both because the alternative is a listed-but-dead
+arg: `downFill`/`rightFill` (this port has no keyboard fill command — the fill handle is a mouse
+gesture from 9h — and they default off upstream anyway) and `acceptOverlay*`/`closeOverlay` (the
+overlay editor owns its own `keydown` listener and never reaches this handler). Source's back-compat
+aliases (`pageUp`/`first`/…) are also skipped: they exist to avoid breaking a release this port never
+shipped.
+
+**One default differs from source, deliberately:** `search` is `true` here, `false` upstream. This
+port has had Cmd/Ctrl+F since 9e; flipping it off as a side effect of making the map configurable
+would have been a silent regression. A vitest assertion caught the mismatch between the doc comment
+and the defaults table while it was still wrong.
+
+### What the rewrite added on top of remapping
+
+Tab / shift+Tab aliasing, alt+Arrow free move, primary+shift+edge extension, and the space-bar
+row/column selects — all four were TODO's "nav variants" item, and all four are now just map entries.
+Also `PageUp`/`PageDown`, `primary+Enter` (scroll to selection) and **Escape to clear the selection**,
+none of which this port had.
+
+`adjustSelection` gained source's `±2` cases (jump-to-edge) alongside the existing `±1`, and
+`moveActiveCell` gained `freeMove`, which bypasses the selection writer exactly as source bypasses
+`setCurrent` — the point is to *not* apply the collapse-and-replace that writer encodes.
+
+### A correction to this repo's own notes
+
+The 4.6 controlled-selection work recorded that source fires `onSelectionCleared` "from exactly one
+place, its out-of-bounds mouse branch, and *not* on Escape". **That is wrong about source**: it fires
+from two (`data-editor.tsx:2054` and `:3207`, the `clear` keybinding). The claim was true of *this
+port*, which had no Escape-to-clear at all. Both call sites are now ported and the comment corrected.
+Worth noting as a pattern: a note describing this port's behaviour got written as though it described
+upstream's, and nothing caught it until the missing feature was implemented.
+
+### `cancelOnlyOnMove`, and one narrow divergence
+
+Source cancels the event on `moved || !cancelOnlyOnMove || trapFocus`, where `cancelOnlyOnMove` is
+set for **every** binding inside its `!overlayOpen` block — which includes `selectGrow*`. So upstream
+does *not* `preventDefault()` a shift+Arrow that grows a range without moving the cursor. This port
+sets the flag only for genuine cursor movement, so the grow keys are always swallowed. Reasons, in
+order: the port has cancelled them since Phase 3b (changing it is a silent regression for existing
+consumers), and an unprevented shift+Arrow lets the page scroll under the user mid-selection. The
+behaviour that matters — Tab at the last column moving focus out of the grid — is preserved exactly.
+
+### `CellRenderer.onSelect`
+
+Typed since Phase 4, called by nothing until now. Wired at source's own spot in the mousedown
+selection path (`data-editor.tsx:1917-1934`), **after** the "already this cell" early-out, so it fires
+only when the click would land somewhere new. `preventDefault()` aborts the selection change — the
+only callback in the grid that can.
+
+**The demo found the trap this hook hides.** `<DemoGrid>` swaps in a wrapped star renderer, and the
+first version filtered the array with `r.kind !== "star-cell"` — but **every `CustomRenderer` carries
+`kind: GridCellKind.Custom`**; the *cell's* `data.kind` is what names a star cell. So the filter
+removed nothing, the original renderer stayed ahead of the wrapper in `isMatch` order, and the hook
+looked unported in the browser. Swap renderers **by identity**. This is now in the cookbook, because a
+consumer overriding a shipped cell type will hit it first.
+
+### 4.5's Shadow DOM row, now actually checked
+
+`<ShadowDomDemo>` (the "Shadow DOM" tab) renders a grid into an open shadow root via `{{in-element}}`.
+Verified in the browser: `gridRoot.getRootNode() === shadowRoot`, both canvases inside it, a click
+reporting the right cell, and arrow-key nav moving the selection — so hit-testing, focus and the
+window-level listeners all work across the boundary, which is what `@eventTarget`'s `getRootNode()`
+default was reasoned to give and had never been tested.
+
+**The one real finding is styles.** The addon's stylesheets are imported from its component modules
+and therefore land in the *document* head, which a shadow boundary blocks by construction. A grid in
+a shadow root renders unstyled unless the consumer adopts them (the demo clones them in; a real app
+would use `adoptedStyleSheets`). That is a consumer responsibility and not something the addon can
+fix from inside. The measurement canvas on `document.documentElement` is fine — it is measured with an
+explicit `ctx.font`, never inherited CSS.
+
+### 4.5b — the header menu
+
+`<DemoGrid>`'s `@onHeaderMenuClick` menu had only a "Close" item, which read as a broken callback. It
+now names the column and offers auto-size (`api.remeasureColumns`) and hide/show, both *grid*
+concerns — sorting stays in `<GlideDemo>` because it is a data-source decorator. Hiding is just
+removing the column from the array: cell content is looked up by column `id`, not position, the same
+property that makes column reordering work.
+
+### Browser-testing note worth reusing
+
+Synthetic `KeyboardEvent`s are useless for verifying the keyboard until the grid has **real** focus:
+`onKeyDown` is gated on `isFocused`, which only flips on a genuine `focus` event. A `computer`-tool
+click establishes it; a dispatched `MouseEvent` does not reliably, and in a hidden tab the grid stays
+inert entirely. The working shape is: `computer` click once to focus, then either `computer` key
+presses or dispatched `KeyboardEvent`s (needed for `ctrl+space`, which macOS swallows), reading a
+`MutationObserver` log of the status row so several keys can be checked per round trip.

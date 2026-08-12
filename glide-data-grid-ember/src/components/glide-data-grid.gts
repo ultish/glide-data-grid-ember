@@ -83,6 +83,7 @@ import type {
     ScrollToParams,
     IsDraggable,
     GridDragEventArgs,
+    Keybinds,
 } from "../rendering/index.ts";
 
 /**
@@ -543,6 +544,12 @@ export interface GlideDataGridSignature {
         // *into* it. Nothing to do with `@onColumnMoved`/`@onRowMoved`, which are internal mouse
         // gestures. `@isDraggable` is what makes the surface draggable at all, and `@onDrop` is what
         // makes it a drop target; the two halves are independent.
+        /**
+         * Remap or switch off any keyboard gesture: `{ selectAll: false, goDownCell: "ctrl+j" }`.
+         * Anything omitted keeps its default. Same string syntax as source, so a React `keybindings`
+         * map transfers unchanged — see `GridHostArgs.keybindings` and `ConfigurableKeybinds`.
+         */
+        keybindings?: Partial<Keybinds>;
         /** `true`, or `"cell"`/`"header"` to restrict which band a drag may start from. See
          *  `GridHostArgs.isDraggable`. */
         isDraggable?: IsDraggable;
@@ -755,6 +762,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onHeaderClicked: this.args.onHeaderClicked,
         onGroupHeaderClicked: this.args.onGroupHeaderClicked,
         onGroupHeaderRenamed: this.args.onGroupHeaderRenamed,
+        keybindings: this.args.keybindings,
         isDraggable: this.args.isDraggable,
         onDragStart: this.args.onDragStart,
         onDragOverCell: this.args.onDragOverCell,

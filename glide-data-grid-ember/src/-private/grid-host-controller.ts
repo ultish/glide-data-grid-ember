@@ -113,6 +113,8 @@ import type {
     CellActivationBehavior,
     GridDragEventArgs,
 } from "../rendering/index.ts";
+import { isHotkey, type HotkeyResultDetails } from "../rendering/is-hotkey.ts";
+import { resolveKeybindings, type Keybinds, type RealizedKeybinds } from "../rendering/keybindings.ts";
 import {
     canDragFrom,
     dragKindForHit,
@@ -454,9 +456,13 @@ export interface GridHostArgs {
      * The user cleared the selection by clicking **outside the grid's content** — past the last row
      * or column, on no cell at all. Fires in addition to {@link onSelectionChanged}.
      *
-     * Read the guard, not the name: source fires this from exactly one place, its out-of-bounds
-     * mouse branch (`data-editor.tsx:2051-2054`), and *not* on the many other ways a selection ends
-     * up empty (Escape, a delete, a programmatic clear). Reproduced as narrowly as that.
+     * Read the guard, not the name: source fires this from exactly **two** places -- its
+     * out-of-bounds mouse branch (`data-editor.tsx:2051-2054`) and its `clear` keybinding, i.e.
+     * Escape (`:3206-3207`) -- and *not* on the other ways a selection ends up empty (a delete, a
+     * programmatic clear). Reproduced as narrowly as that.
+     *
+     * **Corrected in 4.6.** This comment previously said "one place... not Escape", which described
+     * this port before Escape-to-clear existed, not upstream. Both call sites are now ported.
      */
     readonly onSelectionCleared?: () => void;
     /** @defaultValue "multi" */
@@ -996,6 +1002,23 @@ export interface GridHostArgs {
      * payload comes from, and a drag with no payload is cancelled before it begins.
      * @defaultValue false
      */
+    /**
+     * Remap or disable any keyboard gesture. Each entry takes `true` (keep the default), `false`
+     * (switch the gesture off entirely) or a hotkey string such as `"ctrl+shift+k"`; anything left
+     * out keeps its default. Source's `keybindings`, with the same string syntax, so a map written
+     * for the React grid transfers unchanged.
+     *
+     * ```js
+     * keybindings = { selectAll: false, goDownCell: "ctrl+j", search: "primary+shift+f" };
+     * ```
+     *
+     * See `ConfigurableKeybinds` for the full list and every default. Two notes: `search` defaults
+     * to **on** here where source defaults it off, and source's `downFill`/`rightFill` and
+     * `acceptOverlay*` entries are absent because this port has nothing for them to bind to — see
+     * that file's header.
+     */
+    readonly keybindings?: Partial<Keybinds>;
+
     readonly isDraggable?: IsDraggable;
 
     /**
@@ -1287,6 +1310,7 @@ interface ResolvedGridHostArgs {
     readonly onHeaderClicked: ((colIndex: number, event: HeaderClickedEventArgs) => void) | undefined;
     readonly onGroupHeaderClicked: ((colIndex: number, event: GroupHeaderClickedEventArgs) => void) | undefined;
     readonly onGroupHeaderRenamed: ((groupName: string, newValue: string) => void) | undefined;
+    readonly keybindings: Partial<Keybinds> | undefined;
     readonly isDraggable: IsDraggable | undefined;
     readonly onDragStart: ((args: GridDragEventArgs) => void) | undefined;
     readonly onDragOverCell: ((cell: Item, dataTransfer: DataTransfer | null) => void) | undefined;
@@ -2211,6 +2235,7 @@ export class GridHostController {
             onHeaderClicked: args.onHeaderClicked,
             onGroupHeaderClicked: args.onGroupHeaderClicked,
             onGroupHeaderRenamed: args.onGroupHeaderRenamed,
+            keybindings: args.keybindings,
             isDraggable: args.isDraggable,
             onDragStart: args.onDragStart,
             onDragOverCell: args.onDragOverCell,
@@ -3925,6 +3950,35 @@ export class GridHostController {
         return [hit.location[0] - args.rowMarkerOffset, hit.location[1]];
     }
 
+    /**
+     * 4.6: runs the clicked cell renderer's `onSelect` hook. Returns `true` if it called
+     * `preventDefault()`, in which case the caller abandons the selection change.
+     *
+     * `mangledLocation` is mangled (it comes from `hit.location`); the hook is handed the *cell*
+     * rather than a location, matching source, so the marker column never reaches it -- the caller's
+     * row-marker branch has already returned by this point.
+     */
+    private emitRendererSelect(args: ResolvedGridHostArgs, hit: MouseHit, mangledLocation: Item): boolean {
+        const cell = this.mangledGetCellContent(args)(mangledLocation);
+        const renderer = args.getCellRenderer(cell);
+        if (renderer?.onSelect === undefined) return false;
+
+        const bounds = this.computeCellRect(args, mangledLocation[0], mangledLocation[1]);
+        let prevented = false;
+        renderer.onSelect({
+            ...this.clickEventBase(hit),
+            cell,
+            posX: hit.localX - bounds.x,
+            posY: hit.localY - bounds.y,
+            bounds,
+            theme: this.themeForCell(args, cell as GridCell, mangledLocation[0], mangledLocation[1]),
+            preventDefault: () => {
+                prevented = true;
+            },
+        });
+        return prevented;
+    }
+
     // --- Phase 9g: click notifications ------------------------------------------------------------
     //
     // All three fire from `onMouseUp`, gated on the mouseup landing on the same target as the
@@ -4975,6 +5029,17 @@ export class GridHostController {
             return;
         }
 
+        // 4.6: the renderer's `onSelect` hook. Typed since Phase 4 and called by nothing until now,
+        // which meant a custom cell could not refuse or intercept its own selection.
+        //
+        // **Read the guards, not the name** (`data-editor.tsx:1917-1934`): it fires only when the
+        // click lands on a *different* cell than the current one -- hence its position after the
+        // early-out above, which is source's -- and only from the mousedown selection path. It is
+        // not a click notification (`onClick` is, and runs on mouseup); its one power is that
+        // `preventDefault()` aborts the selection change entirely, which no consumer-facing callback
+        // in this grid can do.
+        if (this.emitRendererSelect(args, hit, [col, row])) return;
+
         if (hit.shiftKey && cellCol !== undefined && cellRow !== undefined && current !== undefined) {
             const left = Math.min(col, cellCol);
             const right = Math.max(col, cellCol);
@@ -5857,19 +5922,25 @@ export class GridHostController {
         return mangleSelection(asConsumerSelection(result), args.rowMarkerOffset);
     }
 
-    // --- keyboard nav (Phase 3b) -----------------------------------------------------------------
-    // Port of the relevant subset of source's `handleFixedKeybindings`/`updateSelectedCell`/
-    // `adjustSelection` (`data-editor.tsx`, see PORTING-NOTES.md for exact line references). Not
-    // ported: source's generic `keybindings` DSL (`is-hotkey.ts`)/`ConfigurableKeybinds` -- this
-    // handler matches the *default* keybindings directly rather than reimplementing the whole
-    // string-based hotkey matcher, since no consumer of this port has a need to remap keys yet.
-    // Also not ported: Tab/Shift+Tab nav aliasing, alt+arrow "free move" (retains a multi-cell
-    // selection while moving the anchor -- meaningless without span/editor support), cell
-    // activation (Enter/Space/printable-char -- Phase 4, no cell editors exist), copy/cut/paste
-    // (Phase 3c, native clipboard events not keydown), row/column space/ctrl+space select
-    // shortcuts, primary+shift+Arrow/Home/End "jump and extend" (source's own
-    // `selectToFirst/LastRow/Column/Cell` keybinds) -- only bare shift+Arrow grow/shrink (item 2 of
-    // the phase brief) is ported.
+    // --- keyboard nav + the configurable keybinding map (Phase 3b; 4.6) ---------------------------
+    //
+    // Port of source's `handleFixedKeybindings` (`data-editor.tsx:3188-3452`) and the tail of its
+    // `onKeyDown`. Every gesture below is looked up through `rendering/keybindings.ts` and matched
+    // by `rendering/is-hotkey.ts`, so all of them are remappable through `@keybindings` — which is
+    // what 4.6 added. Before that this handler matched the default keys inline, and Tab, alt+Arrow,
+    // primary+shift+edge and the space-bar row/column selects were simply absent.
+    //
+    // **The if/else chain's order is load-bearing and is source's**, not tidied. Two examples that
+    // look arbitrary and are not: `selectColumn`/`selectRow` (ctrl+space / shift+space) are tested
+    // before `activateCell` (whose default includes a bare space), and `goToFirstColumn` ("Home")
+    // is tested after the four `go*Cell` moves so a rebinding cannot shadow plain arrow nav.
+    //
+    // Still not ported, and each for a reason source's own map makes visible:
+    //   - `downFill`/`rightFill` — no keyboard fill command exists here (the fill handle is a mouse
+    //     gesture, 9h), and they default to *off* upstream, so nothing is missing by default.
+    //   - `acceptOverlay*`/`closeOverlay` — the overlay editor owns its own `keydown` listener and
+    //     never reaches this handler (see the early-out below).
+    //   - Row-grouping nav (`rowGroupingNavBehavior`) — §4.1, not ported at all yet.
     private readonly onKeyDown = (ev: KeyboardEvent): void => {
         if (this.destroyed || !this.isFocused) return;
         // While the overlay editor is open, its own container-level `keydown` listener (registered
@@ -5878,178 +5949,277 @@ export class GridHostController {
         // bubble through untouched, not be reinterpreted as grid navigation/select-all/etc below.
         if (this.overlayState !== undefined) return;
 
-        const primary = browserIsOSX.value ? ev.metaKey : ev.ctrlKey;
-
-        // Ctrl(Cmd)+A: select all. Works even with no `selection.current` yet (mirrors source,
-        // which computes `gridSelection.current?.cell ?? [rowMarkerOffset, 0]`), so this check runs
-        // before the "no current cell -> no-op" guard below that gates every other key.
-        if (primary && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "a") {
-            this.selectAll(this.resolveArgs());
+        const args = this.resolveArgs();
+        const keys = this.resolvedKeybindings(args);
+        // Source threads one `details` object through every `isHotkey` call in a keydown and reads
+        // `didMatch` at the end to decide whether to cancel the event. The flag latches on the
+        // first match, so the reads below are "did anything at all handle this key".
+        const details: HotkeyResultDetails = { didMatch: false };
+        const hk = (binding: string): boolean => isHotkey(binding, ev, details);
+        const cancel = (): void => {
             ev.preventDefault();
             ev.stopPropagation();
-            return;
-        }
+        };
 
-        // Ctrl(Cmd)+F: toggle search (Phase 9e). Mirrors source's `keys.search` binding, which
-        // opens but does not close; closing on a second press is this port's own small addition,
-        // since without a bar on screen there would otherwise be no way back out via the keyboard.
-        // Placed with select-all, above the "no current cell" guard, for the same reason: search
-        // must work on a grid nothing has been clicked in yet.
-        if (primary && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "f") {
-            if (this.searchIsOpen(this.resolveArgs())) {
+        // --- bindings that work with nothing selected ---------------------------------------------
+        // Source runs this block before its `gridSelection.current === undefined` early-out, so
+        // select-all and search work on a grid that has never been clicked in.
+        if (hk(keys.clear)) {
+            // 4.6: Escape clears the selection, and fires `@onSelectionCleared` — source does both
+            // in this branch (`data-editor.tsx:3206-3209`). This port had no Escape-to-clear at all
+            // before 4.6, which is why an earlier note in TODO.md described `@onSelectionCleared` as
+            // "the out-of-bounds click only": that was true of this port, not of upstream.
+            this.clearSelection();
+            args.onSelectionCleared?.();
+        } else if (hk(keys.selectAll)) {
+            this.selectAll(args);
+        } else if (hk(keys.search)) {
+            // Toggling (rather than only opening, as source does) is this port's own 9e addition:
+            // with no search bar of source's on screen there would otherwise be no keyboard way out.
+            if (this.searchIsOpen(args)) {
                 this.closeSearch();
             } else {
                 this.openSearch();
             }
-            ev.preventDefault();
-            ev.stopPropagation();
+        } else if (hk(keys.delete)) {
+            this.deleteSelection(args);
+        }
+
+        if (details.didMatch) {
+            cancel();
             return;
         }
 
-        // Escape closes search when it is open and no overlay editor has claimed the key (the
-        // early-out above already returned in that case).
-        if (ev.key === "Escape" && this.searchIsOpen(this.resolveArgs())) {
+        // Escape with the search bar open closes it. Deliberately *after* `keys.clear` (which is
+        // `any+Escape` by default and therefore claims the key first): a consumer who rebinds or
+        // disables `clear` gets this back, and with the default binding the selection clear above
+        // already returned.
+        if (ev.key === "Escape" && this.searchIsOpen(args)) {
             this.closeSearch();
-            ev.preventDefault();
-            ev.stopPropagation();
+            cancel();
             return;
         }
 
-        // Cell activation (Phase 4a) -- Enter, Delete/Backspace, and type-to-overwrite. All three
-        // are no-ops with nothing selected, mirroring source's early-outs for the same keys.
-        const activationArgs = this.resolveArgs();
-        // `activateCell`/`mangledGetCellContent` both work in the render engine's column space.
-        const activationCurrent = this.mangledSelection(activationArgs).current;
-        if (activationCurrent !== undefined) {
-            const mangledLocation = activationCurrent.cell;
-
-            if (ev.key === "Enter" && !primary && !ev.altKey) {
-                const cellContent = this.mangledGetCellContent(activationArgs)(mangledLocation);
-                this.activateCell(activationArgs, mangledLocation, cellContent, {
-                    highlight: true,
-                    activation: { inputType: "keyboard", key: ev.key },
-                });
-                ev.preventDefault();
-                ev.stopPropagation();
-                return;
-            }
-
-            if (ev.key === "Delete" || ev.key === "Backspace") {
-                this.deleteSelection(activationArgs);
-                ev.preventDefault();
-                ev.stopPropagation();
-                return;
-            }
-
-            // Type-to-overwrite: mirrors source's `editOnType` (`data-editor.tsx:3505-3524`) --
-            // any single printable character, no modifiers, immediately opens the overlay seeded
-            // with that character instead of the cell's existing content.
-            if (
-                activationArgs.editOnType &&
-                !primary &&
-                !ev.metaKey &&
-                ev.key.length === 1 &&
-                PRINTABLE_CHAR_RE.test(ev.key) &&
-                mangledLocation[1] >= 0
-            ) {
-                const cellContent = this.mangledGetCellContent(activationArgs)(mangledLocation);
-                if (!isInnerOnlyCellKind(cellContent.kind) && isReadWriteCell(cellContent as GridCell)) {
-                    this.activateCell(activationArgs, mangledLocation, cellContent, {
-                        highlight: false,
-                        initialValue: ev.key,
-                        activation: { inputType: "keyboard", key: ev.key },
-                    });
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    return;
-                }
-            }
-        }
-
-        const isArrow =
-            ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight";
-        const isHome = ev.key === "Home";
-        const isEnd = ev.key === "End";
-        if (!isArrow && !isHome && !isEnd) return;
-        // alt+Arrow ("retain selection" free move, source's `go*CellRetainSelection`) is not
-        // ported -- meaningless without span/editor support in this port yet -- so let the browser
-        // default run rather than half-implement it.
-        if (ev.altKey) return;
-        // Mirrors source's `if (gridSelection.current === undefined) return false;` early-out --
-        // every nav key below is a no-op with nothing selected yet.
-        const args = this.resolveArgs();
-        // Mangled: every `targetCol` below is clamped against `args.rowMarkerOffset` /
-        // `mappedColumns.length` and handed to `moveActiveCell`, all of which are mangled space.
+        // --- everything below needs a current cell ------------------------------------------------
+        // Mangled space throughout: `moveActiveCell`, `adjustSelection` and the selection writers
+        // all work in the render engine's column space.
         const navCurrent = this.mangledSelection(args).current;
         if (navCurrent === undefined) return;
-        const [col, row] = navCurrent.cell;
+        let [col, row] = navCurrent.cell;
+        // `freeMove` keeps the existing range instead of collapsing it, pushing it onto the range
+        // stack — source's alt+Arrow (`updateSelectedCell(..., freeMove)`, `data-editor.tsx:3034`).
+        let freeMove = false;
 
-        if (primary && ev.shiftKey) {
-            // primary+shift+Arrow/Home/End ("jump and extend selection to an edge") not ported --
-            // out of scope per the phase brief, which only asks for bare shift+Arrow grow/shrink.
-            return;
-        }
-
-        if (ev.shiftKey) {
-            if (!isArrow) return; // shift+Home/End "extend to edge" not ported
-            if (args.rangeSelect !== "rect" && args.rangeSelect !== "multi-rect") return;
-            const dx: -1 | 0 | 1 = ev.key === "ArrowLeft" ? -1 : ev.key === "ArrowRight" ? 1 : 0;
-            const dy: -1 | 0 | 1 = ev.key === "ArrowUp" ? -1 : ev.key === "ArrowDown" ? 1 : 0;
-            this.adjustSelection(args, dx, dy);
-            ev.preventDefault();
-            ev.stopPropagation();
-            return;
-        }
-
-        let targetCol = col;
-        let targetRow = row;
-        if (primary) {
-            // Ctrl(Cmd)+Home/End: jump to first/last cell in the whole grid. Ctrl(Cmd)+Arrow: jump
-            // to first/last row (up/down) or column (left/right) only.
-            if (isHome) {
-                targetCol = args.rowMarkerOffset;
-                targetRow = 0;
-            } else if (isEnd) {
-                targetCol = Number.MAX_SAFE_INTEGER;
-                // Ctrl(Cmd)+End reaches the trailing blank row when shown (source's
-                // `updateSelectedCell` clamps to `mangledRows - 1`, `data-editor.tsx:3026` -- Ctrl+
-                // ArrowDown below deliberately does NOT, see its own comment).
-                targetRow = this.effectiveRows(args) - 1;
-            } else if (ev.key === "ArrowUp") {
-                targetRow = 0;
-            } else if (ev.key === "ArrowDown") {
-                // Ctrl(Cmd)+ArrowDown ("go to last row") deliberately excludes the trailing blank
-                // row -- mirrors source's `goToLastRow` setting `row = rows - 1` (the real, non-
-                // mangled row count; `data-editor.tsx:3353-3354`), distinct from Ctrl+End above.
-                targetRow = args.rows - 1;
-            } else if (ev.key === "ArrowLeft") {
-                targetCol = args.rowMarkerOffset;
-            } else if (ev.key === "ArrowRight") {
-                targetCol = Number.MAX_SAFE_INTEGER;
+        if (hk(keys.scrollToSelectedCell)) {
+            this.scrollCellIntoView(args, col, row);
+        } else if (args.columnSelect !== "none" && hk(keys.selectColumn)) {
+            this.toggleColumnSelectionFromKeyboard(args, col);
+        } else if (args.rowSelect !== "none" && hk(keys.selectRow)) {
+            this.toggleRowSelectionFromKeyboard(args, row);
+        } else if (hk(keys.activateCell)) {
+            const cellContent = this.mangledGetCellContent(args)([col, row]);
+            this.activateCell(args, [col, row], cellContent, {
+                highlight: true,
+                activation: { inputType: "keyboard", key: ev.key },
+            });
+        } else if (hk(keys.goToNextPage)) {
+            // "partial cell accounting" is source's own comment on the -4 (`data-editor.tsx:3319`).
+            row += Math.max(1, (this.lastVisibleRegion?.height ?? 1) - 4);
+        } else if (hk(keys.goToPreviousPage)) {
+            row -= Math.max(1, (this.lastVisibleRegion?.height ?? 1) - 4);
+        } else if (hk(keys.goToFirstCell)) {
+            row = 0;
+            col = 0;
+        } else if (hk(keys.goToLastCell)) {
+            row = Number.MAX_SAFE_INTEGER;
+            col = Number.MAX_SAFE_INTEGER;
+        } else if (hk(keys.selectToFirstCell)) {
+            this.adjustSelection(args, -2, -2);
+        } else if (hk(keys.selectToLastCell)) {
+            this.adjustSelection(args, 2, 2);
+        } else if (hk(keys.goDownCell)) {
+            row += 1;
+        } else if (hk(keys.goUpCell)) {
+            row -= 1;
+        } else if (hk(keys.goRightCell)) {
+            col += 1;
+        } else if (hk(keys.goLeftCell)) {
+            col -= 1;
+        } else if (hk(keys.goDownCellRetainSelection)) {
+            row += 1;
+            freeMove = true;
+        } else if (hk(keys.goUpCellRetainSelection)) {
+            row -= 1;
+            freeMove = true;
+        } else if (hk(keys.goRightCellRetainSelection)) {
+            col += 1;
+            freeMove = true;
+        } else if (hk(keys.goLeftCellRetainSelection)) {
+            col -= 1;
+            freeMove = true;
+        } else if (hk(keys.goToLastRow)) {
+            // Deliberately excludes the trailing blank row -- source sets `row = rows - 1` with the
+            // real row count (`data-editor.tsx:3357`), where `goToLastCell` above clamps against the
+            // mangled count and therefore *can* land on it.
+            row = args.rows - 1;
+        } else if (hk(keys.goToFirstRow)) {
+            row = Number.MIN_SAFE_INTEGER;
+        } else if (hk(keys.goToLastColumn)) {
+            col = Number.MAX_SAFE_INTEGER;
+        } else if (hk(keys.goToFirstColumn)) {
+            col = Number.MIN_SAFE_INTEGER;
+        } else if (args.rangeSelect === "rect" || args.rangeSelect === "multi-rect") {
+            if (hk(keys.selectGrowDown)) {
+                this.adjustSelection(args, 0, 1);
+            } else if (hk(keys.selectGrowUp)) {
+                this.adjustSelection(args, 0, -1);
+            } else if (hk(keys.selectGrowRight)) {
+                this.adjustSelection(args, 1, 0);
+            } else if (hk(keys.selectGrowLeft)) {
+                this.adjustSelection(args, -1, 0);
+            } else if (hk(keys.selectToLastRow)) {
+                this.adjustSelection(args, 0, 2);
+            } else if (hk(keys.selectToFirstRow)) {
+                this.adjustSelection(args, 0, -2);
+            } else if (hk(keys.selectToLastColumn)) {
+                this.adjustSelection(args, 2, 0);
+            } else if (hk(keys.selectToFirstColumn)) {
+                this.adjustSelection(args, -2, 0);
             }
-        } else if (isHome) {
-            targetCol = args.rowMarkerOffset;
-        } else if (isEnd) {
-            targetCol = Number.MAX_SAFE_INTEGER;
-        } else if (ev.key === "ArrowUp") {
-            targetRow = row - 1;
-        } else if (ev.key === "ArrowDown") {
-            targetRow = row + 1;
-        } else if (ev.key === "ArrowLeft") {
-            targetCol = col - 1;
-        } else if (ev.key === "ArrowRight") {
-            targetCol = col + 1;
         }
 
-        const moved = this.moveActiveCell(args, targetCol, targetRow);
-        // Mirrors source's `moved || !cancelOnlyOnMove || trapFocus` gate -- an already-at-the-edge
-        // nav key is left alone (not prevented) rather than swallowed, so focus can tab out of the
-        // grid, unless `trapFocus` says otherwise.
-        if (moved || args.trapFocus) {
-            ev.preventDefault();
-            ev.stopPropagation();
+        if (details.didMatch) {
+            // Source's `cancelOnlyOnMove`, which exists so a nav key that hits a wall is left
+            // *unprevented* and focus can Tab out of the grid. It is true exactly when a movement
+            // binding matched, which here is "the target cell expression changed" -- a move into a
+            // wall still counts, and `moved` is what decides afterwards.
+            const wantsMove = col !== navCurrent.cell[0] || row !== navCurrent.cell[1];
+            const moved = wantsMove && this.moveActiveCell(args, col, row, freeMove);
+
+            if (moved || !wantsMove || args.trapFocus) {
+                cancel();
+            }
+            return;
+        }
+
+        // --- type-to-overwrite --------------------------------------------------------------------
+        // Not a keybinding: any printable character opens the editor seeded with it. Source keeps it
+        // outside the map too, in `onKeyDown` after `handleFixedKeybindings` returns false
+        // (`data-editor.tsx:3505-3524`). It runs last precisely so a bound key wins over it.
+        const primary = browserIsOSX.value ? ev.metaKey : ev.ctrlKey;
+        if (
+            args.editOnType &&
+            !primary &&
+            !ev.metaKey &&
+            ev.key.length === 1 &&
+            PRINTABLE_CHAR_RE.test(ev.key) &&
+            row >= 0
+        ) {
+            const cellContent = this.mangledGetCellContent(args)([col, row]);
+            if (!isInnerOnlyCellKind(cellContent.kind) && isReadWriteCell(cellContent as GridCell)) {
+                this.activateCell(args, [col, row], cellContent, {
+                    highlight: false,
+                    initialValue: ev.key,
+                    activation: { inputType: "keyboard", key: ev.key },
+                });
+                cancel();
+            }
         }
     };
+
+    /**
+     * 4.6: the realized keybinding map, memoized on the consumer's `@keybindings` object.
+     *
+     * Read once per keydown rather than per draw, so it is not one of `computeCanBlit`'s
+     * identity-compared fields — but realizing 34 bindings on every keypress would still be waste,
+     * and a consumer passing an inline hash gets a new object each render, so the cache is keyed on
+     * identity with a rebuild when it changes.
+     */
+    private keybindingsCache:
+        { readonly src: Partial<Keybinds> | undefined; readonly value: RealizedKeybinds } | undefined;
+
+    private resolvedKeybindings(args: ResolvedGridHostArgs): RealizedKeybinds {
+        const cached = this.keybindingsCache;
+        if (cached !== undefined && cached.src === args.keybindings) return cached.value;
+        const value = resolveKeybindings(args.keybindings);
+        this.keybindingsCache = { src: args.keybindings, value };
+        return value;
+    }
+
+    /**
+     * ctrl+space. Port of source's `keys.selectColumn` branch (`data-editor.tsx:3278-3288`), which
+     * is deliberately simpler than the mouse path: no shift-range, no `lastSelectedCol` tracking —
+     * it toggles the current cell's column and nothing else.
+     */
+    private toggleColumnSelectionFromKeyboard(args: ResolvedGridHostArgs, mangledCol: number): void {
+        const selected = this.mangledSelection(args).columns;
+        if (selected.hasIndex(mangledCol)) {
+            this.applyMangledSelection(
+                args,
+                writerSetSelectedColumns(
+                    this.mangledSelection(args),
+                    selected.remove(mangledCol),
+                    undefined,
+                    true,
+                    this.selectionOptions(args)
+                )
+            );
+        } else if (args.columnSelect === "single") {
+            this.applyMangledSelection(
+                args,
+                writerSetSelectedColumns(
+                    this.mangledSelection(args),
+                    CompactSelection.fromSingleSelection(mangledCol),
+                    undefined,
+                    true,
+                    this.selectionOptions(args)
+                )
+            );
+        } else {
+            this.applyMangledSelection(
+                args,
+                writerSetSelectedColumns(
+                    this.mangledSelection(args),
+                    undefined,
+                    mangledCol,
+                    true,
+                    this.selectionOptions(args)
+                )
+            );
+        }
+    }
+
+    /** shift+space. Source's `keys.selectRow` branch (`data-editor.tsx:3289-3299`). Row selection
+     *  carries no column coordinate, so this one stays in consumer space, like the mouse path. */
+    private toggleRowSelectionFromKeyboard(args: ResolvedGridHostArgs, row: number): void {
+        const selected = this.selection.rows;
+        if (selected.hasIndex(row)) {
+            this.applySelection(
+                writerSetSelectedRows(
+                    this.selection,
+                    selected.remove(row),
+                    undefined,
+                    true,
+                    this.selectionOptions(args)
+                )
+            );
+        } else if (args.rowSelect === "single") {
+            this.applySelection(
+                writerSetSelectedRows(
+                    this.selection,
+                    CompactSelection.fromSingleSelection(row),
+                    undefined,
+                    true,
+                    this.selectionOptions(args)
+                )
+            );
+        } else {
+            this.applySelection(
+                writerSetSelectedRows(this.selection, undefined, row, true, this.selectionOptions(args))
+            );
+        }
+        this.lastSelectedRow = row;
+    }
 
     // Port of `updateSelectedCell`'s core (clamp + no-op-if-unchanged + `setCurrent(..., "keyboard-nav")`
     // + scroll-into-view), minus the `freeMove`/`lastSent` concerns that don't apply to this port
@@ -6059,7 +6229,15 @@ export class GridHostController {
     // own `targetRow` above) can reach the trailing blank row -- mirrors source's
     // `updateSelectedCell`'s `rowMax = mangledRows - (fromEditingTrailingRow ? 0 : 1)`
     // (`data-editor.tsx:3026`, the common non-`fromEditingTrailingRow` case).
-    private moveActiveCell(args: ResolvedGridHostArgs, colIn: number, rowIn: number): boolean {
+    private moveActiveCell(
+        args: ResolvedGridHostArgs,
+        colIn: number,
+        rowIn: number,
+        /** 4.6: alt+Arrow. Keep whatever is selected and start a new 1x1 range at the moved cursor,
+         *  pushing the old range onto the range stack -- source's `freeMove`
+         *  (`data-editor.tsx:3034-3049`). Requires a multi-cell range to have anything to keep. */
+        freeMove = false
+    ): boolean {
         const { mappedColumns } = this.computeMangledLayout(args);
         const minCol = args.rowMarkerOffset;
         const maxCol = mappedColumns.length - 1;
@@ -6071,6 +6249,26 @@ export class GridHostController {
         const mangledSelection = this.mangledSelection(args);
         const current = mangledSelection.current;
         if (current !== undefined && current.cell[0] === col && current.cell[1] === row) return false;
+
+        if (freeMove && current !== undefined) {
+            // Deliberately bypasses `setCurrentSelection`, exactly as source bypasses `setCurrent`
+            // here: the whole point is to *not* apply the collapse-and-replace behaviour that writer
+            // encodes. Only a range worth keeping is stacked -- a 1x1 range would just accumulate.
+            const rangeStack =
+                current.range.width > 1 || current.range.height > 1
+                    ? [...current.rangeStack, current.range]
+                    : [...current.rangeStack];
+            this.applyMangledSelection(args, {
+                ...mangledSelection,
+                current: {
+                    cell: [col, row],
+                    range: { x: col, y: row, width: 1, height: 1 },
+                    rangeStack,
+                },
+            });
+            this.scrollCellIntoView(args, col, row);
+            return true;
+        }
 
         const result = setCurrentSelection(
             mangledSelection,
@@ -6085,14 +6283,14 @@ export class GridHostController {
         return true;
     }
 
-    // Port of `adjustSelection`'s core motion logic (the `y !== 0`/`x !== 0` "motion up/down/left/right"
-    // cases only -- case `2`/`-2`, "jump to end/start", is source's primary+shift+Home/End/Arrow,
-    // deliberately not ported, see `onKeyDown` above) and the span-skipping (`disallowed`/
-    // `getCellsForSelection`) logic, which has no meaning without span support (not ported anywhere
-    // in this port yet). Grows/shrinks the range on the edge opposite the anchor cell
+    // Port of `adjustSelection`'s motion logic. `+/-1` is "motion up/down/left/right" (shift+Arrow)
+    // and `+/-2` is "jump to the edge" (primary+shift+Arrow/Home/End), added in 4.6 -- both are
+    // source's, with its case numbering kept so the two files read side by side. Not ported: the
+    // span-skipping (`disallowed`/`getSpanStops`), which has no meaning without span support.
+    // Grows/shrinks the range on the edge opposite the anchor cell
     // (`selection.current.cell`); shrinks back in on the near edge once the far edge has retreated
     // past the anchor. Exactly one of `dx`/`dy` is non-zero per call (a single arrow keypress).
-    private adjustSelection(args: ResolvedGridHostArgs, dx: -1 | 0 | 1, dy: -1 | 0 | 1): void {
+    private adjustSelection(args: ResolvedGridHostArgs, dx: -2 | -1 | 0 | 1 | 2, dy: -2 | -1 | 0 | 1 | 2): void {
         // Mangled: the column clamps below are `args.rowMarkerOffset` and `mappedColumns.length`,
         // and `scrollCellIntoView` takes a mangled column.
         const mangledSelection = this.mangledSelection(args);
@@ -6110,7 +6308,15 @@ export class GridHostController {
         const maxColExclusive = mappedColumns.length;
         const maxRowExclusive = args.rows;
 
-        if (dy === 1) {
+        if (dy === 2) {
+            // jump to the last row: the range becomes anchor..end
+            bottom = maxRowExclusive;
+            top = row;
+        } else if (dy === -2) {
+            // jump to the first row: start..anchor, inclusive of the anchor
+            top = 0;
+            bottom = row + 1;
+        } else if (dy === 1) {
             // motion down
             if (top < row) {
                 top++;
@@ -6126,7 +6332,16 @@ export class GridHostController {
             }
         }
 
-        if (dx === 1) {
+        if (dx === 2) {
+            // jump to the last column
+            right = maxColExclusive;
+            left = col;
+        } else if (dx === -2) {
+            // jump to the first real column -- `minCol`, not 0, so the row-marker column can never
+            // end up inside a selection (source uses `rowMarkerOffset` here for the same reason).
+            left = minCol;
+            right = col + 1;
+        } else if (dx === 1) {
             // motion right
             if (left < col) {
                 left++;
@@ -6154,8 +6369,8 @@ export class GridHostController {
 
         // Scroll the edge that actually moved into view (mirrors source's per-branch `scrollTo`
         // calls in `adjustSelection`), not the anchor cell.
-        const edgeCol = dx === 1 ? right - 1 : dx === -1 ? left : col;
-        const edgeRow = dy === 1 ? bottom - 1 : dy === -1 ? top : row;
+        const edgeCol = dx > 0 ? right - 1 : dx < 0 ? left : col;
+        const edgeRow = dy > 0 ? bottom - 1 : dy < 0 ? top : row;
         this.scrollCellIntoView(args, edgeCol, edgeRow);
     }
 
