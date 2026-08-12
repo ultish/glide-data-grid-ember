@@ -5102,3 +5102,47 @@ Three, and the middle one cost real time:
 3. Clipboard paths are gated on the controller's `isFocused`, which never becomes true while the OS
    window is unfocused. `root.dispatchEvent(new FocusEvent("focus"))` sets it and unblocks copy/paste
    testing.
+
+## 4.5 — scroll shadows and overscroll (COMPLETE, browser-verified, 2026-08-12)
+
+### Scroll shadows (`@fixedShadowX` / `@fixedShadowY`, both default `true`)
+
+The depth cue under the frozen columns' right edge and under the header. **Not canvas drawing** —
+source builds two absolutely-positioned divs with an inset `box-shadow` and animates only their
+opacity (`data-grid.tsx:1878-1918`), and this port does the same for a reason worth stating: the
+canvas has a blit fast path that reuses the previous frame, and a shadow whose opacity tracks the
+scroll offset would invalidate it on every single frame. The divs live in `.dvn-underlay`, are
+`pointer-events: none`, and are deliberately **not** in `gridSurfaces` (they must never be treated as
+a click origin). `updateScrollShadows` runs from `runDraw` and compares a serialized state string
+first, so a scroll frame at full opacity writes no DOM at all.
+
+Two of source's expressions are kept verbatim and look wrong on their own:
+
+- `opacityY` uses a hardcoded `32` as the row height (`data-grid.tsx:1881`), not the real one. It
+  only controls how fast the shadow fades in over the first few rows.
+- `opacityX` is gated on `freezeColumns !== 0`, where `freezeColumns` is the **mangled** count — so a
+  row-marker column casts a shadow on its own, as upstream, where the marker is folded into the
+  frozen count before this runs.
+
+The port has no CSS transition on the opacity because source only adds one when smooth scrolling is
+*off*, and this port always smooth-scrolls (TODO.md 3.1).
+
+### `@overscrollX` / `@overscrollY`
+
+Pure scroll extent, added in `rebuildScrollContent` where source adds it
+(`scrolling-data-grid.tsx:105,115`) — X clamped at zero, Y not, matched rather than tidied. Also
+threaded through `remAdjustDimensions`, which had carried a "add them here when they land" note since
+9g; the one divergence is that an absent value stays `undefined` instead of becoming `0`, so the
+scroll-extent code has one case to test rather than two.
+
+Browser-verified together: scrollWidth 8657 -> 8857 and scrollHeight 6800106 -> 6800306 with
+`overscroll: 200`, and both shadow opacities 0 -> 1 on scroll, with `left: 48px` (the row-marker
+sticky width) and `top: 72px` (the total header height).
+
+### `preventDiagonalScrolling` — deliberately NOT ported
+
+Its guard is `hasTouches && ... && preventDiagonalScrolling` (`infinite-scroller.tsx:215-225`): the
+axis lock only ever engages during a **touch** scroll. Touch is deferred (9c), so `hasTouches` is
+permanently false in this port and the arg could never do anything. This is the "read the guard
+conditions, not the prop declaration" rule paying for itself — the prop's name and type suggest a
+general-purpose scroll lock. Recorded as WON'T PORT in TODO.md rather than silently skipped.

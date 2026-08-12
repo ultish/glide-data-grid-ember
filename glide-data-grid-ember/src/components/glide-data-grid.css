@@ -45,6 +45,29 @@
     outline: none;
 }
 
+/* Scroll shadows (4.5) -- the depth cue under the frozen columns' right edge and under the header,
+   fading in as the grid scrolls away from each. Ported from the inline styles source builds in
+   `data-grid.tsx`'s `stickyShadow` memo; only the geometry and `opacity` are set from JS, because
+   only those change. Kept off the canvas deliberately: the canvas has a blit fast path that assumes
+   the previous frame is reusable, and an opacity that tracks the scroll offset would invalidate it
+   every frame. Both start hidden -- `updateScrollShadows` writes nothing until one is needed. */
+.gdg-root .dvn-underlay > .dvn-shadow-x,
+.gdg-root .dvn-underlay > .dvn-shadow-y {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.gdg-root .dvn-underlay > .dvn-shadow-x {
+    top: 0;
+    box-shadow: inset 13px 0 10px -13px rgb(0 0 0 / 20%);
+}
+
+.gdg-root .dvn-underlay > .dvn-shadow-y {
+    left: 0;
+    box-shadow: inset 0 13px 10px -13px rgb(0 0 0 / 20%);
+}
+
 /* The real scroll surface. `translate3d` promotes it to its own layer, which is what keeps
    scrolling smooth while the canvas repaints beneath it. */
 .gdg-root .dvn-scroller {

@@ -65,3 +65,28 @@ describe("remAdjustDimensions", () => {
         expect(remAdjustDimensions(base, true, 8).rowHeight).toBe(17);
     });
 });
+
+describe("remAdjustDimensions — overscroll (4.5)", () => {
+    const base = { rowHeight: 34, headerHeight: 36, groupHeaderHeight: 36, theme: undefined };
+
+    it("scales overscroll alongside the heights", () => {
+        const out = remAdjustDimensions({ ...base, overscrollX: 100, overscrollY: 50 }, true, 20);
+        // 20/16 = 1.25, and source ceils each one.
+        expect(out.overscrollX).toBe(125);
+        expect(out.overscrollY).toBe(63);
+    });
+
+    it("keeps `undefined` distinguishable from zero", () => {
+        // Source turns an absent value into `0` here; this port keeps it absent so the scroll-extent
+        // code has one case to test rather than two. Either way nothing is added.
+        const out = remAdjustDimensions({ ...base, overscrollY: 40 }, true, 20);
+        expect(out.overscrollX).toBeUndefined();
+        expect(out.overscrollY).toBe(50);
+    });
+
+    it("returns the input untouched when scaling is off", () => {
+        const input = { ...base, overscrollX: 100, overscrollY: 50 };
+        expect(remAdjustDimensions(input, false, 20)).toBe(input);
+        expect(remAdjustDimensions(input, true, 16)).toBe(input);
+    });
+});

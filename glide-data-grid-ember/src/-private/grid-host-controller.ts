@@ -244,6 +244,29 @@ export interface GridHostArgs {
      */
     readonly getGroupDetails?: (groupName: string) => Partial<GroupDetails> | undefined;
     /**
+     * Extra empty scrollable space past the last column / last row, in px. Lets the user scroll a
+     * trailing column or row away from the edge of the viewport — useful when something floats over
+     * the grid's bottom-right, and the only way to reach the last row otherwise is to have it hidden
+     * underneath. Mirrors source's `overscrollX`/`overscrollY`; scaled by `@scaleToRem` like every
+     * other pixel dimension.
+     * @defaultValue none
+     */
+    readonly overscrollX?: number;
+    /** {@inheritDoc GridHostArgs.overscrollX} */
+    readonly overscrollY?: number;
+    /**
+     * The inset shadow drawn over the frozen columns' right edge once the grid is scrolled
+     * horizontally, and over the header's bottom edge once it is scrolled vertically. Depth cues:
+     * without them, frozen columns and a sticky header look like part of a flat surface.
+     *
+     * The X shadow needs `@freezeColumns` (or a row-marker column) to have something to cast from.
+     * Both mirror source's `fixedShadowX`/`fixedShadowY`.
+     * @defaultValue true
+     */
+    readonly fixedShadowX?: boolean;
+    /** {@inheritDoc GridHostArgs.fixedShadowX} */
+    readonly fixedShadowY?: boolean;
+    /**
      * Extra/override header-icon glyphs, merged **over** the built-in set (`rendering/sprites.ts`)
      * exactly as source does (`data-editor-all.tsx:14`: `{...sprites, ...p.headerIcons}`). The
      * built-ins are always present, so this is only needed to add custom glyphs or restyle one of
@@ -934,6 +957,11 @@ interface ResolvedGridHostArgs {
     /** Always defined: {@link GridHostController.resolvedGroupDetails} fills in the defaults, so
      *  every reader (draw, hit test) sees the same total function. */
     readonly getGroupDetails: GroupDetailsCallback;
+    /** `scaleToRem`-adjusted, so these are already in final px. `undefined` means none. */
+    readonly overscrollX: number | undefined;
+    readonly overscrollY: number | undefined;
+    readonly fixedShadowX: boolean;
+    readonly fixedShadowY: boolean;
 
     readonly rowMarkers: RowMarkerKind;
     readonly rowMarkerWidth: number;
@@ -1082,8 +1110,15 @@ function dimensionsAreEqual(a: RemAdjustableDimensions, b: RemAdjustableDimensio
         a.rowHeight === b.rowHeight &&
         a.headerHeight === b.headerHeight &&
         a.groupHeaderHeight === b.groupHeaderHeight &&
-        a.theme === b.theme
+        a.theme === b.theme &&
+        a.overscrollX === b.overscrollX &&
+        a.overscrollY === b.overscrollY
     );
+}
+
+/** Source's `clamp` (`common/utils.ts`), which this port had never needed until the scroll shadows. */
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
 }
 
 function rectanglesEqual(a: Rectangle | undefined, b: Rectangle | undefined): boolean {
@@ -1240,6 +1275,11 @@ export class GridHostController {
     private readonly scrollInnerEl: HTMLDivElement;
     private readonly stackEl: HTMLDivElement;
     private readonly spacerEl: HTMLDivElement;
+    /** 4.5: the frozen-column and header scroll shadows. See `updateScrollShadows`. */
+    private readonly shadowXEl: HTMLDivElement;
+    private readonly shadowYEl: HTMLDivElement;
+    /** Last styles written to the two shadows, so a draw that changes nothing touches no DOM. */
+    private lastShadowState: { x: string; y: string } = { x: "", y: "" };
 
     /**
      * The nodes a pointer event is allowed to have originated on for the grid to treat it as its
@@ -1414,7 +1454,20 @@ export class GridHostController {
 
         this.canvasEl = document.createElement("canvas");
         this.headerCanvasEl = document.createElement("canvas");
-        this.underlayEl.append(this.canvasEl, this.headerCanvasEl);
+
+        // 4.5: the two scroll shadows. Source builds them as plain absolutely-positioned divs with
+        // an inset `box-shadow` (`data-grid.tsx:1884-1918`) rather than drawing them on the canvas,
+        // and this port keeps that: the canvas has a blit fast path that assumes what it painted
+        // last frame is still valid, and a shadow whose opacity tracks the scroll offset would
+        // invalidate it on every frame. They live in the underlay next to the canvases, are
+        // `pointer-events: none` (so they are deliberately NOT in `gridSurfaces`), and their
+        // opacity is driven from `updateScrollShadows` on each draw.
+        this.shadowXEl = document.createElement("div");
+        this.shadowXEl.className = "dvn-shadow-x";
+        this.shadowYEl = document.createElement("div");
+        this.shadowYEl.className = "dvn-shadow-y";
+
+        this.underlayEl.append(this.canvasEl, this.headerCanvasEl, this.shadowXEl, this.shadowYEl);
 
         // --- .dvn-scroller / .dvn-scroll-inner / .dvn-stack / .dvn-spacer -------------------
         this.scrollerEl = document.createElement("div");
@@ -1678,12 +1731,14 @@ export class GridHostController {
     private resolveArgs(): ResolvedGridHostArgs {
         const args = this.getArgsFn();
         const baseHeaderHeight = args.headerHeight ?? DEFAULT_HEADER_HEIGHT;
-        const { rowHeight, headerHeight, groupHeaderHeight, theme } = this.remAdjust(
+        const { rowHeight, headerHeight, groupHeaderHeight, theme, overscrollX, overscrollY } = this.remAdjust(
             {
                 rowHeight: args.rowHeight ?? DEFAULT_ROW_HEIGHT,
                 headerHeight: baseHeaderHeight,
                 groupHeaderHeight: args.groupHeaderHeight ?? baseHeaderHeight,
                 theme: args.theme,
+                overscrollX: args.overscrollX,
+                overscrollY: args.overscrollY,
             },
             args.scaleToRem === true
         );
@@ -1703,6 +1758,11 @@ export class GridHostController {
             resizeIndicator: args.resizeIndicator ?? "none",
             hyperWrapping: args.hyperWrapping ?? false,
             getGroupDetails: this.resolvedGroupDetails(args.getGroupDetails),
+            overscrollX,
+            overscrollY,
+            // Source defaults both to `true` (`data-grid.tsx:362-363`), so the shadows are opt-*out*.
+            fixedShadowX: args.fixedShadowX !== false,
+            fixedShadowY: args.fixedShadowY !== false,
 
             rowMarkers,
             rowMarkerWidth: args.rowMarkerWidth ?? rowMarkerWidthDefault(args.rows),
@@ -2318,6 +2378,8 @@ export class GridHostController {
             this.lastRootStampedTheme = theme;
         }
 
+        this.updateScrollShadows(args, mappedColumns, freezeColumns);
+
         const current: DrawGridArg = {
             canvasCtx: this.canvasCtx,
             headerCanvasCtx: this.headerCanvasCtx,
@@ -2612,10 +2674,73 @@ export class GridHostController {
         this.headerCanvasEl.style.height = `${headerCanvasHeight}px`;
     }
 
+    /**
+     * Positions and fades the two scroll shadows (4.5). Port of source's `stickyShadow` memo
+     * (`data-grid.tsx:1878-1918`), which computes exactly these two opacities and inline styles.
+     *
+     * Both stay mounted and are hidden with `opacity: 0` rather than being added and removed,
+     * because they are re-evaluated on every draw and the whole point of the memo upstream is to do
+     * no work when nothing changed -- here that is the `lastShadowState` comparison, which keeps a
+     * scroll frame free of DOM writes once the shadows have reached full opacity.
+     */
+    private updateScrollShadows(
+        args: ResolvedGridHostArgs,
+        mappedColumns: readonly MappedGridColumn[],
+        freezeColumns: number
+    ): void {
+        // Source's exact expressions. `freezeColumns` is the mangled count, so a row-marker column
+        // casts a shadow on its own -- as it does upstream, where the marker is likewise folded into
+        // the frozen count before this runs.
+        const opacityX =
+            freezeColumns === 0 || !args.fixedShadowX
+                ? 0
+                : this.cellXOffset > freezeColumns
+                  ? 1
+                  : clamp(-this.translateX / 100, 0, 1);
+        // The `32` is source's, and it is a hardcoded assumed row height rather than `args.rowHeight`
+        // (`data-grid.tsx:1881`). Kept: it only scales how fast the shadow fades in over the first
+        // ~3 rows of scrolling, and diverging would change the feel for no stated gain.
+        const absoluteOffsetY = -this.cellYOffset * 32 + this.translateY;
+        const opacityY = args.fixedShadowY ? clamp(-absoluteOffsetY / 100, 0, 1) : 0;
+
+        const stickyX = args.fixedShadowX ? getStickyWidth(mappedColumns, this.currentDragAndDropState()) : 0;
+        const totalHeaderHeight = this.totalHeaderHeight(args);
+
+        // Serialized rather than compared field-by-field: five numbers each, all of which change
+        // together during a scroll, so one string compare is both cheaper and harder to get wrong.
+        const x = opacityX === 0 ? "" : `${stickyX}|${this.width - stickyX}|${this.height}|${opacityX}`;
+        const y = opacityY === 0 ? "" : `${totalHeaderHeight}|${this.width}|${this.height}|${opacityY}`;
+        if (x === this.lastShadowState.x && y === this.lastShadowState.y) return;
+        this.lastShadowState = { x, y };
+
+        const shadowX = this.shadowXEl.style;
+        shadowX.opacity = `${opacityX}`;
+        if (opacityX > 0) {
+            shadowX.left = `${stickyX}px`;
+            shadowX.width = `${Math.max(0, this.width - stickyX)}px`;
+            shadowX.height = `${this.height}px`;
+        }
+
+        const shadowY = this.shadowYEl.style;
+        shadowY.opacity = `${opacityY}`;
+        if (opacityY > 0) {
+            shadowY.top = `${totalHeaderHeight}px`;
+            shadowY.width = `${this.width}px`;
+            shadowY.height = `${this.height}px`;
+        }
+    }
+
     private rebuildScrollContent(args: ResolvedGridHostArgs): void {
         const { mappedColumns } = this.computeMangledLayout(args);
-        const totalWidth = mappedColumns.reduce((sum, c) => sum + c.width, 0);
-        const totalHeight = this.totalHeaderHeight(args) + totalRowsHeight(this.effectiveRows(args), args.rowHeight);
+        // 4.5: `overscrollX`/`overscrollY` are pure scroll *extent* -- empty space past the content,
+        // nothing drawn into it. Source adds them in exactly this spot
+        // (`scrolling-data-grid.tsx:105,115`), and clamps X at zero while letting Y through
+        // unclamped; matched rather than tidied.
+        const totalWidth = mappedColumns.reduce((sum, c) => sum + c.width, 0) + Math.max(0, args.overscrollX ?? 0);
+        const totalHeight =
+            this.totalHeaderHeight(args) +
+            totalRowsHeight(this.effectiveRows(args), args.rowHeight) +
+            (args.overscrollY ?? 0);
 
         this.stackEl.replaceChildren();
 

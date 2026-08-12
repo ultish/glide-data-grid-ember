@@ -69,5 +69,25 @@ handleColumnMoved = (from, to) => {
   this.columns = next;
 };`,
         },
+        {
+            kind: "p",
+            text: "**Freezing, overscroll and scroll shadows.** `@freezeColumns={{2}}` pins the first N columns while the rest scroll under them (a row-marker column is frozen on top of that, and counts as one). `@overscrollX` / `@overscrollY` add empty scrollable space past the last column and row, so a trailing column can be scrolled clear of anything floating over the grid's edge.",
+        },
+        {
+            kind: "code",
+            text: `<GlideDataGrid
+  @freezeColumns={{2}}
+  @overscrollY={{200}}      {{! 200px of empty space below the last row }}
+  @fixedShadowX={{false}}   {{! both shadows are ON by default }}
+/>`,
+        },
+        {
+            kind: "list",
+            items: [
+                "The shadows are the depth cue that makes frozen columns and the header read as floating: one fades in over the frozen columns' right edge as you scroll sideways, one under the header as you scroll down. `@fixedShadowX` / `@fixedShadowY` turn them off.",
+                "The X shadow needs something frozen to cast from — with no `@freezeColumns` and no row markers, there is nothing to draw and it stays hidden.",
+                "Overscroll is scaled by `@scaleToRem` along with every other pixel dimension, so it keeps its proportion at a larger root font size.",
+            ],
+        },
     ],
 };

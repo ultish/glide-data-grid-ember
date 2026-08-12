@@ -18,13 +18,13 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-12:** `main` is pushed, GitHub Pages is deployed and working. 858 vitest tests
+**State as of 2026-08-12:** `main` is pushed, GitHub Pages is deployed and working. 861 vitest tests
 pass. Phases 0–11 are done; what is left is the backlog below.
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 858 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 861 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -241,9 +241,9 @@ reusing the existing `resolveMouseHit` for the cell target.
 
 | Item | Size | Where |
 |---|---|---|
-| **Scroll shadows** | `S` | Source `data-grid.tsx:362,454,1879` — `fixedShadowX`/`fixedShadowY`, both default **true**. The port draws none. Purely cosmetic; it *degrades* rather than breaks, which is why nobody noticed. |
-| **`overscrollX`/`overscrollY`** | `S` | N pixels of empty scrollable space past the last column/row. The port computes scroll extent from content only. |
-| **`preventDiagonalScrolling`** | `S` | Locks scrolling to one axis per gesture. |
+| **Scroll shadows** | DONE (2026-08-12) | `@fixedShadowX` / `@fixedShadowY`, both defaulting **true** as upstream. Two `pointer-events: none` divs in `.dvn-underlay` with an inset `box-shadow`, opacity driven from `updateScrollShadows` — **not** canvas drawing, because an opacity that tracks the scroll offset would invalidate the blit fast path every frame. Source builds them as divs for the same reason. |
+| **`overscrollX`/`overscrollY`** | DONE (2026-08-12) | Added to the scroll extent in `rebuildScrollContent`, and to `remAdjustDimensions` so `@scaleToRem` scales them as source does (that file had carried a "add them here when they land" note since 9g). |
+| **`preventDiagonalScrolling`** | WON'T PORT | Read the guard, not the prop: source only applies the axis lock when `hasTouches` is true (`infinite-scroller.tsx:215-225`). With touch deferred (9c) `hasTouches` is permanently false here, so porting it would add an arg that can never do anything. Revisit only if 9c is ever picked up. |
 | **`onPaste` prop** | DONE (2026-08-12) | Shipped as `<GlideDataGrid @onPaste>`: `false` refuses every paste, a callback gets the target in consumer space plus the clipboard as raw strings and must return `true`. The rule is `shouldAcceptPaste` in `rendering/copy-paste.ts` (5 tests); `<DemoGrid>`'s "Paste:" toggle cycles allow / single-cell / off. **Stated divergence:** source treats an absent `onPaste` as "write the whole clipboard into the one target cell"; this port keeps its long-standing range paste, i.e. `undefined` behaves as `true`. |
 | **`experimental` bag, rest** | `S` each | `paddingRight`/`paddingBottom`, `eventTarget`, `strict`, `scrollbarWidthOverride`, `disableMinimumCellWidth` (`minimumCellWidth: 10` hardcoded at `:2303`), `renderStrategy` (derived from `browserIsSafari` at `:2299`, not overridable). |
 | **Shadow DOM** | `S` to check | Never tried. **Unknown, not broken.** Risks: `window`-scoped listeners (`paste` at `:1484`, the window-level `mousemove` from 9h) and the measurement canvas appended to `document.documentElement` at `:1408`. Overlay editors append to the grid root, which is the good case. |

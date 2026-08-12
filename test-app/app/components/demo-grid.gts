@@ -654,6 +654,24 @@ export default class DemoGrid extends Component {
         this.deleteModeIndex = (this.deleteModeIndex + 1) % DELETE_MODES.length;
     };
 
+    // 4.5: scroll shadows and overscroll. The shadows are ON by default, so the toggle exists to
+    // show what the grid looks like *without* them — which is what it looked like before 4.5, since
+    // the port drew none. Overscroll is off by default and adds trailing empty scroll space.
+    @tracked scrollShadows = true;
+    @tracked useOverscroll = false;
+
+    toggleScrollShadows = (): void => {
+        this.scrollShadows = !this.scrollShadows;
+    };
+
+    toggleOverscroll = (): void => {
+        this.useOverscroll = !this.useOverscroll;
+    };
+
+    get overscroll(): number | undefined {
+        return this.useOverscroll ? 200 : undefined;
+    }
+
     // 4.5: `@onPaste`. All-or-nothing, and checked before a single cell is written — where
     // `@coercePasteValue` above shapes values once a paste is already going ahead.
     @tracked pasteModeIndex = 0;
@@ -1224,6 +1242,24 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-scroll-shadows-toggle
+                    {{on "click" this.toggleScrollShadows}}
+                >
+                    Scroll shadows:
+                    <b>{{if this.scrollShadows "on" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-overscroll-toggle
+                    {{on "click" this.toggleOverscroll}}
+                >
+                    Overscroll:
+                    <b>{{if this.useOverscroll "200px" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-paste-mode-toggle
                     {{on "click" this.cyclePasteMode}}
                 >
@@ -1478,6 +1514,11 @@ export default class DemoGrid extends Component {
                     @coercePasteValue={{this.coercePasteValue}}
                     {{! 4.5: all-or-nothing paste veto, checked before any cell is written. }}
                     @onPaste={{this.onPaste}}
+                    {{! 4.5: scroll shadows (on by default) and trailing overscroll space. }}
+                    @fixedShadowX={{this.scrollShadows}}
+                    @fixedShadowY={{this.scrollShadows}}
+                    @overscrollX={{this.overscroll}}
+                    @overscrollY={{this.overscroll}}
                     @copyHeaders={{this.copyHeaders}}
                     @onDelete={{this.onDelete}}
                     @cellActivationBehavior={{this.cellActivationBehavior}}

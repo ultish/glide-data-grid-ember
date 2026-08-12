@@ -8,8 +8,9 @@
 // disable the scroll blit fast path. That is the same trap PORTING-NOTES.md's Phase 6 section
 // records three instances of.
 //
-// The overscroll fields source also scales are omitted: `overscrollX`/`overscrollY` are not ported
-// (N6 in TBD.md). Add them here when they land -- source routes them through this same function.
+// `overscrollX`/`overscrollY` are scaled here too, exactly as source does -- they are pixel
+// dimensions like the heights above, so a grid that scales with the root font size has to scale its
+// trailing empty space with it or the proportion drifts.
 import type { Theme } from "./theme.ts";
 import { getDataEditorTheme } from "./theme.ts";
 
@@ -19,6 +20,9 @@ export interface RemAdjustableDimensions {
     readonly headerHeight: number;
     readonly groupHeaderHeight: number;
     readonly theme: Partial<Theme> | undefined;
+    /** Empty scrollable space past the last column / row, in px. Absent means none. */
+    readonly overscrollX?: number;
+    readonly overscrollY?: number;
 }
 
 /** The browser default this port, and source, scale relative to. */
@@ -44,10 +48,16 @@ export function remAdjustDimensions(
     if (!scaleToRem || remSize === BASE_REM_SIZE) return dimensions;
 
     const scaler = remSize / BASE_REM_SIZE;
-    const { rowHeight, headerHeight, groupHeaderHeight, theme } = dimensions;
+    const { rowHeight, headerHeight, groupHeaderHeight, theme, overscrollX, overscrollY } = dimensions;
     const base = getDataEditorTheme();
 
     return {
+        // Source scales these unconditionally, turning an absent value into `0`
+        // (`use-rem-adjuster.ts`, `Math.ceil((overscrollXIn ?? 0) * scaler)`). Kept as `undefined`
+        // here when it was absent, so "no overscroll" stays distinguishable from "0px of it" and the
+        // scroll-extent code has one thing to test rather than two.
+        overscrollX: overscrollX === undefined ? undefined : Math.ceil(overscrollX * scaler),
+        overscrollY: overscrollY === undefined ? undefined : Math.ceil(overscrollY * scaler),
         rowHeight:
             typeof rowHeight === "number" ? rowHeight * scaler : (row: number) => Math.ceil(rowHeight(row) * scaler),
         headerHeight: Math.ceil(headerHeight * scaler),

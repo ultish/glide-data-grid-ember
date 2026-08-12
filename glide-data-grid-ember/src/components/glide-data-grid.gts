@@ -236,6 +236,22 @@ export interface GlideDataGridSignature {
          * arrow: see `GridHostArgs.getGroupDetails`.
          */
         getGroupDetails?: (groupName: string) => Partial<GroupDetails> | undefined;
+        /**
+         * Extra empty scrollable space past the last column / last row, in px, so a trailing column
+         * or row can be scrolled clear of anything floating over the grid's edge. Scaled by
+         * `@scaleToRem` like every other pixel dimension.
+         */
+        overscrollX?: number;
+        /** {@inheritDoc overscrollX} */
+        overscrollY?: number;
+        /**
+         * The inset shadows that fade in over the frozen columns' right edge and under the header as
+         * the grid scrolls. **On by default** — pass `false` to switch one off. The X shadow needs
+         * frozen columns (or a row-marker column) to cast from.
+         */
+        fixedShadowX?: boolean;
+        /** {@inheritDoc fixedShadowX} */
+        fixedShadowY?: boolean;
         // Not part of the original Phase 2 brief's enumerated arg list, but required because
         // `GridHostArgs.getCellRenderer` is non-optional -- see PORTING-NOTES.md "Phase 2b"
         // section for the rationale. Defaults to the real Phase 4a cell-type registry
@@ -527,6 +543,10 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         resizeIndicator: this.args.resizeIndicator,
         hyperWrapping: this.args.hyperWrapping,
         getGroupDetails: this.args.getGroupDetails,
+        overscrollX: this.args.overscrollX,
+        overscrollY: this.args.overscrollY,
+        fixedShadowX: this.args.fixedShadowX,
+        fixedShadowY: this.args.fixedShadowY,
         getCellRenderer: this.cellRenderer,
         headerIcons: this.args.headerIcons,
         rowMarkers: this.args.rowMarkers,
