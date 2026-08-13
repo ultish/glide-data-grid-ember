@@ -12,9 +12,31 @@
 //     runtime from an offscreen `<canvas>` (memoized), so thumbnails are visually distinct per row
 //     without shipping N base64 blobs or hitting the network. Falls back to the same tiny static
 //     PNG `demo-data.ts` uses if there's no DOM (SSR / build-time evaluation).
-//   - **Records materialized up front, `getCellContent` O(1).** 3,000 rows is small enough to hold
-//     in memory, and `getCellContent` runs inside the canvas draw loop (once per painted cell), so
-//     it must never do real work. See DATA.md / PORTING-NOTES.md's "Autotracking -> canvas" section.
+//   - **Records materialized up front, `getCellContent` O(1).** `getCellContent` runs inside the
+//     canvas draw loop (once per painted cell), so it must never do real work. See
+//     PORTING-NOTES.md's "Autotracking -> canvas" section.
+//
+// **Row count and what it costs** (measured 2026-08-13, raised 3,000 -> 200,000 to match the full
+// grid demo). Materializing up front is not free at this size, and the numbers are worth knowing
+// before changing it again:
+//
+//   | rows    | build at module load | heap  | one sort click |
+//   |---------|----------------------|-------|----------------|
+//   | 3,000   | 6 ms                 | 3 MB  | ~4 ms          |
+//   | 50,000  | 48 ms                | 33 MB | ~60 ms         |
+//   | 200,000 | 150 ms               | ~140 MB | **253 ms**   |
+//
+// The sort number is the one that matters, because column sort is this demo's headline interaction
+// and this is the app's landing tab. `withColumnSort`'s `buildSortMap` reads **every** row through
+// `getCellContent` to build its comparison keys, then sorts the whole index array
+// (`data-source/column-sort.ts:273-292`), so the cost is linear in rows and lands as a single
+// blocking task. At 200,000 that is a quarter-second freeze on every sort click; at 3,000 it was
+// imperceptible.
+//
+// Lazy per-row generation would fix the module-load and heap columns but **not** the sort one --
+// sorting touches every row by definition, so it would materialize the lot on the first click. If
+// the freeze becomes a problem, the fix is to make the sort incremental or move it off the main
+// thread, not to defer record construction.
 import {
     GridCellKind,
     GridColumnIcon,
@@ -24,7 +46,7 @@ import {
 } from "glide-data-grid-ember/rendering/index";
 import { PHOTO_PALETTE, avatarUrl, photoUrl } from "test-app/utils/demo-fixtures";
 
-export const GLIDE_DEMO_ROW_COUNT = 3000;
+export const GLIDE_DEMO_ROW_COUNT = 200_000;
 
 // --- Seeded PRNG -----------------------------------------------------------------------------
 // mulberry32: 5 lines, no dependency, good enough distribution for demo data. Same seed => same
