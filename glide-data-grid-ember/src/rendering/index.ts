@@ -260,6 +260,19 @@ export type { IsDraggable } from "./external-drag.ts";
 // `keybindingDefaults` is exported so a consumer can read a default rather than guess it.
 export type { Keybind, Keybinds, ConfigurableKeybinds, RealizedKeybinds } from "./keybindings.ts";
 export { keybindingDefaults } from "./keybindings.ts";
+// 4.1: row grouping. `RowGroupingOptions` is what `@rowGrouping` takes. The rest is the consumer's
+// half of the feature and is not optional reading: the grid does not draw group headers, so a
+// consumer *must* call `rowGroupingApi(...).mapper` inside `@getCellContent` both to recognise
+// header rows and to translate every other row back into its own data space via `originalIndex`.
+// `updateRowGroupingByPath` is how a collapse is applied, immutably.
+export type { RowGroup, RowGroupingOptions, RowGroupingApi, FlattenedRowGroup, MapResult } from "./row-grouping.ts";
+export {
+    rowGroupingApi,
+    mapRowIndexToPath,
+    flattenRowGroups,
+    updateRowGroupingByPath,
+    getRowGroupingForPath,
+} from "./row-grouping.ts";
 // Value exports, not types: these are the discriminants of the `GridMouseEventArgs` union, so a
 // consumer narrowing an `@onItemHovered` event needs them at runtime. Unexported until N2 landed,
 // because until then nothing in this addon ever constructed that union.

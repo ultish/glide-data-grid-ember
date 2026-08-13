@@ -730,11 +730,12 @@ only by nobody having needed them. Each is small on its own — the value is in 
   `use-column-sizer.ts` (253 lines), plus the `minColumnWidth`/`maxColumnWidth`/`maxColumnAutoWidth`
   props and the `remeasureColumns` ref method (9f). The measurement itself can reuse
   `canvas-hypertxt`, already a dependency. `M`.
-- **Row grouping** — not ported (column grouping was, in Phase 7b). Source:
-  `data-editor/row-grouping.ts` (326 lines) + `row-grouping-api.ts` (72) + the `rowGrouping` prop,
-  and it pairs with `use-collapsing-groups` in 9j. Substantial: it changes row-space mapping
-  globally, which means it interacts with every decorator's coordinate contract (see the settled rule
-  in Phase 8's brief above). `L`.
+- **Row grouping** — **DONE (2026-08-13)**, as `@rowGrouping`. Sized `L` here on the assumption that
+  it changes row-space mapping globally and so collides with every decorator's coordinate contract.
+  It does not: the whole feature is four transforms of args the grid already had, applied in
+  `resolveArgs`, so nothing below that point — including all of `src/data-source/` — sees grouped
+  coordinates. **The grid never draws group headers**; the consumer does, via `mapper(row)`. See
+  PORTING-NOTES.md → "4.1 — row grouping", which also records the one bug this port fixes in source.
 - **`maxScaleFactor` is a flat `5`** — source varies it 1–5 by browser and active-touch-scroll as a
   perf micro-opt. Deliberate Phase 2 simplification, noted here only for completeness. `S`.
 
@@ -1172,9 +1173,8 @@ Queue items 1–6, Phase 11, and backlog items 9f, 9g, 9j, 9k, plus N1/N2 from `
 
 ### Then, in rough value order
 
-- **9i — row grouping** (`L`). The biggest remaining parity gap. **Read the warning in 9i before
-  starting**: it changes row-space mapping globally, so it interacts with every decorator's coordinate
-  contract — including the three hooks 9j just added.
+- ~~**9i — row grouping**~~ — **DONE (2026-08-13)**. The feared global coordinate interaction did not
+  materialise; see the entry above and PORTING-NOTES.md → "4.1 — row grouping".
 - **`TBD.md` N3–N15** — 13 audited gaps with sizes and source citations. `rightElement` and external
   HTML5 drag-and-drop are the two genuinely new subsystems.
 - **9h leftovers** — controlled-selection mode, span/merged-cell selection, the `onSelect` renderer

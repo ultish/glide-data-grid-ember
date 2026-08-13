@@ -70,6 +70,18 @@ import { computeScrollDelta, type ScrollToParams } from "../rendering/scroll-to.
 import { resolveNewRowTarget } from "../rendering/new-row-target.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
 import { isOutsideStrictRegion } from "../rendering/strict-region.ts";
+import {
+    effectiveRowCount,
+    flattenRowGroups,
+    getSelectionRowLimits,
+    makeRowHeight,
+    makeRowNumberMapper,
+    makeRowThemeOverride,
+    mapRowIndexToPath,
+    skipGroupHeaders,
+    type FlattenedRowGroup,
+    type RowGroupingOptions,
+} from "../rendering/row-grouping.ts";
 import type {
     DrawGridArg,
     DragAndDropState,
@@ -668,8 +680,37 @@ export interface GridHostArgs {
      * instead of fully repainted -- a fresh inline arrow function on every draw makes that check
      * fail every time and silently defeats the scroll fast path. Define it once (a module-scope
      * function, or a class field / `@action`-bound method), don't build it inside a getter.
+     *
+     * Receives source's three arguments. `groupIndex` is the row's position inside its row group and
+     * `contentIndex` its position counting content rows only; with `@rowGrouping` unset all three are
+     * the same number, exactly as upstream. A callback that only declares `row` is unaffected.
      */
-    readonly getRowThemeOverride?: GetRowThemeCallback;
+    readonly getRowThemeOverride?: (
+        row: number,
+        groupIndex: number,
+        contentIndex: number
+    ) => Partial<Theme> | undefined;
+
+    // --- 4.1: row grouping -----------------------------------------------------------------------
+    /**
+     * Groups rows under collapsible header rows. Source's `rowGrouping` prop
+     * (`data-editor/row-grouping.ts`).
+     *
+     * **The grid does not draw group headers.** A group header is an ordinary row; what this arg does
+     * is tell the grid which rows those are, so it can give them their own height and theme, keep the
+     * row-marker numbering from counting them, and optionally skip them during navigation. Deciding
+     * what a header row *looks like* is the consumer's job: call `rowGroupingApi(...).mapper(row)` in
+     * `@getCellContent` and return whatever cell you want for `isGroupHeader` rows. That is how
+     * source works too, and it is why a group header can be any cell type at all.
+     *
+     * `mapper(row).originalIndex` converts a grid row back into an index in your own flat, expanded
+     * row array — use it for every other row, or the grid will read the wrong record once a group is
+     * collapsed.
+     *
+     * Collapsing is consumer-driven: handle `@onCellClicked`, and rebuild `groups` with
+     * `updateRowGroupingByPath`.
+     */
+    readonly rowGrouping?: RowGroupingOptions;
 
     // --- Phase 8: async / streaming data ---------------------------------------------------------
     /**
@@ -1197,6 +1238,18 @@ export interface GridHostControllerOptions {
     readonly getArgs: () => GridHostArgs;
 }
 
+/** What {@link GridHostController.resolvedRowGrouping} memoizes — source's `UseRowGroupingInnerResult`
+ *  plus the flattened tree, which this port also needs for nav and selection clamping. */
+interface ResolvedRowGrouping {
+    readonly flattened: readonly FlattenedRowGroup[] | undefined;
+    /** Rows the grid lays out, collapses applied. */
+    readonly rows: number;
+    /** Pre-rem-adjust; the caller feeds it through `remAdjust`. */
+    readonly rowHeight: number | ((row: number) => number);
+    readonly rowNumberMapper: ((row: number) => number | undefined) | undefined;
+    readonly getRowThemeOverride: GetRowThemeCallback | undefined;
+}
+
 interface ResolvedGridHostArgs {
     readonly columns: readonly GridColumn[];
     readonly getCellContent: (item: Item) => GridCell;
@@ -1274,7 +1327,19 @@ interface ResolvedGridHostArgs {
     readonly trailingRowOptions: TrailingRowOptions | undefined;
     readonly onRowAppended: (() => RowAppendedResult | Promise<RowAppendedResult> | void) | undefined;
 
+    /** Post-grouping and single-argument: the render engine only ever knows about a row index. The
+     *  consumer's three-argument callback is wrapped into this by {@link
+     *  GridHostController.resolvedRowGrouping}. */
     readonly getRowThemeOverride: GetRowThemeCallback | undefined;
+
+    // --- 4.1: row grouping -----------------------------------------------------------------------
+    /** The consumer's options, kept for the nav/selection behaviour flags. */
+    readonly rowGrouping: RowGroupingOptions | undefined;
+    /** `undefined` when grouping is off, which is the flag every consumer of it tests. */
+    readonly flattenedRowGroups: readonly FlattenedRowGroup[] | undefined;
+    /** Row index -> row-marker number, or `undefined` on a group header. Only set when grouping is
+     *  on; the marker column numbers by raw row index otherwise. */
+    readonly rowNumberMapper: ((row: number) => number | undefined) | undefined;
 
     readonly onVisibleRegionChanged: ((region: Rectangle) => void) | undefined;
 
@@ -2101,12 +2166,89 @@ export class GridHostController {
         return value;
     }
 
+    // 4.1: the row-grouping transform, memoized on everything it is computed from.
+    //
+    // **Load-bearing, for the usual reason.** Both `rowHeight` and `getRowThemeOverride` are
+    // identity-compared by `computeCanBlit` (`data-grid-render.blit.ts:241` and
+    // `dimensionsAreEqual`), and `resolveArgs` runs several times per draw. Rebuilding these
+    // wrappers per call would hand out fresh closures every time and silently disable the scroll
+    // blit fast path -- no error, no visual difference. It would also defeat `remAdjustCache`, which
+    // keys on `rowHeight` by identity.
+    //
+    // Flattening the group tree is itself worth memoizing: it is O(groups) and every lookup below
+    // walks the result.
+    private rowGroupingCache:
+        | {
+              readonly rowGrouping: RowGroupingOptions | undefined;
+              readonly rows: number;
+              readonly rowHeightIn: number | ((row: number) => number);
+              readonly getRowThemeOverrideIn: GridHostArgs["getRowThemeOverride"];
+              readonly value: ResolvedRowGrouping;
+          }
+        | undefined;
+
+    private resolvedRowGrouping(
+        rowGrouping: RowGroupingOptions | undefined,
+        rows: number,
+        rowHeightIn: number | ((row: number) => number),
+        getRowThemeOverrideIn: GridHostArgs["getRowThemeOverride"]
+    ): ResolvedRowGrouping {
+        const cached = this.rowGroupingCache;
+        if (
+            cached !== undefined &&
+            cached.rowGrouping === rowGrouping &&
+            cached.rows === rows &&
+            cached.rowHeightIn === rowHeightIn &&
+            cached.getRowThemeOverrideIn === getRowThemeOverrideIn
+        ) {
+            return cached.value;
+        }
+
+        let value: ResolvedRowGrouping;
+        if (rowGrouping === undefined) {
+            value = {
+                flattened: undefined,
+                rows,
+                rowHeight: rowHeightIn,
+                rowNumberMapper: undefined,
+                // Source calls an ungrouped `getRowThemeOverride` as `(row, row, row)`
+                // (`row-grouping.ts:302`), so the two extra arguments are the row index rather than
+                // `undefined`. Wrapping costs one call frame per themed row per draw and is memoized
+                // here, which is what keeps its identity stable.
+                getRowThemeOverride:
+                    getRowThemeOverrideIn === undefined ? undefined : row => getRowThemeOverrideIn(row, row, row),
+            };
+        } else {
+            const flattened = flattenRowGroups(rowGrouping, rows);
+            value = {
+                flattened,
+                rows: effectiveRowCount(flattened, rows),
+                rowHeight: makeRowHeight(flattened, rowGrouping, rowHeightIn),
+                rowNumberMapper: makeRowNumberMapper(flattened),
+                getRowThemeOverride: makeRowThemeOverride(flattened, rowGrouping, getRowThemeOverrideIn),
+            };
+        }
+
+        this.rowGroupingCache = { rowGrouping, rows, rowHeightIn, getRowThemeOverrideIn, value };
+        return value;
+    }
+
     private resolveArgs(): ResolvedGridHostArgs {
         const args = this.getArgsFn();
         const baseHeaderHeight = args.headerHeight ?? DEFAULT_HEADER_HEIGHT;
+        // Row grouping runs *before* the rem adjuster, as source orders them
+        // (`data-editor.tsx:930-947`): the adjuster scales whatever `rowHeight` function it is
+        // handed, so `rowGrouping.height` gets `scaleToRem` applied through the wrapper rather than
+        // needing its own case.
+        const grouping = this.resolvedRowGrouping(
+            args.rowGrouping,
+            args.rows,
+            args.rowHeight ?? DEFAULT_ROW_HEIGHT,
+            args.getRowThemeOverride
+        );
         const { rowHeight, headerHeight, groupHeaderHeight, theme, overscrollX, overscrollY } = this.remAdjust(
             {
-                rowHeight: args.rowHeight ?? DEFAULT_ROW_HEIGHT,
+                rowHeight: grouping.rowHeight,
                 headerHeight: baseHeaderHeight,
                 groupHeaderHeight: args.groupHeaderHeight ?? baseHeaderHeight,
                 theme: args.theme,
@@ -2125,7 +2267,14 @@ export class GridHostController {
         return {
             columns: args.columns,
             getCellContent: args.getCellContent,
-            rows: args.rows,
+            // Post-grouping, as source does it (`data-editor.tsx:931`): from here down, `rows` means
+            // "rows the grid lays out", so selection, hit testing and scrolling all agree with what
+            // is on screen. With `@rowGrouping` unset this is `args.rows` unchanged.
+            //
+            // Note `rowMarkerWidth` below deliberately still sizes off the raw `args.rows` — it is a
+            // width bucket for the widest number the marker column will ever show, and that number
+            // comes from the ungrouped content space.
+            rows: grouping.rows,
             rowHeight,
             headerHeight,
             groupHeaderHeight,
@@ -2199,7 +2348,11 @@ export class GridHostController {
             trailingRowOptions: args.trailingRowOptions,
             onRowAppended: args.onRowAppended,
 
-            getRowThemeOverride: args.getRowThemeOverride,
+            getRowThemeOverride: grouping.getRowThemeOverride,
+
+            rowGrouping: args.rowGrouping,
+            flattenedRowGroups: grouping.flattened,
+            rowNumberMapper: grouping.rowNumberMapper,
 
             onVisibleRegionChanged: args.onVisibleRegionChanged,
 
@@ -2475,6 +2628,8 @@ export class GridHostController {
               // `visibleRegionRef.current` (`data-editor.tsx:1351`) -- baking it in would rebuild
               // this closure on every scrolled row and take the blit fast path down with it.
               readonly strictVisibleRegion: boolean;
+              // 4.1: the row-marker numbering, which changes whenever a group collapses.
+              readonly rowNumberMapper: ((row: number) => number | undefined) | undefined;
               readonly freezeColumns: number;
               readonly value: (item: Item) => InnerGridCell;
           }
@@ -2514,6 +2669,10 @@ export class GridHostController {
             cached.trailingRowOptions === args.trailingRowOptions &&
             cached.rowMarkerStartIndex === args.rowMarkerStartIndex &&
             cached.strictVisibleRegion === args.strictVisibleRegion &&
+            // 4.1: identity is enough because `resolvedRowGrouping` memoizes the mapper, so a new
+            // one appears exactly when the groups or the row count actually changed. Without this a
+            // collapse would keep serving marker numbers from the pre-collapse layout.
+            cached.rowNumberMapper === args.rowNumberMapper &&
             cached.freezeColumns === args.freezeColumns
         ) {
             return cached.value;
@@ -2530,6 +2689,14 @@ export class GridHostController {
                 if (isTrailing) {
                     return { kind: GridCellKind.Loading, allowOverlay: false };
                 }
+                // 4.1: with row grouping on, a group-header row has no marker at all -- source
+                // returns a `Loading` cell for it (`data-editor.tsx:1317-1319`), which draws as
+                // empty. This is also what keeps the visible numbering running 1, 2, 3 straight
+                // through a header instead of burning a number on each one.
+                const markerRow = args.rowNumberMapper === undefined ? row : args.rowNumberMapper(row);
+                if (markerRow === undefined) {
+                    return { kind: GridCellKind.Loading, allowOverlay: false };
+                }
                 const markerKind: "checkbox" | "number" | "both" | "checkbox-visible" =
                     args.rowMarkers === "clickable-number"
                         ? "number"
@@ -2540,10 +2707,12 @@ export class GridHostController {
                     kind: InnerGridCellKind.Marker,
                     allowOverlay: false,
                     checkboxStyle: DEFAULT_ROW_MARKER_CHECKBOX_STYLE,
+                    // Deliberately the raw grid row, not `markerRow`: selection is tracked in grid
+                    // row space everywhere else, so the checkbox must ask in the same space.
                     checked: this.selection.rows.hasIndex(row),
                     markerKind,
                     // 9g: `rowMarkerStartIndex` (default 1) instead of the hardcoded `+ 1`.
-                    row: args.rowMarkerStartIndex + row,
+                    row: args.rowMarkerStartIndex + markerRow,
                     // Phase 9h: the marker cell's drag-handle dots, which are both the affordance
                     // for row reorder and its enable flag -- source sets exactly
                     // `drawHandle: onRowMoved !== undefined` (`data-editor.tsx:1338`).
@@ -2593,6 +2762,7 @@ export class GridHostController {
             trailingRowOptions: args.trailingRowOptions,
             rowMarkerStartIndex: args.rowMarkerStartIndex,
             strictVisibleRegion: args.strictVisibleRegion,
+            rowNumberMapper: args.rowNumberMapper,
             freezeColumns: args.freezeColumns,
             value,
         };
@@ -5040,6 +5210,18 @@ export class GridHostController {
         // in this grid can do.
         if (this.emitRendererSelect(args, hit, [col, row])) return;
 
+        // 4.1: `navigationBehavior: "block"` is the one variant that also refuses *clicks* on a group
+        // header, not just keyboard moves onto one (`data-editor.tsx:1936-1938`). Source's placement,
+        // right after the `onSelect` hook. Note the row-marker branch has already returned above, so
+        // this only ever sees real cells -- and `@onCellClicked` still fires on mouseup, which is
+        // what makes click-to-collapse work on a blocked header.
+        if (
+            args.rowGrouping?.navigationBehavior === "block" &&
+            mapRowIndexToPath(row, args.flattenedRowGroups).isGroupHeader
+        ) {
+            return;
+        }
+
         if (hit.shiftKey && cellCol !== undefined && cellRow !== undefined && current !== undefined) {
             const left = Math.min(col, cellCol);
             const right = Math.max(col, cellCol);
@@ -5340,8 +5522,20 @@ export class GridHostController {
             (args.rangeSelect === "rect" || args.rangeSelect === "multi-rect")
         ) {
             const [selectedCol, selectedRow] = mangledSelection.current.cell;
-            const targetRow = row < 0 ? this.cellYOffset : row;
             const targetCol = Math.max(col, args.rowMarkerOffset);
+
+            // 4.1: `selectionBehavior: "block-spanning"` stops a drag-selection crossing a group
+            // boundary (`data-editor.tsx:2706-2724, 2786`). The limits come from the *anchor* row,
+            // not the row under the pointer, so the range is confined to the group the drag started
+            // in -- dragging past the boundary pins to it rather than jumping to the next group.
+            const limits = getSelectionRowLimits(
+                selectedRow,
+                args.flattenedRowGroups,
+                args.rowGrouping?.selectionBehavior
+            );
+            const unclampedRow = row < 0 ? this.cellYOffset : row;
+            const targetRow =
+                limits === undefined ? unclampedRow : Math.min(Math.max(unclampedRow, limits[0]), limits[1]);
 
             const deltaX = targetCol - selectedCol;
             const deltaY = targetRow - selectedRow;
@@ -6089,6 +6283,24 @@ export class GridHostController {
         }
 
         if (details.didMatch) {
+            // 4.1: `navigationBehavior` steps the target row off any group header it landed on.
+            // Source's placement exactly (`data-editor.tsx:3412-3440`) -- immediately before the
+            // move, on the *unclamped* row.
+            //
+            // That placement carries an upstream quirk this port reproduces rather than papers over:
+            // `goToFirstRow` sets `row` to `MIN_SAFE_INTEGER` as a "clamp me to the top" sentinel,
+            // and the skip sees the sentinel, reads it as an upward move, runs off the top of the
+            // grid and restores the starting row. So under `skip`, `skip-up` or `block`, Ctrl+Home
+            // does nothing. Fixing it would mean inventing a direction rule upstream does not have
+            // (the sentinel has no direction of travel), so it is left matching source.
+            row = skipGroupHeaders(
+                row,
+                navCurrent.cell[1],
+                args.rows,
+                args.flattenedRowGroups,
+                args.rowGrouping?.navigationBehavior
+            );
+
             // Source's `cancelOnlyOnMove`, which exists so a nav key that hits a wall is left
             // *unprevented* and focus can Tab out of the grid. It is true exactly when a movement
             // binding matched, which here is "the target cell expression changed" -- a move into a

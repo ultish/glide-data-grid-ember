@@ -60,7 +60,7 @@ import type {
     Rectangle,
     Theme,
     GetCellRendererCallback,
-    GetRowThemeCallback,
+    RowGroupingOptions,
     GroupDetails,
     SpriteMap,
     CustomRenderer,
@@ -423,7 +423,13 @@ export interface GlideDataGridSignature {
         // per-row overlay, applied after a column's `themeOverride` and before a cell's. See
         // THEMING.md for the full precedence table -- and note the blit-invalidation caveat there:
         // pass a *stable* function reference, not a fresh inline arrow each render.
-        getRowThemeOverride?: GetRowThemeCallback;
+        getRowThemeOverride?: (row: number, groupIndex: number, contentIndex: number) => Partial<Theme> | undefined;
+
+        // Row grouping (4.1). Collapsible header rows. The grid does NOT draw group headers -- it
+        // only learns which rows they are, so it can size, theme and number around them. Call
+        // `rowGroupingApi(...).mapper(row)` in `@getCellContent` to draw them and to translate every
+        // other row back into your own data space. See `GridHostArgs.rowGrouping`.
+        rowGrouping?: RowGroupingOptions;
 
         // Async / streaming data (Phase 8). Fired -- deduplicated, and deferred to a microtask so
         // it is safe to set tracked state from -- whenever the visible block of cells changes.
@@ -734,6 +740,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         trailingRowOptions: this.args.trailingRowOptions,
         onRowAppended: this.args.onRowAppended,
         getRowThemeOverride: this.args.getRowThemeOverride,
+        rowGrouping: this.args.rowGrouping,
         onVisibleRegionChanged: this.args.onVisibleRegionChanged,
         getCellsForSelection: this.args.getCellsForSelection,
         drawCell: this.args.drawCell,

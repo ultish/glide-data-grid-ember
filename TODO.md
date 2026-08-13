@@ -19,20 +19,24 @@ directly**; every item below cites file:line in it.
 is also what deploys to GitHub Pages. pnpm workspace.
 
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 903 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
+GitHub Pages. 941 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
 **Published vs unpublished.** **v0.3.0 is on npm** (tagged 2026-08-13) and everything below marked
-DONE ships in it — 4.2, 4.3, all of §4.5 and §4.5b, §4.4's drag-and-drop, and all of §4.6 except span
-selection. **Nothing is currently unreleased.** §5.3 has the release procedure for next time.
+DONE ships in it *except* **§4.1 row grouping, which is landed but unreleased** — it is the one thing
+currently sitting on `main` ahead of npm. §5.3 has the release procedure.
 
-**The `experimental` bag is now fully closed.** With 4.3, 4.4, 4.5, 4.5b and all of 4.6 except
-span selection done, the only substantial parity items left are **row grouping (§4.1)** and
-**span/merged-cell selection (§4.6)** — and the latter is blocked on span *rendering* existing first.
+**The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
+substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
+*rendering* existing first — no cell type in this port sets `GridCell.span`, so building it now would
+add a feature no demo can switch on, which rule 5 says is unverified code by construction.
+
+**There is no other outstanding work in this file.** §3.1 was decided on 2026-08-13 (smooth scrolling
+stays, documented). Everything else below is marked DONE and is kept for its source citations.
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 903 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 941 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -182,7 +186,14 @@ the demo. No additional work was needed.
 
 ## 3. Decide, then act — a stated divergence
 
-### 3.1 The port always smooth-scrolls; source defaults to snap-to-cell — `S`
+### 3.1 The port always smooth-scrolls; source defaults to snap-to-cell — DECIDED (2026-08-13)
+
+**Decision: smooth stays the default, and is now documented as a stated divergence** in the cookbook's
+*Performance rules* chapter. No code change. If a consumer ever asks for snap, the branch to port is
+`scrolling-data-grid.tsx:145-175` and the natural shape is `@smoothScrollX`/`@smoothScrollY` keeping
+`true` as this port's default.
+
+The original entry is kept below for the source citations.
 
 **Every grid this port renders scrolls differently from the same grid in React.**
 
@@ -202,16 +213,31 @@ document it in the cookbook's performance chapter. If not, the branch to port is
 
 ## 4. Substantial parity gaps
 
-### 4.1 Row grouping — `L` — the biggest remaining gap
+### 4.1 Row grouping — DONE (2026-08-13)
 
-Source: `data-editor/row-grouping.ts` (326 lines) + `row-grouping-api.ts` (72) + the `rowGrouping`
-prop. Column grouping was done in Phase 7b; rows were not.
+Shipped as `<GlideDataGrid @rowGrouping={{...}}>`, with `rowGroupingApi` / `mapRowIndexToPath` /
+`updateRowGroupingByPath` / `getRowGroupingForPath` as the consumer's half. Pure logic in
+`src/rendering/row-grouping.ts` (38 tests); `<DemoGrid>`'s "Row groups" toggle cycles
+off / normal / skip / block. Full write-up in **PORTING-NOTES.md → "4.1 — row grouping"**.
 
-**Read the warning before starting:** it changes row-space mapping **globally**, so it interacts with
-every decorator's coordinate contract (rule 4 above) — including the three hooks in
-`src/data-source/` (`withColumnSort`, `withMovableColumns`, `withCollapsingGroups`, `UndoRedo`,
-`recordsSource`, `AsyncRecordsSource`). This is the item most likely to break things quietly. Give it
-its own session with a browser available; do not squeeze it in.
+**The feared interaction did not materialise, and it is worth knowing why.** Row grouping is four
+transforms applied to args the grid already had (`rows`, `rowHeight`, `getRowThemeOverride`, the
+row-marker number), so it lands entirely in `resolveArgs` and nothing below it — including every
+`src/data-source/` decorator — learns that grouping exists. **The grid does not draw group headers**;
+the consumer does, via `mapper(row)`. That is source's design too.
+
+Three things a future session should know:
+
+- **One repair to source**, demonstrated by running source's own code: `flattenRowGroups` computes
+  `rowIndex` across hidden groups, so collapsing a group *that has subgroups* makes every group header
+  below it lose `options.height`. This port assigns it over the visible groups only. `contentIndex`
+  keeps source's behaviour, which is deliberate there.
+- **Known upstream quirk, reproduced on purpose:** `goToFirstRow` (Ctrl+Home) is inert under
+  `navigationBehavior` `skip`, `skip-up` or `block` — the skip sees the `MIN_SAFE_INTEGER` sentinel,
+  reads it as an upward move and restores the start row. Fixing it means inventing a direction rule
+  upstream does not have. Revisit only if someone actually hits it.
+- **A group at `headerIndex: 0` displaces original row 0** — the header occupies that slot, as
+  upstream. Source's own story starts its groups at 10 for this reason.
 
 ### 4.2 `getGroupDetails` — group header icons, themes, actions — DONE (2026-08-12)
 

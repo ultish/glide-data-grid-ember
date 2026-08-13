@@ -5705,3 +5705,104 @@ click establishes it; a dispatched `MouseEvent` does not reliably, and in a hidd
 inert entirely. The working shape is: `computer` click once to focus, then either `computer` key
 presses or dispatched `KeyboardEvent`s (needed for `ctrl+space`, which macOS swallows), reading a
 `MutationObserver` log of the status row so several keys can be checked per round trip.
+
+## 4.1 — row grouping (COMPLETE, browser-verified, 2026-08-13)
+
+Source: `data-editor/row-grouping.ts` (326) + `row-grouping-api.ts` (72) + the `rowGrouping` prop.
+Ported to `src/rendering/row-grouping.ts` (pure, 38 tests) plus ~6 touch points in the controller.
+
+**It is far smaller than TODO.md's `L` estimate suggested, and the reason is worth internalising:
+the grid does not draw group headers, and neither does source.** A group header is an ordinary row
+that the *consumer* recognises via `mapper(row)` and returns whatever cell content it likes for. The
+grid's entire contribution is four transforms applied to args it already had:
+
+| arg | transform |
+|---|---|
+| `rows` | `effectiveRowCount` — a collapsed group contributes 1 row |
+| `rowHeight` | `makeRowHeight` — header rows get `options.height` |
+| `getRowThemeOverride` | `makeRowThemeOverride` — header rows get `options.themeOverride` |
+| the row-marker number | `makeRowNumberMapper` — `undefined` on a header row, so it draws blank |
+
+Because they are all *arg transforms*, the whole feature lands in `resolveArgs` and **nothing below it
+learns that grouping exists**. That is source's structure too (`useRowGroupingInner` runs near the top
+of `DataEditor`), and it is what defused the interaction TODO.md §4.1 warned about — the
+`src/data-source/` decorators never see grouped coordinates, because grouping is applied after them.
+
+**Ordering matters and is source's:** grouping runs *before* `remAdjust`, so a `scaleToRem` grid scales
+`rowGrouping.height` through the wrapped `rowHeight` function rather than needing its own case.
+
+### The memo is load-bearing (rule 1, again)
+
+`resolvedRowGrouping` memoizes on `(rowGrouping, rows, rowHeightIn, getRowThemeOverrideIn)`. Both
+values it produces are identity-compared — `rowHeight` by `dimensionsAreEqual` *and* `computeCanBlit`,
+`getRowThemeOverride` by `data-grid-render.blit.ts:241` — and `resolveArgs` runs several times per
+draw. Without the memo every resolve would hand out fresh closures and silently kill the blit fast
+path, and it would also defeat `remAdjustCache`, which keys on `rowHeight` by identity. The demo's
+`rowGrouping` getter is `@cached` for the same reason, and that is documented in the cookbook because
+a consumer has to get it right too.
+
+### One repair to source, demonstrated rather than asserted
+
+`flattenRowGroups` fills in `rowIndex` and `contentIndex` in a single pass over the **unfiltered**
+list, then filters out groups hidden inside a collapsed ancestor. `contentIndex` accumulating across
+hidden groups is correct and deliberate (it indexes fully-expanded content space, so a row keeps its
+marker number when a group above it folds). **`rowIndex` doing so is not**: it disagrees with
+`mapRowIndexToPath`, which is the other computation of the same quantity and the one that decides what
+is drawn.
+
+Verified by transcribing source's own functions into a scratch script and running them: three groups
+over 30 rows, middle group carrying two subgroups and collapsed → source reports `rowIndex: 22` for
+the last group's header, while its own mapper puts that header at row 11, **in a grid that is 16 rows
+tall**. `rowIndex`'s only consumer is the group-header row-height lookup, so upstream's actual symptom
+is that collapsing a parent group makes every group header below it lose `options.height`.
+
+This port assigns `rowIndex` in a second pass over the *visible* list, which is the same accumulation
+`mapRowIndexToPath` performs and therefore agrees by construction. Pinned by a test that walks every
+group and asserts `mapRowIndexToPath(g.rowIndex).isGroupHeader`.
+
+**Browser-confirmed, not just unit-tested:** with the first group (which has subgroups) collapsed, a
+hover bisect measured grid row 0 = 44px, **grid row 1 = 44px**, grid row 2 = 34px. Under source's
+accounting row 1 would have been 34.
+
+### Two upstream behaviours reproduced on purpose
+
+- **`goToFirstRow` is inert under `skip`/`skip-up`/`block`.** Source applies the header-skip to the
+  *unclamped* row, and `goToFirstRow` sets `Number.MIN_SAFE_INTEGER` as a "clamp me to the top"
+  sentinel. The skip reads that as an upward move, runs off the top and restores the starting row. So
+  Ctrl+Home does nothing under those three settings. Fixing it means inventing a direction rule
+  upstream does not have — the sentinel has no direction of travel — so it is left matching source.
+  Noted in TODO.md as a known quirk rather than silently diverged from.
+- **A group at `headerIndex: 0` displaces original row 0.** The header occupies that slot
+  (`rowsInGroup--`, "the header isn't in the group"), so the group's content starts at index 1. This
+  is why source's own story places groups at 10 and 30 rather than 0.
+
+### Type widening, not a divergence
+
+`RowGroup` is widened to `number | {…}`. Source's `groups` documents the bare-number shorthand and its
+`expandRowGroups` implements it, but its declared type never admitted a number, leaving the branch
+unreachable. Behaviour is identical; the documented form now type-checks.
+
+`getRowThemeOverride` gains source's second and third arguments (`groupIndex`, `contentIndex`). With
+grouping off all three are the row index, as upstream — which is why the ungrouped path also gets a
+(memoized) wrapper rather than passing the callback straight through. Existing one-argument callbacks
+are unaffected.
+
+### Verification
+
+Browser-verified end to end on a clean `dist/` build: header rows drawn from the mapper, `originalIndex`
+translation (EMP-05001 after a collapse, not EMP-05000), marker numbering skipping headers and
+following `contentIndex` across a collapse (4998…), collapse/expand through `updateRowGroupingByPath`,
+nested subgroups vanishing with their parent, and the three interaction settings as differentials on
+one gesture — `normal` selects a header where `skip` refuses the move, `block` refuses the *click*
+selection while `@onCellClicked` still fires, and `block-spanning` clamps a drag to `cell 0,2` where
+`allow-spanning` gives `range 1x3 at 0,0`.
+
+The row-height check is the one worth reusing: **`scrollHeight` deltas are an exact, non-visual
+assertion about row heights.** Toggling grouping changed the scroller's extent by exactly 420px =
+42 headers × (44 − 34), which pins both the height and the number of rows it applied to, with none of
+the eyeball error a zoomed screenshot has.
+
+Two harness notes, both re-earned: a `javascript_tool` loop that calls `document.body.innerText` per
+iteration times the renderer out at ~70 iterations on this page (scope the readout to the status
+element), and hover-probing is the only non-destructive way to bisect row boundaries here — clicking
+to probe fires `@onCellClicked` and collapses the group you are measuring.

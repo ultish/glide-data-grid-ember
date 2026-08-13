@@ -48,6 +48,12 @@ import {
     headerKind,
     groupHeaderKind,
     outOfBoundsKind,
+    rowGroupingApi,
+    getRowGroupingForPath,
+    updateRowGroupingByPath,
+    type RowGroup,
+    type RowGroupingOptions,
+    type RowGroupingApi,
 } from "glide-data-grid-ember/rendering/index";
 import { cached } from "@glimmer/tracking";
 // 4.6: the individual extra-cell renderers live in their own barrel; `rendering/index` re-exports
@@ -212,6 +218,30 @@ const AUTO_SIZED_COLUMN = 3;
 // how it stayed dead: the type field existed and `growOffset` was read in three resize callbacks,
 // but no code ever computed it, so setting `grow` did nothing and said nothing.
 const GROW_COLUMNS: Readonly<Record<number, number>> = { 1: 2, 2: 1 };
+
+// 4.1: the demo's row groups. Every 5,000 rows across the 200,000-row demo -- 40 groups, which keeps
+// the per-cell `mapper` lookup (a linear scan of the flattened list, as upstream) cheap while still
+// being enough groups that scrolling crosses several.
+//
+// The first group carries two subgroups deliberately. Nesting is the case that distinguishes a
+// correct implementation from one that merely looks right: it is the only way a group can be hidden
+// inside a *collapsed* ancestor, which is where source's own `rowIndex` accounting goes wrong.
+const DEMO_ROW_GROUP_SIZE = 5000;
+
+function buildDemoRowGroups(): readonly RowGroup[] {
+    return Array.from({ length: Math.floor(DEMO_ROW_COUNT / DEMO_ROW_GROUP_SIZE) }, (_value, i): RowGroup => {
+        const headerIndex = i * DEMO_ROW_GROUP_SIZE;
+        if (i !== 0) return { headerIndex, isCollapsed: false };
+        return {
+            headerIndex,
+            isCollapsed: false,
+            subGroups: [
+                { headerIndex: 1000, isCollapsed: false },
+                { headerIndex: 3000, isCollapsed: false },
+            ],
+        };
+    });
+}
 
 function buildDemoColumns(): readonly GridColumn[] {
     return demoColumns.map((column, i) => {
@@ -540,10 +570,102 @@ export default class DemoGrid extends Component {
     };
 
     getCellContent = (item: Item): GridCell => {
+        // 4.1: with row grouping on, the grid hands out *grid* rows -- which count header rows and
+        // omit collapsed ones. Everything below wants a row in the demo's own data space, so the
+        // mapper runs first. This is the whole consumer contract for row grouping, and skipping it
+        // is what makes a grouped grid read the wrong record the moment anything is collapsed.
+        const grouping = this.rowGroupingApi;
+        if (grouping !== undefined) {
+            const { isGroupHeader, originalIndex, groupRows, path } = grouping.mapper(item[1]);
+            if (isGroupHeader) {
+                // The grid draws nothing special for a header row -- this cell IS the header. Only
+                // the first column gets the label; the rest stay blank so the band reads as one
+                // strip. (Source's story returns a `Loading` cell for the others, which draws the
+                // same way; a blank text cell is clearer about being deliberate.)
+                //
+                // `item[0] === 0` is the first *real* column: this callback receives consumer space,
+                // so the row-marker column has already been subtracted out.
+                if (item[0] !== 0) return { kind: GridCellKind.Text, data: "", displayData: "", allowOverlay: false };
+                const collapsed = this.isGroupCollapsed(path);
+                // `originalIndex` on a header row IS the group's `headerIndex`, and the header
+                // occupies that slot -- so the group's content runs from the next index up. (This is
+                // why a group at `headerIndex: 0` hides original row 0, exactly as upstream.)
+                const label = `${collapsed ? "▶" : "▼"}  Rows ${originalIndex + 1}–${originalIndex + groupRows}  (${groupRows})`;
+                return { kind: GridCellKind.Text, data: label, displayData: label, allowOverlay: false };
+            }
+            const row = this.sourceRow(originalIndex);
+            const col = naturalDemoColumnIndex(this.columns[item[0]], item[0]);
+            return this.edits.get(`${col},${row}`) ?? demoGetCellContent([col, row]);
+        }
+
         const row = this.sourceRow(item[1]);
         const col = naturalDemoColumnIndex(this.columns[item[0]], item[0]);
         return this.edits.get(`${col},${row}`) ?? demoGetCellContent([col, row]);
     };
+
+    // --- 4.1: row grouping -----------------------------------------------------------------------
+    // Cycles off -> normal -> skip -> block, where `block` also switches on `block-spanning`
+    // selection (source's own story pairs those two). Four states in one control because they are
+    // mutually exclusive and a demo that only ever shows one of them proves nothing about the rest.
+    @tracked rowGroupingIndex = 0;
+
+    // The collapse state. Kept as the group tree itself, because that is what `@rowGrouping` takes
+    // and what `updateRowGroupingByPath` returns -- a separate "which are collapsed" set would be a
+    // second source of truth.
+    @tracked rowGroups: readonly RowGroup[] = buildDemoRowGroups();
+
+    cycleRowGrouping = (): void => {
+        this.rowGroupingIndex = (this.rowGroupingIndex + 1) % 4;
+        // Reset the collapses when switching off, so re-enabling starts from a known state.
+        if (this.rowGroupingIndex === 0) this.rowGroups = buildDemoRowGroups();
+    };
+
+    get rowGroupingLabel(): string {
+        return ["off", "normal", "skip", "block"][this.rowGroupingIndex] ?? "off";
+    }
+
+    /**
+     * `@rowGrouping`'s value. **`@cached` is load-bearing, not tidiness** (rule 1): the controller
+     * memoizes the whole grouping transform on this object's identity, and both the wrapped
+     * `rowHeight` and the wrapped `getRowThemeOverride` it produces are identity-compared by
+     * `computeCanBlit`. A getter that rebuilt this object per access would hand out a fresh one every
+     * resolve and silently disable the scroll blit fast path -- no error, no visual difference.
+     */
+    @cached
+    get rowGrouping(): RowGroupingOptions | undefined {
+        if (this.rowGroupingIndex === 0) return undefined;
+        return {
+            groups: this.rowGroups,
+            height: 44,
+            themeOverride: { bgCell: this.isDark ? "#2a3550" : "#eef2ff" },
+            navigationBehavior: (["normal", "normal", "skip", "block"] as const)[this.rowGroupingIndex],
+            selectionBehavior: this.rowGroupingIndex === 3 ? "block-spanning" : "allow-spanning",
+        };
+    }
+
+    @cached
+    get rowGroupingApi(): RowGroupingApi | undefined {
+        const options = this.rowGrouping;
+        if (options === undefined) return undefined;
+        // Same row count the grid is given, or the mapper and the grid disagree about where the
+        // groups fall.
+        return rowGroupingApi(options, this.rows);
+    }
+
+    private isGroupCollapsed(path: readonly number[]): boolean {
+        const group = getRowGroupingForPath(this.rowGroups, path);
+        return typeof group === "number" ? false : group.isCollapsed;
+    }
+
+    /** Collapse/expand on a click anywhere in a group header row. */
+    private toggleRowGroup(gridRow: number): boolean {
+        const api = this.rowGroupingApi;
+        if (api === undefined) return false;
+        const { isGroupHeader, path } = api.mapper(gridRow);
+        if (!isGroupHeader) return false;
+        this.rowGroups = updateRowGroupingByPath(this.rowGroups, path, { isCollapsed: !this.isGroupCollapsed(path) });
+        return true;
+    }
 
     handleColumnResize = (_column: GridColumn, newSize: number, colIndex: number): void => {
         this.columns = this.columns.map((c, i) => (i === colIndex ? { ...c, width: newSize } : c));
@@ -993,6 +1115,15 @@ export default class DemoGrid extends Component {
     };
 
     handleCellClicked = (cell: Item): void => {
+        // 4.1: collapsing is entirely consumer-driven -- the grid never changes `groups` itself.
+        // Note this still fires for a header row under `navigationBehavior: "block"`: that setting
+        // suppresses the *selection*, not the click, which is exactly what makes click-to-collapse
+        // work on a blocked header.
+        if (this.toggleRowGroup(cell[1])) {
+            this.lastClick = `group header row ${cell[1]}`;
+            return;
+        }
+
         // Fires on mouseup, and only when it lands on the cell the mousedown did -- so starting a
         // drag-selection does NOT report a click here. Watch this readout while dragging: it stays
         // put. Calling `event.preventDefault()` would suppress the cell renderer's own `onClick` and
@@ -1610,6 +1741,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-row-grouping-toggle
+                    {{on "click" this.cycleRowGrouping}}
+                >
+                    Row groups:
+                    <b>{{this.rowGroupingLabel}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-fill-direction-toggle
                     {{on "click" this.cycleFillDirection}}
                 >
@@ -2105,6 +2245,9 @@ export default class DemoGrid extends Component {
                     @copyHeaders={{this.copyHeaders}}
                     @onDelete={{this.onDelete}}
                     @cellActivationBehavior={{this.cellActivationBehavior}}
+                    {{! 4.1: undefined unless the "Row groups" toggle is on. The grid does not draw
+                        the header rows -- `this.getCellContent` above does, off `mapper(row)`. }}
+                    @rowGrouping={{this.rowGrouping}}
                     @onCellClicked={{this.handleCellClicked}}
                     @onHeaderClicked={{this.handleHeaderClicked}}
                     @onGroupHeaderClicked={{this.handleGroupHeaderClicked}}

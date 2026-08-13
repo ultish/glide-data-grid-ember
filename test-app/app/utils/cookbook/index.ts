@@ -11,6 +11,7 @@ import { selectionSection } from "./selection.ts";
 import { dragAndDropSection } from "./drag-and-drop.ts";
 import { keyboardSection } from "./keyboard.ts";
 import { sortingSection } from "./sorting.ts";
+import { rowGroupingSection } from "./row-grouping.ts";
 import { composingSection } from "./composing.ts";
 import { hoverSection } from "./hover.ts";
 import { themingSection } from "./theming.ts";
@@ -31,6 +32,7 @@ export const SECTIONS: readonly Section[] = [
     dragAndDropSection,
     keyboardSection,
     sortingSection,
+    rowGroupingSection,
     composingSection,
     hoverSection,
     themingSection,

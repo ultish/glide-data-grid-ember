@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Row grouping** — `@rowGrouping` puts collapsible header rows between your data rows, with
+  per-group `height`, `themeOverride`, `navigationBehavior` (`normal` / `skip-up` / `skip-down` /
+  `skip` / `block`) and `selectionBehavior` (`allow-spanning` / `block-spanning`). The grid does
+  **not** draw group headers — it learns which rows they are so it can size, theme and number around
+  them, and `@getCellContent` draws them. `rowGroupingApi`, `mapRowIndexToPath`,
+  `updateRowGroupingByPath` and `getRowGroupingForPath` are exported for that: `mapper(row).originalIndex`
+  translates a grid row back into your own data space, which you must do on every read once grouping
+  is on. Nesting is supported via `subGroups`.
+- **`@getRowThemeOverride` now receives `(row, groupIndex, contentIndex)`**, matching upstream. With
+  `@rowGrouping` unset all three are the row index. Existing one-argument callbacks are unaffected.
+
+### Fixed
+
+- Row grouping computes a group header's grid row index over the visible groups only. Upstream
+  computes it across hidden groups too, so collapsing a group that has subgroups made every group
+  header below it lose its configured height.
+
+### Documentation
+
+- New cookbook chapter, *Grouping rows*.
+- *Performance rules* now records that this port always smooth-scrolls where upstream defaults to
+  snap-to-cell — a deliberate divergence that was previously undocumented.
+
 ## [0.3.0] - 2026-08-13
 
 ### Added

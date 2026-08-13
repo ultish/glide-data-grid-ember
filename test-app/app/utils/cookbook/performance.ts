@@ -39,5 +39,9 @@ export const performanceSection: Section = {
             kind: "p",
             text: "For genuinely high-frequency updates — thousands of cells a second from a socket — bypass tracking entirely with the imperative damage API (`updateCells` from `@onReady`). That is **Guide 8, *When the data isn't in memory***, and the **Streaming updates** tab measures it. It is not a fallback for a tracked grid that isn't repainting; that is a different bug, and it is **Guide 3**.",
         },
+        {
+            kind: "note",
+            text: "**This grid always smooth-scrolls, and React's does not.** Upstream defaults `smoothScrollX`/`smoothScrollY` to `false`, so a React grid snaps to whole cell boundaries and never shows a half-clipped row at the top edge; smooth scrolling is opt-in there. This port always translates by a sub-pixel offset, so content slides continuously and rows can be partly clipped at the edges. It is a deliberate choice rather than an oversight — it reads more like a native scroll area — but it is the first thing anyone porting a grid over from React notices, and there is currently no arg to switch it back.",
+        },
     ],
 };
