@@ -273,6 +273,18 @@ function naturalDemoColumnIndex(column: GridColumn | undefined, fallback: number
     return natural === -1 ? fallback : natural;
 }
 
+// The five columns that dominate this demo's draw cost: Photo (image), Skills (bubble), Projects
+// (drilldown), Trend (sparkline) and Rating (star). Natural indices, so the set survives reordering.
+//
+// Measured 2026-08-13: with these off screen the per-draw p90 fell from 4.8ms to 0.2ms — a 24x
+// difference on the same grid, same scroll. Cost tracks visible *heavy* cells and essentially
+// nothing else; the text/number/checkbox/uri columns are free. See TODO.md §3b.
+const MEDIA_COLUMN_INDICES: ReadonlySet<number> = new Set([5, 6, 7, 8, 9]);
+
+function isMediaColumn(column: GridColumn): boolean {
+    return MEDIA_COLUMN_INDICES.has(naturalDemoColumnIndex(column, -1));
+}
+
 // Cycled by the "Row markers" control. `"none"` is included on purpose: it is the default, and it
 // is the setting that turns row reordering off (there is nothing left to grab).
 const ROW_MARKER_KINDS: readonly RowMarkerKind[] = ["both", "checkbox", "number", "clickable-number", "none"];
@@ -1593,6 +1605,34 @@ export default class DemoGrid extends Component {
         this.closeHeaderMenu();
     };
 
+    /** True when none of the five heavy columns is currently in the grid. */
+    get mediaColumnsHidden(): boolean {
+        return !this.columns.some(c => isMediaColumn(c));
+    }
+
+    /**
+     * Hides or restores the five expensive columns in one go.
+     *
+     * Routed through the same `hiddenColumns` array the per-column header menu uses, rather than a
+     * separate flag, so the two compose: "Show hidden" restores whatever this hid, and hiding a
+     * media column individually still flips this control's label. Hiding is just removing the column
+     * from the array — cell content is looked up by column `id`, not by position.
+     */
+    toggleMediaColumns = (): void => {
+        if (this.mediaColumnsHidden) {
+            const restoring = this.hiddenColumns.filter(c => isMediaColumn(c));
+            this.hiddenColumns = this.hiddenColumns.filter(c => !isMediaColumn(c));
+            this.columns = [...this.columns, ...restoring].sort(
+                (a, b) => naturalDemoColumnIndex(a, 0) - naturalDemoColumnIndex(b, 0)
+            );
+        } else {
+            const hiding = this.columns.filter(c => isMediaColumn(c));
+            this.columns = this.columns.filter(c => !isMediaColumn(c));
+            this.hiddenColumns = [...this.hiddenColumns, ...hiding];
+        }
+        this.closeHeaderMenu();
+    };
+
     unhideAllColumns = (): void => {
         if (this.hiddenColumns.length === 0) return;
         // Restored in the demo's natural column order rather than at the end, so repeatedly hiding
@@ -1746,6 +1786,15 @@ export default class DemoGrid extends Component {
                 >
                     Row groups:
                     <b>{{this.rowGroupingLabel}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-media-columns-toggle
+                    {{on "click" this.toggleMediaColumns}}
+                >
+                    Media columns:
+                    <b>{{if this.mediaColumnsHidden "hidden" "shown"}}</b>
                 </button>
                 <button
                     type="button"
@@ -2231,13 +2280,17 @@ export default class DemoGrid extends Component {
                     @fixedShadowY={{this.scrollShadows}}
                     @overscrollX={{this.overscroll}}
                     @overscrollY={{this.overscroll}}
-                    {{! 4.5: source's `experimental` bag, flattened. Both rescaling flags are on so
-                        the scroll-time downscale is exercised on the browsers that honour it; each
-                        is a no-op elsewhere. }}
+                    {{! 4.5: source's `experimental` bag, flattened. All three rescaling flags are on
+                        so the scroll-time downscale is exercised wherever it is honoured; each is a
+                        no-op on the other browsers. `@enableChromeRescaling` is this port's own
+                        addition and is the only one of the three that does anything in Chromium —
+                        which, until it existed, meant the demo looked like it had opted in while
+                        actually painting at full dpr throughout every scroll. }}
                     @renderStrategy={{this.renderStrategyArg}}
                     @disableMinimumCellWidth={{this.disableMinimumCellWidth}}
                     @enableFirefoxRescaling={{true}}
                     @enableSafariRescaling={{true}}
+                    @enableChromeRescaling={{true}}
                     {{! 4.5: the last two `experimental` keys. `@strictVisibleRegion` is a harness for
                         paged sources; `@eventTarget` moves the window-level pointer listeners. }}
                     @strictVisibleRegion={{this.strictVisibleRegion}}

@@ -286,19 +286,20 @@ simultaneously — so putting the media columns behind a toggle (or narrowing th
 coverage and is the obvious cheap fix if the demo's own feel matters. The header menu already has
 per-column hide (4.5b), so this is testable interactively before changing anything.
 
-**Chrome gets no scroll-time DPR reduction at all, and that is worth a decision.** Read the guard,
-not the prop: `<DemoGrid>` sets `@enableFirefoxRescaling` *and* `@enableSafariRescaling` to `true`,
-but `resolveArgs` (`grid-host-controller.ts:2301-2306`) `&&`s each against `browserIsFirefox` /
-`browserIsSafari`, so on Chrome `rescaleWhileScrolling` is `undefined`, `maxScaleFactor` stays 5 and
-the canvas is painted at full dpr throughout the scroll. That is faithful to source, which offers the
-hack for those two browsers only. But the measurement above was taken on Chrome at dpr 2, where the
-6ms row draw is 4x the pixels of a 1x paint — so **capping dpr during scroll on Chrome is the single
-biggest available win, and this port cannot currently express it.**
+**Chrome scroll-time DPR capping — DONE (2026-08-14), as `@enableChromeRescaling`.** Previously this
+section recorded that Chromium got no scroll-time downscale at all: `<DemoGrid>` set
+`@enableFirefoxRescaling` and `@enableSafariRescaling` to `true`, but `resolveArgs` `&&`s each
+against `browserIsFirefox` / `browserIsSafari`, so on Chrome `rescaleWhileScrolling` stayed
+`undefined` and the canvas painted at full dpr throughout every scroll.
 
-Adding it (`@enableChromeRescaling`, or generalising the arg to a browser-agnostic
-`@rescaleWhileScrolling`) would be a deliberate divergence from upstream, so it needs a decision
-rather than a quiet patch. An earlier revision of this section recommended the existing two flags as
-"the cheapest win", which was wrong on Chrome for exactly this reason.
+**A deliberate divergence from upstream**, which offers the hack for those two browsers only, taken
+because the reason for it — fill cost scaling with `devicePixelRatio` — is not browser specific. Caps
+at **1x, not Safari's 2x**: at the common dpr of 2, `min(2, ceil(2))` is still 2, so a 2x cap would
+be an arg that cannot do anything on the displays it was added for. New `browserIsChromium` predicate
+matches the Chromium family (Edge, Brave, Opera, Arc), not Chrome alone.
+
+Browser-verified on Chrome at dpr 2: canvas backing store is 3424px for 1712 CSS px at rest (2x) and
+**1712 for 1712 while scrolling (1x)**.
 
 ### Harness note for whoever measures next
 

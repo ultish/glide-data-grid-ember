@@ -164,7 +164,12 @@ import {
 import { pointInRect } from "../rendering/common/math.ts";
 import { withAlpha } from "../rendering/color-parser.ts";
 import { AnimationQueue } from "../rendering/animation-queue.ts";
-import { browserIsSafari, browserIsOSX, browserIsFirefox } from "../rendering/common/browser-detect.ts";
+import {
+    browserIsSafari,
+    browserIsOSX,
+    browserIsFirefox,
+    browserIsChromium,
+} from "../rendering/common/browser-detect.ts";
 import { isGridSurfaceTarget } from "./grid-event-target.ts";
 import { MangledLayoutCache, type MangledLayout, type RowMarkerColumnSpec } from "./mangled-layout.ts";
 import {
@@ -327,6 +332,28 @@ export interface GridHostArgs {
     readonly enableFirefoxRescaling?: boolean;
     /** {@inheritDoc GridHostArgs.enableFirefoxRescaling} */
     readonly enableSafariRescaling?: boolean;
+    /**
+     * The same scroll-time downscale for **Chromium** browsers (Chrome, Edge, Brave, Opera, Arc),
+     * capping at 1x while scrolling exactly as Firefox does.
+     *
+     * **This arg does not exist upstream, and that is deliberate rather than an oversight in
+     * source.** Source offers the hack for Firefox and Safari only. It is added here because the
+     * reason for the cap — canvas fill cost scaling with `devicePixelRatio` — is not browser
+     * specific, and on a Retina display Chromium pays exactly the 4x fill that the other two are
+     * allowed to avoid. Measured on this port's own full-grid demo at dpr 2: the draws that matter
+     * are the ~6ms ones where a new row of image/bubble/sparkline cells enters view, and they are
+     * fill-bound.
+     *
+     * **1x, not 2x.** Safari's 2x is a no-op at the common `devicePixelRatio` of 2 —
+     * `min(2, ceil(2))` is still 2 — so the only cap that reduces work on a typical Retina screen is
+     * 1x. That is the same trade Firefox users already take: visibly softer while the scroll is in
+     * flight, sharp again 200ms after it stops.
+     *
+     * Off by default, like the other two: this trades image quality for frame rate, and that is the
+     * consumer's call.
+     * @defaultValue false
+     */
+    readonly enableChromeRescaling?: boolean;
     /**
      * Refuse to read any cell outside the region last reported to `@onVisibleRegionChanged`, handing
      * the renderer a `Loading` cell instead. Source's `experimental.strict`.
@@ -1274,7 +1301,7 @@ interface ResolvedGridHostArgs {
     readonly minimumCellWidth: number;
     readonly renderStrategy: "single-buffer" | "double-buffer" | "direct";
     /** Already `&&`-ed with the running browser, so the draw path only has to ask "is it on". */
-    readonly rescaleWhileScrolling: "firefox" | "safari" | undefined;
+    readonly rescaleWhileScrolling: "firefox" | "safari" | "chromium" | undefined;
     readonly strictVisibleRegion: boolean;
     readonly rightElement: HTMLElement | undefined;
     readonly rightElementSticky: boolean;
@@ -2298,12 +2325,19 @@ export class GridHostController {
             renderStrategy: args.renderStrategy ?? (browserIsSafari.value ? "double-buffer" : "single-buffer"),
             // Each flag is `&&`-ed with its own browser, exactly as source does
             // (`data-grid.tsx:437-438`) -- switching on Firefox rescaling in Chrome must do nothing.
+            //
+            // `chromium` is this port's addition (see `enableChromeRescaling`); it is last so the
+            // two upstream flags keep their exact precedence. The browser predicates are mutually
+            // exclusive anyway -- `browserIsChromium` excludes Firefox, and `browserIsSafari`
+            // excludes Chrome -- so the order only matters if a consumer sets several flags at once.
             rescaleWhileScrolling:
                 args.enableFirefoxRescaling === true && browserIsFirefox.value
                     ? "firefox"
                     : args.enableSafariRescaling === true && browserIsSafari.value
                       ? "safari"
-                      : undefined,
+                      : args.enableChromeRescaling === true && browserIsChromium.value
+                        ? "chromium"
+                        : undefined,
             strictVisibleRegion: args.strictVisibleRegion === true,
             rightElement: args.rightElement,
             rightElementSticky: args.rightElementSticky === true,
@@ -3081,7 +3115,15 @@ export class GridHostController {
             // 4.5: source's `maxDPR` (`data-grid.tsx:761`) -- 1x on Firefox or 2x on Safari *while
             // scrolling*, 5x otherwise. `isScrolling` is only ever true when a rescaling flag is on,
             // so a grid that has not opted in keeps the flat 5x it always had.
-            maxScaleFactor: this.isScrolling ? (args.rescaleWhileScrolling === "firefox" ? 1 : 2) : 5,
+            //
+            // `chromium` joins Firefox at 1x rather than Safari at 2x, and that is the whole point:
+            // at the common `devicePixelRatio` of 2 a 2x cap is a no-op (`min(2, ceil(2))` is 2), so
+            // 2x would add an arg that cannot do anything on the displays it was added for.
+            maxScaleFactor: this.isScrolling
+                ? args.rescaleWhileScrolling === "firefox" || args.rescaleWhileScrolling === "chromium"
+                    ? 1
+                    : 2
+                : 5,
             touchMode: false,
             renderStrategy: args.renderStrategy,
             enqueue: this.animationQueue.enqueue,

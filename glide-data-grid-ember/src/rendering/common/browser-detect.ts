@@ -23,3 +23,16 @@ export const browserIsSafari = lazy(
         !window.navigator.userAgent.includes("Chrome")
 );
 export const browserIsOSX = lazy(() => window.navigator.platform.toLowerCase().startsWith("mac"));
+
+/**
+ * **Not in source.** Added for `@enableChromeRescaling`, this port's extension of source's
+ * Firefox/Safari-only scroll-time DPR cap — see `GridHostArgs.enableChromeRescaling`.
+ *
+ * Deliberately matches Chromium as a family (Edge, Brave, Opera, Arc) rather than Chrome
+ * specifically: the reason the cap helps is the canvas fill cost at high `devicePixelRatio`, which
+ * every Chromium browser shares. `Chrome` appears in the Edge and Opera user agents too, so the only
+ * exclusion needed is Safari, which carries `Safari` but not `Chrome`.
+ */
+export const browserIsChromium = lazy(
+    () => window.navigator.userAgent.includes("Chrome") && !window.navigator.userAgent.includes("Firefox")
+);

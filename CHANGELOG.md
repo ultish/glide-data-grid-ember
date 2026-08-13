@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`@enableChromeRescaling`** — the scroll-time canvas downscale for Chromium browsers (Chrome,
+  Edge, Brave, Opera, Arc), capping at 1x while scrolling and restoring full resolution 200ms after
+  the last scroll. **Not an upstream arg**: React's grid offers this for Firefox and Safari only.
+  Added because the reason for it — canvas fill cost scaling with `devicePixelRatio` — is not
+  browser specific, and a Chromium browser on a Retina display pays exactly the 4x fill the other
+  two are allowed to avoid. Caps at 1x rather than Safari's 2x because at the common dpr of 2 a 2x
+  cap is a no-op. Off by default, like the other two.
+
 ## [0.4.0] - 2026-08-13
 
 ### Added

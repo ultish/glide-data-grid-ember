@@ -29,7 +29,7 @@ export const performanceSection: Section = {
         },
         {
             kind: "p",
-            text: "**Hi-DPI screens, wide grids.** The canvas is painted at up to 5x device pixel ratio, and on a 4K screen that is the per-frame fill cost. `@enableFirefoxRescaling` / `@enableSafariRescaling` drop it to 1x / 2x **while scrolling** and restore full resolution 200ms after the last scroll — blurrier in motion, sharp at rest. Each only applies on its own browser, so switching both on is the normal thing to do.",
+            text: "**Hi-DPI screens, wide grids.** The canvas is painted at up to 5x device pixel ratio, and on a Retina or 4K screen that is the per-frame fill cost — at dpr 2 every fill is four times the pixels. `@enableFirefoxRescaling`, `@enableSafariRescaling` and `@enableChromeRescaling` drop it **while scrolling** (to 1x, 2x and 1x respectively) and restore full resolution 200ms after the last scroll — blurrier in motion, sharp at rest. Each only applies on its own browser, so switching all three on is the normal thing to do.",
         },
         {
             kind: "note",
@@ -38,6 +38,10 @@ export const performanceSection: Section = {
         {
             kind: "p",
             text: "For genuinely high-frequency updates — thousands of cells a second from a socket — bypass tracking entirely with the imperative damage API (`updateCells` from `@onReady`). That is **Guide 8, *When the data isn't in memory***, and the **Streaming updates** tab measures it. It is not a fallback for a tracked grid that isn't repainting; that is a different bug, and it is **Guide 3**.",
+        },
+        {
+            kind: "note",
+            text: "**`@enableChromeRescaling` is this port's own arg, not an upstream one.** React's grid offers the scroll-time downscale for Firefox and Safari only. It is added here because the reason for it — canvas fill cost scaling with device pixel ratio — is not browser specific, and a Chromium browser on a Retina display pays exactly the 4x fill the other two are allowed to avoid. It caps at 1x rather than Safari's 2x, because at the common dpr of 2 a 2x cap does nothing at all.",
         },
         {
             kind: "note",

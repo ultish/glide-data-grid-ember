@@ -286,6 +286,12 @@ export interface GlideDataGridSignature {
         /** {@inheritDoc enableFirefoxRescaling} */
         enableSafariRescaling?: boolean;
         /**
+         * The same scroll-time downscale for Chromium browsers, capping at 1x. **Not an upstream
+         * arg** — see `GridHostArgs.enableChromeRescaling` for why this port adds it and why the cap
+         * is 1x rather than Safari's 2x.
+         */
+        enableChromeRescaling?: boolean;
+        /**
          * Refuse to read any cell outside the region last reported to `@onVisibleRegionChanged`,
          * drawing a loading cell instead. A **development harness for paged/async sources**: it
          * turns "the grid quietly rendered whatever the array held" into visible loading cells.
@@ -699,6 +705,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         renderStrategy: this.args.renderStrategy,
         enableFirefoxRescaling: this.args.enableFirefoxRescaling,
         enableSafariRescaling: this.args.enableSafariRescaling,
+        enableChromeRescaling: this.args.enableChromeRescaling,
         strictVisibleRegion: this.args.strictVisibleRegion,
         eventTarget: this.args.eventTarget,
         // `undefined` until the template has rendered a `<:rightElement>` block -- see the getter.
