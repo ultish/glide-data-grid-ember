@@ -259,10 +259,32 @@ drawing, which blows the 16.7ms budget. It behaves identically on 0.1.7. It also
 **glide demo feels better** (plainer cells) and why `Scroll to row 50` feels choppy (a large jump
 crosses many new rows at once).
 
-**If this needs to get faster, the levers are cell-draw cost, not the scroll machinery:** cheaper
-cell renderers for the heavy columns, and the row/column buffer cache that source lists but neither
-project implements (see the "Future optimization opportunities" comment at the top of
+**Confirmed by measurement: cost tracks the number of visible *heavy* cells, and nothing else.** Same
+grid, same 300-draw benchmark, only the window width changed:
+
+| | 11 cols visible (1712px) | 4 cols visible (604px) |
+|---|---|---|
+| p90 | 4.8 ms | **0.2 ms** |
+| p99 | 6.7 ms | 0.8 ms |
+| mean | 1.178 ms | 0.137 ms |
+| wall, 300 draws | 360.6 ms | 45.5 ms |
+
+**p90 fell 24x.** Caveat: the narrow window also cut visible rows 16 -> 4, so that is a ~16x cell
+reduction, not a pure column test — but the direction and magnitude are unambiguous, and the columns
+that dropped out were `Photo`, `Skills`, `Projects`, `Trend` and `Rating`, i.e. *all four expensive
+cell types* (image, two bubble columns, sparkline, stars). The four that remained are text, number,
+checkbox and uri, and they are essentially free.
+
+**So the levers are cell-draw cost, not the scroll machinery:** cheaper renderers for those columns,
+fewer of them on screen at once, and the row/column buffer cache that source lists but neither project
+implements (see the "Future optimization opportunities" comment at the top of
 `rendering/render/data-grid-render.ts`).
+
+**On `<DemoGrid>` specifically:** it is slow because Phase 10 made it show every cell type at once,
+which is its job. Rule 5 protects the *coverage of cell types*, not the number of columns on screen
+simultaneously — so putting the media columns behind a toggle (or narrowing them) would cost no
+coverage and is the obvious cheap fix if the demo's own feel matters. The header menu already has
+per-column hide (4.5b), so this is testable interactively before changing anything.
 
 **Chrome gets no scroll-time DPR reduction at all, and that is worth a decision.** Read the guard,
 not the prop: `<DemoGrid>` sets `@enableFirefoxRescaling` *and* `@enableSafariRescaling` to `true`,
