@@ -21,11 +21,9 @@ is also what deploys to GitHub Pages. pnpm workspace.
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
 GitHub Pages. 903 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
-**Published vs unpublished.** **v0.2.1 is on npm** (tagged and pushed 2026-08-13) and contains
-everything through 4.6's controlled selection: 4.2 (`@getGroupDetails`, `@onGroupHeaderRenamed`),
-4.3 (`<:rightElement>` + the two paddings), every §4.5 row, and `@selection` /
-`@onSelectionCleared`. **Unreleased since that tag:** §4.4 (external HTML5 drag-and-drop) and §4.6 (`@keybindings`, the nav
-variants, the `onSelect` hook) plus §4.5b. §5.3 has the release procedure.
+**Published vs unpublished.** **v0.3.0 is on npm** (tagged 2026-08-13) and everything below marked
+DONE ships in it — 4.2, 4.3, all of §4.5 and §4.5b, §4.4's drag-and-drop, and all of §4.6 except span
+selection. **Nothing is currently unreleased.** §5.3 has the release procedure for next time.
 
 **The `experimental` bag is now fully closed.** With 4.3, 4.4, 4.5, 4.5b and all of 4.6 except
 span selection done, the only substantial parity items left are **row grouping (§4.1)** and
@@ -341,9 +339,9 @@ violations.)
 - Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
   character.
 
-### 5.3 npm publish — DONE (0.1.7 on 2026-08-09, 0.2.0 on 2026-08-12)
+### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0 — latest 2026-08-13)
 
-- Current version is `0.2.0`, tagged `v0.2.0`. Everything from 4.2 and §4.5 ships in it.
+- Current version is `0.3.0`, tagged `v0.3.0`.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.

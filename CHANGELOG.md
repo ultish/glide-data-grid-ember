@@ -5,6 +5,57 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-13
+
+### Added
+
+- **External HTML5 drag-and-drop** — `@isDraggable` (`true`, `"cell"` or `"header"`) makes the grid
+  a drag source, and `@onDrop` separately makes it a drop target; the two halves are independent.
+  `@onDragStart` supplies the payload with `setData(mime, payload)` and can override the drag image,
+  `@onDragOverCell` fires once per new cell rather than per event, `@onDragLeave` completes the set.
+  Distinct from the internal column/row reorder gestures, which are plain mouse drags. **A drag that
+  sets no data is cancelled**, so `@isDraggable` is safe to switch on before the callback exists.
+- **`@keybindings`** — remap or switch off any keyboard gesture: `true` keeps the default, `false`
+  disables it, a string rebinds it. Same syntax as upstream (`primary+shift+f`, `ArrowRight|Tab`,
+  `any+Escape`, `_68` for a keyCode), so a React `keybindings` map transfers unchanged. The
+  _Keyboard, and remapping keys_ cookbook chapter lists every binding and its default.
+- **Keyboard gestures that were missing**, all now bindable: Tab / shift+Tab as horizontal movement,
+  alt+Arrow to move the cursor without collapsing the selection, primary+shift+Arrow/Home/End to
+  extend the selection to an edge, shift+space / ctrl+space to select the row / column,
+  PageUp/PageDown, primary+Enter to scroll the selection back into view, and **Escape to clear the
+  selection** (which also fires `@onSelectionCleared`, matching upstream).
+- **`CellRenderer.onSelect`** is now called. A custom cell renderer can intercept a click that would
+  move the selection onto one of its cells, and `preventDefault()` refuses it — the only callback in
+  the grid that can.
+- `<DemoGrid>`'s header menu gained real items (auto-size, hide/show column), and the demo app gained
+  a **Shadow DOM** tab.
+
+### Fixed
+
+- A drag started inside the grid no longer extends the selection underneath it.
+
+### Notes
+
+- **The grid works inside a shadow root**, now verified rather than assumed: hit-testing, focus,
+  pointer listeners and keyboard navigation all cross the boundary. **Styles do not** — the addon's
+  stylesheets land in the document head, which a shadow boundary blocks by construction, so a
+  consumer mounting the grid in a shadow root must adopt them (e.g. via `adoptedStyleSheets`).
+- The `search` keybinding defaults to **on** here where upstream defaults it off; Cmd/Ctrl+F has
+  worked in this addon since 0.1.x, and inheriting upstream's default would have silently removed it.
+  Pass `keybindings={{hash search=false}}` for upstream's behaviour.
+- Upstream's `downFill` / `rightFill` and `acceptOverlay*` bindings are deliberately absent from the
+  map rather than present and inert: this addon has no keyboard fill command (its fill handle is a
+  mouse gesture), and its overlay editor handles its own keys.
+- A `shift+Arrow` that grows the selection without moving the cursor is swallowed here, where
+  upstream lets it through. Unchanged from previous releases of this addon; without it the page
+  scrolls under the user mid-selection. Tab at the last column still moves focus out of the grid.
+- When you write a cell through `@onDrop` (or any other consumer-initiated path), call
+  `updateCells` — nothing has told the grid to repaint. This is the same tracking rule as everywhere
+  else, but a drop _looks_ like an edit the grid made.
+- Swapping a shipped cell renderer for your own must be done **by identity**, not by filtering on
+  `kind`: every custom renderer carries `kind: GridCellKind.Custom`, so a `kind` filter removes
+  nothing and leaves the original ahead of your replacement.
+
 ## [0.2.1] - 2026-08-12
 
 ### Added
@@ -140,6 +191,7 @@ thousands stay smooth.
   and canary — i.e. through Ember 7.x.
 - Embroider or ember-auto-import v2.
 
+[0.3.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.2.0
 [0.1.7]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.1.7
