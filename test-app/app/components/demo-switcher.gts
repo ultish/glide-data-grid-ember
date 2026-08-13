@@ -2,12 +2,16 @@
 // `app/templates/application.gts` because that template uses `ember-route-template`'s classless
 // `Route(<template>)` form, which has no backing class to hold `@tracked` state.
 //
+//   - "Glide demo"     -> `<GlideDemo>`: Phase 7c's replica of grid.glideapps.com's demo grid --
+//                          column group headers, row markers, sparklines, and the consumer-built
+//                          column sort menu. **This is the landing tab**: it is the showcase grid,
+//                          and it is also the cheapest one to draw. `<DemoGrid>` renders every cell
+//                          type at once, which measured a p90 of ~5ms per draw against this one's
+//                          fraction of that -- fine for a reference integration you opt into, a poor
+//                          first impression for a page that opens on it. See TODO.md 3b.
 //   - "Full grid"      -> `<DemoGrid>`: 200k rows, every cell type, resize/reorder, theming.
 //   - "Tracking proof" -> `<TrackingDemo>`: small model-store-backed table + edit form, proving
 //                          `@tracked` mutations repaint the canvas with no imperative redraw.
-//   - "Glide demo"     -> `<GlideDemo>`: Phase 7c's replica of grid.glideapps.com's demo grid --
-//                          column group headers, row markers, sparklines, and the consumer-built
-//                          column sort menu.
 //   - "Streaming"      -> `<StreamingDemo>`: Phase 8's high-frequency demo -- a non-tracked buffer
 //                          + imperative `updateCells()` at thousands of cells/sec, with measured
 //                          throughput and repaint timings.
@@ -62,7 +66,10 @@ type DemoTab =
     | "cookbook";
 
 export default class DemoSwitcher extends Component {
-    @tracked tab: DemoTab = "full-grid";
+    // The landing tab. `<GlideDemo>` rather than `<DemoGrid>` because it is the showcase and the
+    // cheaper grid -- see the note at the top of this file. The template's `{{else}}` branch renders
+    // this same component, so the default is stated in exactly one place.
+    @tracked tab: DemoTab = "glide";
 
     showFullGrid = (): void => {
         this.tab = "full-grid";
@@ -161,6 +168,14 @@ export default class DemoSwitcher extends Component {
     keep exercising that path instead of tiptoeing around it. }}
             <div style="flex: 0 0 auto; display: flex; gap: 6px; align-items: center; font: 13px system-ui;">
                 <button
+                    class="btn btn-xs btn-ghost {{if this.isGlide 'btn-active'}}"
+                    type="button"
+                    data-test-show-glide
+                    {{on "click" this.showGlideDemo}}
+                >
+                    Glide demo grid
+                </button>
+                <button
                     class="btn btn-xs btn-ghost {{if this.isFullGrid 'btn-active'}}"
                     type="button"
                     data-test-show-full-grid
@@ -175,14 +190,6 @@ export default class DemoSwitcher extends Component {
                     {{on "click" this.showTrackingDemo}}
                 >
                     Tracking proof demo
-                </button>
-                <button
-                    class="btn btn-xs btn-ghost {{if this.isGlide 'btn-active'}}"
-                    type="button"
-                    data-test-show-glide
-                    {{on "click" this.showGlideDemo}}
-                >
-                    Glide demo grid
                 </button>
                 <button
                     class="btn btn-xs btn-ghost {{if this.isStreaming 'btn-active'}}"
@@ -250,10 +257,10 @@ export default class DemoSwitcher extends Component {
                 </button>
             </div>
             <div style="flex: 1 1 auto; min-height: 0;">
-                {{#if this.isTracking}}
+                {{#if this.isFullGrid}}
+                    <DemoGrid />
+                {{else if this.isTracking}}
                     <TrackingDemo />
-                {{else if this.isGlide}}
-                    <GlideDemo />
                 {{else if this.isStreaming}}
                     <StreamingDemo />
                 {{else if this.isComposed}}
@@ -271,7 +278,8 @@ export default class DemoSwitcher extends Component {
                 {{else if this.isCookbook}}
                     <CookbookPage />
                 {{else}}
-                    <DemoGrid />
+                    {{! The landing tab -- keep this in step with `tab`'s initial value above. }}
+                    <GlideDemo />
                 {{/if}}
             </div>
         </div>
