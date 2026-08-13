@@ -31,7 +31,23 @@ import {
 } from "test-app/utils/demo-fixtures";
 
 export const DEMO_ROW_COUNT = 200_000;
-export const DEMO_COLUMN_COUNT = 50;
+
+/**
+ * 21 typed columns + 5 filler. Was 50 (29 filler); trimmed 2026-08-13 because 29 columns of
+ * plausible-but-inert text made the demo tedious to scroll through horizontally without
+ * demonstrating anything the first few don't.
+ *
+ * **The floor is `TYPED_COLUMNS.length`, and it is a hard floor**: every one of those 21 is a
+ * *distinct* cell kind (8 built-in + the 13 extra cell types), so dropping any of them drops the
+ * only place that type is exercised — which rule 5 says makes it unverified code. The filler is the
+ * only slack, and a few are kept so horizontal scrolling still has somewhere to go.
+ *
+ * **This does not make scrolling faster and is not meant to.** Only *visible* columns are drawn, so
+ * off-screen ones cost nothing per frame beyond `mapColumns` allocating one object each. The scroll
+ * cost is the visible heavy cells (image, bubble, drilldown, sparkline, star), which are columns
+ * 5–9 and all on screen at once. See TODO.md §3b.
+ */
+export const DEMO_COLUMN_COUNT = 26;
 
 // --- the demo's activity channel ----------------------------------------------------------------
 // Several cell kinds carry a *callback* on the cell itself -- `ButtonCell`'s `onClick`,
