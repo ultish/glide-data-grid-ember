@@ -262,8 +262,21 @@ crosses many new rows at once).
 **If this needs to get faster, the levers are cell-draw cost, not the scroll machinery:** cheaper
 cell renderers for the heavy columns, and the row/column buffer cache that source lists but neither
 project implements (see the "Future optimization opportunities" comment at the top of
-`rendering/render/data-grid-render.ts`). `@enableFirefoxRescaling`/`@enableSafariRescaling` already
-exist to cap DPR during scroll and are the cheapest win on a Retina display.
+`rendering/render/data-grid-render.ts`).
+
+**Chrome gets no scroll-time DPR reduction at all, and that is worth a decision.** Read the guard,
+not the prop: `<DemoGrid>` sets `@enableFirefoxRescaling` *and* `@enableSafariRescaling` to `true`,
+but `resolveArgs` (`grid-host-controller.ts:2301-2306`) `&&`s each against `browserIsFirefox` /
+`browserIsSafari`, so on Chrome `rescaleWhileScrolling` is `undefined`, `maxScaleFactor` stays 5 and
+the canvas is painted at full dpr throughout the scroll. That is faithful to source, which offers the
+hack for those two browsers only. But the measurement above was taken on Chrome at dpr 2, where the
+6ms row draw is 4x the pixels of a 1x paint — so **capping dpr during scroll on Chrome is the single
+biggest available win, and this port cannot currently express it.**
+
+Adding it (`@enableChromeRescaling`, or generalising the arg to a browser-agnostic
+`@rescaleWhileScrolling`) would be a deliberate divergence from upstream, so it needs a decision
+rather than a quiet patch. An earlier revision of this section recommended the existing two flags as
+"the cheapest win", which was wrong on Chrome for exactly this reason.
 
 ### Harness note for whoever measures next
 
