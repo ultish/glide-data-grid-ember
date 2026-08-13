@@ -211,6 +211,47 @@ document it in the cookbook's performance chapter. If not, the branch to port is
 
 ---
 
+## 3b. Scroll perf regression since 0.1.7 — OPEN, partly diagnosed (2026-08-13)
+
+Reported: the full grid demo scrolls choppily, `Scroll to row 50` is choppy, the glide demo is
+slightly slower. Measured by instrumenting `drawGrid`, `runDraw`, `resolveArgs` and `computeCanBlit`
+identically on a `v0.1.7` worktree and on `main`, same machine, same scroll gesture.
+
+**Ruled out, with numbers — do not re-investigate these:**
+
+- **The blit fast path is intact in both versions.** Zero identity breakers across every scroll
+  measured (`computeCanBlit`'s ~18 fields all compared equal). Rule 1 is *not* what is happening here,
+  which is worth knowing because it is the reflexive first guess.
+- **The demo's debug/status row is not the cause.** It produced **one** DOM mutation for an entire
+  scroll gesture — `@onVisibleRegionChanged` defers to a microtask and Ember coalesces the tracked
+  write. Cost is not per-frame.
+- **Work outside `drawGrid` is negligible**: `runDraw` minus `drawGrid` was 3% of the total, so scroll
+  shadows and the visible-region computation are not it. `resolveArgs` was ~0.2ms/draw.
+- **No long tasks** (>50ms) in either version.
+
+**Found:** per-draw cost roughly **1.5–1.7× worse than 0.1.7** — warm draws 0.4/0.6ms → 0.8/0.9ms,
+cold 6.2ms → 8.1ms. Real, but sub-millisecond against a 16ms budget, so it is **not on its own an
+explanation** for visible choppiness. Draw cost also varies hugely with scroll *distance* (2ms to
+15ms per draw), since cost scales with how many new rows enter view.
+
+**Two things not yet done:**
+
+1. **Bisect the 11 addon commits in `v0.1.7..HEAD`** for the per-draw regression. Nothing here
+   identifies which one; the candidates that add per-draw work are 4.5's scroll shadows, 4.2's
+   `getGroupDetails` (allocates per group per frame), and the hairline/resize-indicator drawing.
+2. **Reproduce the choppiness at all.** It was *not* reproduced. Chrome suspends `requestAnimationFrame`
+   whenever the tab is not foreground, and the `computer` tool only foregrounds it for the duration of
+   a discrete action — so a real continuous scroll cannot be driven from the agent harness, and
+   `setTimeout` fallbacks get throttled to 1/s. Every number above comes from discrete scroll gestures.
+   **Measure this from a real DevTools session instead**; the instrumentation used is described above
+   and is a few lines around `drawGrid`/`computeCanBlit`.
+
+**Strong confound to check first.** Phase 10 made `<DemoGrid>` the fully-featured reference grid with
+*every* shipped arg switched on; 0.1.7's demo had roughly fifteen fewer toggles enabled. So part of
+"the full demo is slow" may be "the full demo now does much more per draw, by design" — which also
+fits the report that the *glide* demo, which enables far less, is only slightly slower. Compare
+like-for-like by switching the demo's extras off before concluding the addon regressed.
+
 ## 4. Substantial parity gaps
 
 ### 4.1 Row grouping — DONE (2026-08-13)
