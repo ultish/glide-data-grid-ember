@@ -16,27 +16,28 @@
 //     canvas draw loop (once per painted cell), so it must never do real work. See
 //     PORTING-NOTES.md's "Autotracking -> canvas" section.
 //
-// **Row count and what it costs** (measured 2026-08-13, raised 3,000 -> 200,000 to match the full
-// grid demo). Materializing up front is not free at this size, and the numbers are worth knowing
-// before changing it again:
+// **Row count and what it costs.** Raised from 3,000 to 50,000 on 2026-08-13, having measured
+// 200,000 first and rejected it. Materializing up front is not free at this size:
 //
-//   | rows    | build at module load | heap  | one sort click |
-//   |---------|----------------------|-------|----------------|
-//   | 3,000   | 6 ms                 | 3 MB  | ~4 ms          |
-//   | 50,000  | 48 ms                | 33 MB | ~60 ms         |
-//   | 200,000 | 150 ms               | ~140 MB | **253 ms**   |
+//   | rows    | build (node) | records heap | page heap | one sort click |
+//   |---------|--------------|--------------|-----------|----------------|
+//   | 3,000   | 6 ms         | 3 MB         | —         | ~4 ms          |
+//   | 50,000  | 48 ms        | 33 MB        | ~85 MB    | **80 ms**      |
+//   | 200,000 | 150 ms       | 122 MB       | ~140 MB   | **253 ms**     |
 //
-// The sort number is the one that matters, because column sort is this demo's headline interaction
-// and this is the app's landing tab. `withColumnSort`'s `buildSortMap` reads **every** row through
-// `getCellContent` to build its comparison keys, then sorts the whole index array
-// (`data-source/column-sort.ts:273-292`), so the cost is linear in rows and lands as a single
-// blocking task. At 200,000 that is a quarter-second freeze on every sort click; at 3,000 it was
-// imperceptible.
+// The sort column is the one that decided it. Column sort is this demo's headline interaction and
+// this is the app's landing tab, so a blocking pause there is the most visible cost the demo can
+// have. `withColumnSort`'s `buildSortMap` reads **every** row through `getCellContent` to build its
+// comparison keys, then sorts the whole index array (`data-source/column-sort.ts:273-292`) -- linear
+// in rows, delivered as one blocking task. 200,000 meant a quarter-second freeze per sort; 50,000
+// keeps it at 80 ms, which reads as instant while still being a visibly large dataset.
 //
-// Lazy per-row generation would fix the module-load and heap columns but **not** the sort one --
-// sorting touches every row by definition, so it would materialize the lot on the first click. If
-// the freeze becomes a problem, the fix is to make the sort incremental or move it off the main
-// thread, not to defer record construction.
+// Both sort figures are single `longtask` measurements taken in Chrome on the dev server; the build
+// and records-heap columns are from node. Page heap is the whole tab, not just these records.
+//
+// Lazy per-row generation would fix the build and heap columns but **not** the sort one -- sorting
+// touches every row by definition, so it would materialize the lot on the first click. If the pause
+// ever needs to go, the fix is an incremental or off-main-thread sort, not deferred construction.
 import {
     GridCellKind,
     GridColumnIcon,
@@ -46,7 +47,7 @@ import {
 } from "glide-data-grid-ember/rendering/index";
 import { PHOTO_PALETTE, avatarUrl, photoUrl } from "test-app/utils/demo-fixtures";
 
-export const GLIDE_DEMO_ROW_COUNT = 200_000;
+export const GLIDE_DEMO_ROW_COUNT = 50_000;
 
 // --- Seeded PRNG -----------------------------------------------------------------------------
 // mulberry32: 5 lines, no dependency, good enough distribution for demo data. Same seed => same
