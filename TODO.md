@@ -85,7 +85,7 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 ### Working practices that were learned the hard way
 
-- **`glide-data-grid-ember/src/-private/grid-host-controller.ts` is ~5,200 lines and nearly every
+- **`glide-data-grid-ember/src/-private/grid-host-controller.ts` is ~7,500 lines and nearly every
   remaining item touches it.** Subagents cannot work it in parallel — they conflict. Serialize it.
   Safely parallel: `src/data-source/`, `test-app/app/utils/{cookbook,guide}/`, new demo files.
 - **The controller cannot be imported by vitest.** Extracting logic into pure `src/rendering/`
