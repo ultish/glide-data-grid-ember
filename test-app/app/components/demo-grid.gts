@@ -747,8 +747,12 @@ export default class DemoGrid extends Component {
      * rate by painting at lower resolution *while the scroll is moving*. You cannot judge whether
      * that is worth it without flipping it back and forth on your own display, and it does nothing
      * observable at `devicePixelRatio` 1.
+     *
+     * **Defaults off**, unlike every other toggle here, and for the same reason it is toggleable: the
+     * demo should open at full sharpness and let you opt into the blur, not the other way round. It
+     * also matches the addon's own default — all three rescaling args are opt-in.
      */
-    @tracked rescaleWhileScrolling = true;
+    @tracked rescaleWhileScrolling = false;
 
     toggleRescaleWhileScrolling = (): void => {
         this.rescaleWhileScrolling = !this.rescaleWhileScrolling;
@@ -2314,7 +2318,8 @@ export default class DemoGrid extends Component {
                         machine. `@enableChromeRescaling` is this port's own addition and is the only
                         one that does anything in Chromium; until it existed the demo set both
                         upstream flags and *looked* opted in while painting at full dpr all the way
-                        through every scroll. Toggle it off and scroll to see what it costs. }}
+                        through every scroll. Starts **off** so the demo opens sharp — switch it on
+                        and scroll to see what it buys and what it costs. }}
                     @renderStrategy={{this.renderStrategyArg}}
                     @disableMinimumCellWidth={{this.disableMinimumCellWidth}}
                     @enableFirefoxRescaling={{this.rescaleWhileScrolling}}
