@@ -41,7 +41,7 @@ export const performanceSection: Section = {
         },
         {
             kind: "note",
-            text: "**`@enableChromeRescaling` is this port's own arg, not an upstream one.** React's grid offers the scroll-time downscale for Firefox and Safari only. It is added here because the reason for it — canvas fill cost scaling with device pixel ratio — is not browser specific, and a Chromium browser on a Retina display pays exactly the 4x fill the other two are allowed to avoid. It caps at 1x rather than Safari's 2x, because at the common dpr of 2 a 2x cap does nothing at all.",
+            text: "**`@enableChromeRescaling` is this port's own arg, not an upstream one.** React's grid offers the scroll-time downscale for Firefox and Safari only. It is added here because the reason for it — canvas fill cost scaling with device pixel ratio — is not browser specific, and a Chromium browser on a Retina display pays exactly the 4x fill the other two are allowed to avoid. It caps at 1x rather than Safari's 2x, because at the common dpr of 2 a 2x cap does nothing at all. The **Full grid demo**'s `Rescale on scroll:` toggle drives all three flags at once — flip it and scroll to judge the trade-off on your own display, which is the only way to judge it.",
         },
         {
             kind: "note",

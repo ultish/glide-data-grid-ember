@@ -735,6 +735,25 @@ export default class DemoGrid extends Component {
         this.useFillHandle = !this.useFillHandle;
     };
 
+    /**
+     * The scroll-time canvas downscale, as one control over all three browser flags.
+     *
+     * One toggle rather than three because they are one *feature* — each flag is already `&&`-ed
+     * with its own browser inside the grid, so on any given machine at most one of them can do
+     * anything. Three controls would leave two of them permanently inert and say nothing.
+     *
+     * Toggleable at all — where the other `experimental`-bag args are hardcoded on — because this is
+     * the one whose value is a **visible trade-off** rather than a strict improvement: it buys frame
+     * rate by painting at lower resolution *while the scroll is moving*. You cannot judge whether
+     * that is worth it without flipping it back and forth on your own display, and it does nothing
+     * observable at `devicePixelRatio` 1.
+     */
+    @tracked rescaleWhileScrolling = true;
+
+    toggleRescaleWhileScrolling = (): void => {
+        this.rescaleWhileScrolling = !this.rescaleWhileScrolling;
+    };
+
     // --- Phase 10a: the mutually-exclusive settings, as cycling controls -------------------------
     // Each of these is an arg where only one value can be live at a time, so a toggle is the only
     // way a demo can cover more than one of them.
@@ -1799,6 +1818,15 @@ export default class DemoGrid extends Component {
                 <button
                     type="button"
                     class="gdg-full__toggle"
+                    data-test-rescale-toggle
+                    {{on "click" this.toggleRescaleWhileScrolling}}
+                >
+                    Rescale on scroll:
+                    <b>{{if this.rescaleWhileScrolling "on" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
                     data-test-fill-direction-toggle
                     {{on "click" this.cycleFillDirection}}
                 >
@@ -2280,17 +2308,18 @@ export default class DemoGrid extends Component {
                     @fixedShadowY={{this.scrollShadows}}
                     @overscrollX={{this.overscroll}}
                     @overscrollY={{this.overscroll}}
-                    {{! 4.5: source's `experimental` bag, flattened. All three rescaling flags are on
-                        so the scroll-time downscale is exercised wherever it is honoured; each is a
-                        no-op on the other browsers. `@enableChromeRescaling` is this port's own
-                        addition and is the only one of the three that does anything in Chromium —
-                        which, until it existed, meant the demo looked like it had opted in while
-                        actually painting at full dpr throughout every scroll. }}
+                    {{! 4.5: source's `experimental` bag, flattened. All three rescaling flags follow
+                        the one "Rescale on scroll" toggle — they are one feature, and each is
+                        already browser-gated inside the grid, so at most one can act on any given
+                        machine. `@enableChromeRescaling` is this port's own addition and is the only
+                        one that does anything in Chromium; until it existed the demo set both
+                        upstream flags and *looked* opted in while painting at full dpr all the way
+                        through every scroll. Toggle it off and scroll to see what it costs. }}
                     @renderStrategy={{this.renderStrategyArg}}
                     @disableMinimumCellWidth={{this.disableMinimumCellWidth}}
-                    @enableFirefoxRescaling={{true}}
-                    @enableSafariRescaling={{true}}
-                    @enableChromeRescaling={{true}}
+                    @enableFirefoxRescaling={{this.rescaleWhileScrolling}}
+                    @enableSafariRescaling={{this.rescaleWhileScrolling}}
+                    @enableChromeRescaling={{this.rescaleWhileScrolling}}
                     {{! 4.5: the last two `experimental` keys. `@strictVisibleRegion` is a harness for
                         paged sources; `@eventTarget` moves the window-level pointer listeners. }}
                     @strictVisibleRegion={{this.strictVisibleRegion}}
