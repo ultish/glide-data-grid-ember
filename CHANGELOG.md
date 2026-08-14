@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-15
+
 ### Fixed
 
 - **Escape now closes a read-only overlay editor.** Clicking inside a read-only cell's editor left
@@ -268,6 +270,7 @@ thousands stay smooth.
   and canary — i.e. through Ember 7.x.
 - Embroider or ember-auto-import v2.
 
+[0.5.1]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ultish/glide-data-grid-ember/releases/tag/v0.3.0

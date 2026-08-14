@@ -18,13 +18,12 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
+**State as of 2026-08-15:** everything is on **`main`**, which is pushed, green in CI, and deployed to
 GitHub Pages. 954 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
-**Published vs unpublished.** **v0.5.0 is on npm** (tagged 2026-08-14). Everything below marked DONE
-ships in it **except §4b's two P1 fixes** (`indicatorIcon` auto-sizing, and Escape on a read-only
-overlay) **and the `tags-cell` fix §4b found along the way** (§4b.6) — all three are committed and
-unreleased, see `CHANGELOG.md`'s Unreleased section. §5.3 has the release procedure.
+**Published vs unpublished.** **v0.5.1 is on npm** (tagged 2026-08-15) — the three §4b fixes
+(`indicatorIcon` auto-sizing, Escape on a read-only overlay, `tags-cell`'s dropped toggles) all ship
+in it. **Nothing is currently unreleased.** §5.3 has the release procedure for next time.
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
@@ -33,7 +32,7 @@ add a feature no demo can switch on, which rule 5 says is unverified code by con
 
 **The other outstanding work is §4b — upstream bug parity (added 2026-08-14).** All 10 open
 `type:bug` issues and all 37 open PRs upstream were audited against this tree: six bugs are
-inherited, three are worth doing. **Both P1 items are DONE and unreleased** (#954, #910). What is
+inherited, three are worth doing. **Both P1 items are DONE**, shipped in v0.5.1 (#954, #910). What is
 left there is **§4b.2's P2 items, none of which should be scheduled before being reproduced in a
 browser** — start with P2.1 (Firefox scrollbar click-through), the only one whose consequence is a
 data mutation. §4b.4 lists what was checked and dismissed, so it does not get re-audited; §4b.5 is a
@@ -476,7 +475,7 @@ reproduce is a fix you cannot verify.
 **§4b.5 and §4b.6 aren't from the audit above** — they're what fixing P1.1/P1.2 turned up along the
 way (an unported arg) and what a follow-up sweep of this port's own code for the same *shape* of
 miss (a local fix whose comment names a general rule, never checked against sibling code) turned up
-(a second stale-`p.value` bug). Both DONE, both unreleased.
+(a second stale-`p.value` bug). Both DONE, both shipped in v0.5.1.
 
 ### 4b.1 P1 — both DONE (2026-08-14)
 
@@ -755,9 +754,9 @@ violations.)
 - Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
   character.
 
-### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0, 0.5.0 — latest 2026-08-14)
+### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.5.1 — latest 2026-08-15)
 
-- Current version is `0.5.0`, tagged `v0.5.0`.
+- Current version is `0.5.1`, tagged `v0.5.1`.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.
