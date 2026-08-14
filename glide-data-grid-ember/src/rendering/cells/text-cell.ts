@@ -47,7 +47,7 @@ export const textCellRenderer: InternalCellRenderer<TextCell> = {
                 value: p.value.data,
                 theme: p.theme,
                 highlight: p.isHighlighted,
-                disabled: p.value.readonly === true,
+                readOnly: p.value.readonly === true,
                 wrapping: cell.allowWrapping === true,
                 altNewline: true,
                 validatedSelection: p.validatedSelection,

@@ -69,6 +69,7 @@ import { sizeColumns, applyColumnGrow, measureColumn } from "../rendering/column
 import { computeScrollDelta, type ScrollToParams } from "../rendering/scroll-to.ts";
 import { resolveNewRowTarget } from "../rendering/new-row-target.ts";
 import { IncrementalSearch, type SearchStatus } from "../rendering/search.ts";
+import { shouldFocusOverlayContainer } from "../rendering/overlay-focus.ts";
 import { isOutsideStrictRegion } from "../rendering/strict-region.ts";
 import {
     effectiveRowCount,
@@ -5760,6 +5761,10 @@ export class GridHostController {
         // (and `.gdg-pad`, source's own name for the same padding toggle). Only the geometry stays
         // here, because only this method knows the cell's rect.
         container.className = disablePadding ? "gdg-overlay-editor" : "gdg-overlay-editor gdg-pad";
+        // Focusable, but out of the tab order (`-1`, not `0`): this is a backstop for editors that
+        // cannot take focus themselves, never a tab stop of its own. See `focusOverlay` below and
+        // `rendering/overlay-focus.ts` for the whole rule (upstream #910).
+        container.tabIndex = -1;
         Object.assign(container.style, {
             left: `${cellRect.x}px`,
             top: `${cellRect.y}px`,
@@ -5860,10 +5865,10 @@ export class GridHostController {
         // the next typed character must already reach its textarea. Pointer activation remains
         // deferred because the activating mouseup can otherwise collapse the editor's select-all.
         if (focusImmediately) {
-            handle.focus();
+            this.focusOverlay(state);
         } else {
             window.setTimeout(() => {
-                if (this.overlayState === state) handle.focus();
+                if (this.overlayState === state) this.focusOverlay(state);
             }, 0);
         }
 
@@ -5881,6 +5886,33 @@ export class GridHostController {
                 this.addWindowListener("mousedown", this.onOverlayOutsideClick, true);
             }
         }, 0);
+    }
+
+    /**
+     * Hands the editor its focus, and catches the case where it cannot take it.
+     *
+     * `handle.focus()` is the editor's own contract and is always called first -- the fallback only
+     * runs when focus is left somewhere outside the overlay afterwards. That happens for any editor
+     * whose only control is `disabled` (`<select disabled>` in `dropdown-cell`, `<input disabled>`
+     * in `range-cell`, `links-cell`'s inputs) and for any editor with nothing focusable at all,
+     * including consumer-written ones. Without it, Escape/Enter/Tab reach nobody: the container's
+     * `keydown` listener needs focus inside the container, and the grid's own `onKeyDown`
+     * deliberately early-returns while an overlay is open. Upstream #910; the decision itself is
+     * `rendering/overlay-focus.ts`, which is where its tests are.
+     *
+     * The active element is read from the container's **root node**, not from `document`: for a grid
+     * inside a shadow root `document.activeElement` is the shadow *host*, which is outside the
+     * container, so the fallback would fire on every open and steal the caret from editors that
+     * focused themselves perfectly well. `getRootNode()` is the same call `resolveEventTarget`
+     * (`:1951`) already uses to make the grid shadow-DOM-safe.
+     */
+    private focusOverlay(state: OverlayState): void {
+        state.handle?.focus();
+        const root = state.container.getRootNode();
+        const activeElement = (root as Document | ShadowRoot).activeElement ?? null;
+        if (shouldFocusOverlayContainer(state.container, activeElement)) {
+            state.container.focus();
+        }
     }
 
     /**

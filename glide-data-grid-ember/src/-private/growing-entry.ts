@@ -23,7 +23,22 @@ export interface GrowingEntryOptions {
     readonly theme: FullTheme;
     /** `true` = select-all on mount (overwrite-by-typing UX); `false` = caret placed at the end. */
     readonly highlight: boolean;
-    readonly disabled?: boolean;
+    /**
+     * Render the value but refuse edits -- what a `readonly` cell wants.
+     *
+     * **This sets the textarea's `readOnly` attribute, not `disabled`, and the difference is a bug
+     * fix rather than a preference.** A `disabled` textarea cannot be focused, so clicking one moves
+     * focus to `<body>`; the overlay host's `keydown` listener is on the overlay *container*, so it
+     * then never fires, and Escape stops closing the editor -- stranding the user in an editor with
+     * no keyboard way out. That is upstream
+     * [#910](https://github.com/glideapps/glide-data-grid/issues/910), whose own unmerged fix
+     * ([PR #915](https://github.com/glideapps/glide-data-grid/pull/915)) reaches for `readOnly` for
+     * exactly this reason. `readOnly` keeps the element focusable and its text selectable -- so a
+     * read-only cell's contents can now also be selected and copied, which `disabled` prevented.
+     *
+     * Was named `disabled` (after the attribute it used to set) until 2026-08-14.
+     */
+    readonly readOnly?: boolean;
     readonly placeholder?: string;
     /** Adds the `gdg-input-wrapping` class to the input box, which pads it -- mirrors source's
      * `text-cell.tsx` passing `style={{padding: "3px 8.5px"}}` when `cell.allowWrapping === true`
@@ -68,7 +83,7 @@ export class GrowingEntry {
         this.textareaEl.className = options.wrapping === true ? "gdg-input gdg-input-wrapping" : "gdg-input";
         this.textareaEl.dir = "auto";
         if (options.placeholder !== undefined) this.textareaEl.placeholder = options.placeholder;
-        if (options.disabled === true) this.textareaEl.disabled = true;
+        if (options.readOnly === true) this.textareaEl.readOnly = true;
 
         this.textareaEl.value = options.value;
         this.syncShadow();
@@ -102,9 +117,12 @@ export class GrowingEntry {
     /** Focuses the textarea and, per `highlight`, either selects all content or places the caret
      * at the end -- mirrors source's mount-time `React.useEffect`. Requires `element` to already
      * be attached to the document (a detached `<textarea>` cannot receive focus), so the overlay
-     * host calls this only after appending `element` into the DOM. */
+     * host calls this only after appending `element` into the DOM.
+     *
+     * **Read-only entries are focused too.** This used to bail when the textarea was `disabled`,
+     * which it had to -- a disabled element cannot take focus. Under `readOnly` it can, and it must:
+     * that focus is what keeps Escape working (see `readOnly` above, upstream #910). */
     focus(): void {
-        if (this.textareaEl.disabled) return;
         this.textareaEl.focus();
         const length = this.textareaEl.value.length;
         if (this.validatedSelection !== undefined) {

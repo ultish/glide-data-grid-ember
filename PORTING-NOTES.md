@@ -5876,3 +5876,58 @@ Source hit-tests `indicatorIconBounds` (`data-grid.tsx:1057-1065`, `area: "indic
 expose. Here the bounds are computed and only ever drawn. `grid-host-controller.ts:4636` already
 noted the omission, but it was unreachable until now; with `<DemoGrid>` setting `indicatorIcon`, a
 user will try clicking one. `TODO.md` §4b.5.
+
+## #910 — Escape on a read-only overlay editor (COMPLETE, browser-verified, 2026-08-14)
+
+Second of the two P1 items from the upstream-bug audit (`TODO.md` §4b). The what-and-why is there;
+what belongs here is the three things a later phase will otherwise re-derive.
+
+### The port already had this fix, twice, and had not noticed
+
+`markdown-cell.ts:97-104` and `uri-cell.ts` both create a hidden `gdg-focus-decoy` textarea in
+preview mode, with a comment saying exactly why: *"gives the overlay host's `handle.focus()` a real
+focus target so Escape/Enter/Tab keydown handling (registered on the host's wrapping container)
+actually receives keystrokes"*. That is a per-editor workaround for #910, invented in Phase 4b,
+applied to the two editors that happened to need it, and never generalised — while
+`text`/`number`/`row-id`/`article`/`user-profile`/`date-picker` kept the `disabled` textarea that has
+the same problem.
+
+**The lesson, which is a new one for this file:** a workaround written for one component *is* a bug
+report about the architecture, and nothing in this repo reads it as one. Phase 4b's comment
+described the general defect precisely and was filed as a local fix. When you find yourself writing
+"gives X a real focus target so Y works", ask which other X's have the same problem — the answer
+here was "six".
+
+### `handle.focus()` was an unenforceable contract
+
+`CellEditorHandle.focus()` is documented as "focus + select the editable content", and the overlay
+host simply trusted it. Nothing checks, and three shipped editors cannot honour it: a `disabled`
+control is unfocusable, and `readonly` is **not** a valid attribute on `<select>`
+(`dropdown-cell`, `multi-select-cell`) or `<input type=range>` (`range-cell`), so the `readOnly`
+swap cannot rescue them. Hence `focusOverlay` verifying the outcome rather than assuming it. Any
+future editor gets the backstop for free, including consumer-written ones — which matters more here
+than upstream, since `provideEditor` is public API.
+
+**When adding an overlay editor, do not add another decoy.** Let `focusOverlay` handle it; add a
+decoy only when you need to control *where* focus lands, not merely that it lands.
+
+### Reading `activeElement` off `document` is wrong in this codebase
+
+`focusOverlay` uses `container.getRootNode()` (the same call `resolveEventTarget` at
+`grid-host-controller.ts:1951` already uses). For a grid inside a shadow root — which this port
+supports and the test-app demos — `document.activeElement` is the shadow **host**, always outside
+the overlay container. Reading it would make the fallback fire on every open and yank the caret out
+of editors that focused themselves perfectly well. There is a Shadow DOM tab in the test-app; use it
+before touching focus code.
+
+### Verification: three builds, not one
+
+Unit tests cover `shouldFocusOverlayContainer` only (the controller is untestable), so the halves
+were separated in the browser instead — both halves / half (b) alone / neither — confirming (b) alone
+still closes the editor and that reverting both reproduces #910 (editor stuck open, focus on a DIV
+outside the overlay). Table in `TODO.md` §4b.1. Same discipline as #954's before/after: **make the
+bug happen on purpose once, or you have only tested that your code runs.**
+
+Rule 5 note: no read-only cell in this repo had ever opened an editor — the demo's two `readonly`
+cells both set `allowOverlay: false` — so the whole path was dead code. `<DemoGrid>`'s `Read-only
+cells` toggle exists now so it is not dead again.

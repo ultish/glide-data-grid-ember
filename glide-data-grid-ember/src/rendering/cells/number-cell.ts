@@ -40,7 +40,7 @@ export const numberCellRenderer: InternalCellRenderer<NumberCell> = {
             value: p.value.displayData,
             theme: p.theme,
             highlight: p.isHighlighted,
-            disabled: p.value.readonly === true,
+            readOnly: p.value.readonly === true,
             validatedSelection: p.validatedSelection,
             onChange: value => {
                 const trimmed = value.trim();

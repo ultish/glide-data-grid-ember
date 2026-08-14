@@ -110,7 +110,7 @@ function buildMarkdownEditor(p: CellEditorProps<MarkdownCell>): CellEditorHandle
             value: currentValue.data,
             theme: p.theme,
             highlight: false,
-            disabled: readonly,
+            readOnly: readonly,
             validatedSelection: p.validatedSelection,
             onChange: value => {
                 currentValue = { ...currentValue, data: value };

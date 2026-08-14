@@ -32,7 +32,7 @@ function buildUserProfileEditor(p: CellEditorProps<UserProfileCell>): CellEditor
         value: p.value.data.name ?? "",
         theme: p.theme,
         highlight: p.isHighlighted,
-        disabled: p.value.readonly === true,
+        readOnly: p.value.readonly === true,
         validatedSelection: p.validatedSelection,
         onChange: value => p.onChange({ ...p.value, data: { ...p.value.data, name: value } }),
     });

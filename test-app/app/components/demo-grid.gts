@@ -229,6 +229,22 @@ const AUTO_SIZED_COLUMN = 3;
 //
 // The indicator is decorative here: source makes it clickable via `onHeaderIndicatorClick`, which
 // this port does not expose (see §4b.5 in TODO.md and `grid-host-controller.ts:4636`).
+// Which columns the `Read-only cells` toggle applies to. Both are on screen without scrolling, and
+// between them they cover the two shapes a read-only editor comes in — which is the distinction that
+// matters, not the cell kinds:
+//
+//   - **Salary (1)** is a number cell: a bare `GrowingEntry` and nothing else. Its only focusable
+//     element is the textarea itself, so it is the editor that actually exercises upstream #910.
+//   - **Notes (4)** is a markdown cell, which opens in *preview* mode carrying a
+//     `gdg-focus-decoy` textarea (Phase 4b, `markdown-cell.ts:97-104`) — a hidden focusable element
+//     added precisely so Escape keeps working when the visible content cannot take focus. That decoy
+//     is this port's older, per-editor answer to the same problem `focusOverlay` now solves for every
+//     editor at once, including consumer-written ones. Worth keeping in the toggle so both the old
+//     and new mechanisms stay exercised.
+//
+// See `markReadonly`.
+const READONLY_COLUMNS: ReadonlySet<number> = new Set([1, 4]);
+
 const INDICATOR_ICONS: Readonly<Record<number, string>> = {
     1: "headerMath", // Salary -- "this is a computed column"
     3: "headerLookup", // Profile -- the auto-sized column
@@ -636,7 +652,31 @@ export default class DemoGrid extends Component {
 
         const row = this.sourceRow(item[1]);
         const col = naturalDemoColumnIndex(this.columns[item[0]], item[0]);
-        return this.edits.get(`${col},${row}`) ?? demoGetCellContent([col, row]);
+        return this.markReadonly(this.edits.get(`${col},${row}`) ?? demoGetCellContent([col, row]), col);
+    };
+
+    /**
+     * The `Read-only cells` toggle: marks the Salary and Notes columns `readonly` while leaving
+     * `allowOverlay: true`, so their editors still *open* and simply refuse edits.
+     *
+     * That combination is the whole point, and it had **no coverage anywhere in this repo** before
+     * 2026-08-14 — the only two `readonly` cells in the demo data (`button-cell`, `tree-view-cell`)
+     * both set `allowOverlay: false`, so they never open an editor, so the entire read-only editor
+     * path was unreachable. Rule 5 again, and it is what hid upstream #910 here: a read-only editor
+     * used to be built on a `disabled` textarea, which cannot hold focus, so clicking inside one
+     * dropped focus to `<body>` and **Escape stopped closing it**. See `READONLY_COLUMNS` for why
+     * those two columns specifically.
+     */
+    private markReadonly(cell: GridCell, col: number): GridCell {
+        if (!this.readonlyCells || !READONLY_COLUMNS.has(col)) return cell;
+        if (!("allowOverlay" in cell) || cell.allowOverlay !== true) return cell;
+        return { ...cell, readonly: true } as GridCell;
+    }
+
+    @tracked readonlyCells = false;
+
+    toggleReadonlyCells = (): void => {
+        this.readonlyCells = !this.readonlyCells;
     };
 
     // --- 4.1: row grouping -----------------------------------------------------------------------
@@ -1951,6 +1991,15 @@ export default class DemoGrid extends Component {
                 >
                     Coerce paste:
                     <b>{{if this.useCoercion "UPPER" "off"}}</b>
+                </button>
+                <button
+                    type="button"
+                    class="gdg-full__toggle"
+                    data-test-readonly-cells-toggle
+                    {{on "click" this.toggleReadonlyCells}}
+                >
+                    Read-only cells:
+                    <b>{{if this.readonlyCells "Salary+Notes" "off"}}</b>
                 </button>
                 <button
                     type="button"

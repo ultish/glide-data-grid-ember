@@ -26,7 +26,7 @@ export const rowIDCellRenderer: InternalCellRenderer<RowIDCell> = {
             value: p.value.data,
             theme: p.theme,
             highlight: p.isHighlighted,
-            disabled: p.value.readonly !== false,
+            readOnly: p.value.readonly !== false,
             validatedSelection: p.validatedSelection,
             onChange: value => p.onChange({ ...p.value, data: value }),
         });

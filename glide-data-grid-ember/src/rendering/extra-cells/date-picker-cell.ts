@@ -69,15 +69,16 @@ function buildDatePickerEditor(p: CellEditorProps<DatePickerCell>): CellEditorHa
 
     if (readonly) {
         // Mirrors source's `<TextCellEntry highlight disabled value={displayDate} />` for the
-        // readonly case -- this port's equivalent "disabled text display" primitive is a disabled
-        // `GrowingEntry` (same pattern `text-cell.ts`'s `provideEditor` uses for its own readonly
-        // case), not a distinct `TextCellEntry` component (never ported, source's only other user
-        // of it besides date-picker is inside `packages/core` cells already covered in Phase 4).
+        // readonly case -- this port's equivalent "read-only text display" primitive is a
+        // `readOnly` `GrowingEntry` (same pattern `text-cell.ts`'s `provideEditor` uses for its own
+        // readonly case), not a distinct `TextCellEntry` component (never ported, source's only
+        // other user of it besides date-picker is inside `packages/core` cells already covered in
+        // Phase 4). `readOnly` rather than source's `disabled` -- see `GrowingEntry.readOnly`.
         const entry = new GrowingEntry({
             value: displayDate ?? "",
             theme: p.theme,
             highlight: true,
-            disabled: true,
+            readOnly: true,
             onChange: () => undefined,
         });
         return { element: entry.element, focus: () => entry.focus(), destroy: () => entry.destroy() };

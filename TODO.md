@@ -19,11 +19,12 @@ directly**; every item below cites file:line in it.
 is also what deploys to GitHub Pages. pnpm workspace.
 
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 945 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
+GitHub Pages. 949 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
 **Published vs unpublished.** **v0.5.0 is on npm** (tagged 2026-08-14). Everything below marked DONE
-ships in it **except §4b's P1.1** (the `indicatorIcon` auto-size fix), which is committed and
-unreleased — see `CHANGELOG.md`'s Unreleased section. §5.3 has the release procedure.
+ships in it **except §4b's two P1 fixes** (`indicatorIcon` auto-sizing, and Escape on a read-only
+overlay), which are committed and unreleased — see `CHANGELOG.md`'s Unreleased section. §5.3 has the
+release procedure.
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
@@ -32,9 +33,11 @@ add a feature no demo can switch on, which rule 5 says is unverified code by con
 
 **The other outstanding work is §4b — upstream bug parity (added 2026-08-14).** All 10 open
 `type:bug` issues and all 37 open PRs upstream were audited against this tree: six bugs are
-inherited, three are worth doing. **P1.1 (#954) is DONE and unreleased**; **P1.2 (#910, Escape
-cannot close a read-only overlay) is now the best next work in this file.** §4b.4 lists what was
-checked and dismissed, so it does not get re-audited; §4b.5 is a small gap P1.1 surfaced.
+inherited, three are worth doing. **Both P1 items are DONE and unreleased** (#954, #910). What is
+left there is **§4b.2's P2 items, none of which should be scheduled before being reproduced in a
+browser** — start with P2.1 (Firefox scrollbar click-through), the only one whose consequence is a
+data mutation. §4b.4 lists what was checked and dismissed, so it does not get re-audited; §4b.5 is a
+small gap P1.1 surfaced.
 
 **Everything else below is marked DONE** and is kept for its source citations. §3.1 was decided on
 2026-08-13 (smooth scrolling stays, documented).
@@ -42,7 +45,7 @@ checked and dismissed, so it does not get re-audited; §4b.5 is a small gap P1.1
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 945 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 949 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -141,9 +144,8 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 ## 2. Quick wins — diagnosed, small, do these first
 
-**Every item in this section is DONE**, as is §4b's P1.1 (`#954`) which briefly lived here. The
-nearest thing to a quick win left is **§4b.5** — wiring up `@onHeaderIndicatorClick`, one branch in
-the header hit-test.
+**Every item in this section is DONE**, as are §4b's two P1 items. The nearest thing to a quick win
+left is **§4b.5** — wiring up `@onHeaderIndicatorClick`, one branch in the header hit-test.
 
 ### 2.1 `withMovableColumns` memoizes on the wrong key — DONE (2026-08-09)
 
@@ -457,7 +459,7 @@ reproduce is a fix you cannot verify.
 | # | Item | Effort | Why this rank |
 |---|------|--------|---------------|
 | ~~**P1.1**~~ | [#954](https://github.com/glideapps/glide-data-grid/issues/954) auto-size ignores `indicatorIcon` | S | **DONE 2026-08-14** — fixed, 4 tests, browser-verified |
-| **P1.2** | [#910](https://github.com/glideapps/glide-data-grid/issues/910) Escape cannot close a read-only overlay | M | Certain; user-visible dead end; [PR #915](https://github.com/glideapps/glide-data-grid/pull/915) is a blueprint |
+| ~~**P1.2**~~ | [#910](https://github.com/glideapps/glide-data-grid/issues/910) Escape cannot close a read-only overlay | M | **DONE 2026-08-14** — both halves, 4 tests, browser-verified three ways |
 | **P2.1** | [#1034](https://github.com/glideapps/glide-data-grid/issues/1034) Firefox scrollbar click-through | M | Only inherited bug whose consequence is a **mutation**, not a paint artifact |
 | **P2.2** | [#998](https://github.com/glideapps/glide-data-grid/issues/998) column `bgCell` misses the blank strip | M | Visual; likely cause already located |
 | **P2.3** | [#989](https://github.com/glideapps/glide-data-grid/issues/989) Safari frozen-column flicker | L | Visual, Safari-only, and the fix lives in the blit path — high risk, low reward |
@@ -471,7 +473,7 @@ reproduce is a fix you cannot verify.
 [PR #1197](https://github.com/glideapps/glide-data-grid/pull/1197),
 [PR #1199](https://github.com/glideapps/glide-data-grid/pull/1199) — reasons in §4b.4.
 
-### 4b.1 P1 — do these first
+### 4b.1 P1 — both DONE (2026-08-14)
 
 **P1.1 — `#954`: auto-size ignores `indicatorIcon` — DONE (2026-08-14).**
 `rendering/column-sizer.ts` measured the header as title + padding + an `icon` allowance only, a
@@ -500,44 +502,58 @@ via `INDICATOR_ICONS` — **nothing in this repo had ever set one**, the exact r
 before/after browser check where "Auto-size" on those columns renders the indicator **clipped to a
 2px sliver at the column edge without the fix** and fully with it.
 
-### 4b.5 Found while fixing P1.1 — `@onHeaderIndicatorClick` is not ported
+**P1.2 — `#910`: Escape cannot close a read-only overlay — DONE (2026-08-14).** A read-only
+editor was built on a `disabled` textarea (`growing-entry.ts`, mirroring `text-cell.tsx:45`).
+A disabled element cannot hold focus, so clicking inside one moved focus to `<body>` and the
+keystroke then reached **nobody**: the overlay's `keydown` listener is on the container
+(`grid-host-controller.ts:5841`) and needs focus inside it, while `onKeyDown` (`:6196`)
+deliberately early-returns while an overlay is open. The user was stranded in an editor with no
+keyboard way out.
 
-Source makes the indicator icon **clickable**: `data-grid.tsx:1057-1065` hit-tests
-`indicatorIconBounds` and returns `area: "indicator"`, which `:1241` turns into
-`onHeaderIndicatorClick?.(col, bounds)` — the sibling of `onHeaderMenuClick`, which this port does
-expose. Here, `indicatorIconBounds` is computed and **only ever drawn**; there is no hit-test and no
-arg. `grid-host-controller.ts:4636` already notes the omission ("not requested for 3a"), so this is
-a known gap rather than a discovery — but it is now a *reachable* one, since `<DemoGrid>` sets
-`indicatorIcon` and a user will try clicking it.
+**Fixed in both halves of [PR #915](https://github.com/glideapps/glide-data-grid/pull/915), because
+they cover different editors** — its diff was not ported (it is built on source's React portal and a
+styled-components file that do not exist here), only its two ideas:
 
-Small: one branch in the header hit-test beside the existing `menu` branch, one arg, one demo
-handler reporting into the status line. Worth doing next time the header hit-test is open anyway.
-Until then the indicator is decorative, which the demo's comment says out loud.
+- **(a) `readOnly` instead of `disabled`** in `GrowingEntry`, whose option is renamed `disabled` →
+  `readOnly` accordingly (9 call sites). Keeps the element focusable, and as a bonus makes a
+  read-only cell's text selectable and copyable — previously impossible.
+- **(b) The overlay container is focusable** (`tabIndex = -1`, so it is a backstop and never a tab
+  stop) and `focusOverlay` redirects focus to it when the editor could not take it. **This is the
+  half that generalises**: (a) only helps editors with a native text control to put it on, while
+  this covers `dropdown-cell`'s `<select disabled>`, `range-cell`'s `<input disabled>`,
+  `links-cell`'s inputs, and any consumer-written editor — none of which `readOnly` can fix, since
+  `readonly` is not a valid attribute on `<select>` or `<input type=range>`.
 
-**P1.2 — `#910`: Escape cannot close a read-only overlay.** `growing-entry.ts:71` sets
-`textarea.disabled = true` for `cell.readonly`, mirroring `text-cell.tsx:45` / `number-cell.tsx:39`.
-Clicking that disabled textarea moves focus to `<body>`; the overlay's `keydown` listener is on the
-overlay container (`grid-host-controller.ts:5831`) so it never fires, and `onKeyDown` early-returns
-on `this.overlayState !== undefined` (`:6186`) so the grid handler will not catch it either. The
-container has no `tabIndex`, so nothing else holds focus. **The user is stranded in an editor with no
-keyboard way out** — that is what earns it P1 over the paint bugs.
+The decision itself is `rendering/overlay-focus.ts` (`shouldFocusOverlayContainer`) rather than
+inline in the controller, which is the only way it could have tests — the controller cannot be
+imported by vitest. It reads the active element from the container's **root node**, not `document`:
+for a shadow-hosted grid `document.activeElement` is the shadow *host*, which is outside the
+container, so the fallback would fire on every open and steal the caret from editors that focused
+themselves correctly.
 
-[PR #915](https://github.com/glideapps/glide-data-grid/pull/915) ("Keep focus in overlay editor",
-open and unmerged since 2024-03) is the blueprint, in two halves, both of which apply here:
+**Browser-verified three ways, which is what makes the two halves separable rather than a guess:**
 
-- (a) use the `readonly` attribute instead of `disabled`, keeping the element focusable but not
-  editable — and, as the PR notes, this also lets the user select and copy a read-only cell's text,
-  which they cannot do today. Also drop the `if (this.textareaEl.disabled) return` focus bail at
-  `growing-entry.ts:107`.
-- (b) make the overlay element itself focusable and autofocus it, so editors with **no** focusable
-  child still hold focus. This is the more valuable half here: every editor's `handle.focus()`
-  (`:5863`) is trusted to put focus *somewhere*, and a disabled textarea is exactly the case that
-  breaks that assumption silently.
+| Build | Focus after clicking in a read-only editor | Escape |
+|---|---|---|
+| Both halves | the editor's own textarea | closes |
+| **(b) only** (textarea back to `disabled`) | the overlay container itself | closes |
+| **Neither** (upstream's code) | a DIV *outside* the overlay | **stuck open — #910** |
 
-**Do not port PR #915's diff.** It is entangled with source's React portal and
-`data-grid-overlay-editor-style.tsx`, neither of which exists here (this port appends the overlay
-straight into `this.root`, `:5607-5609`). Port the two ideas. Verify against *every* editor kind, not
-just text — the PR's own author flags that as the missing test coverage.
+Plus a no-regression pass: an ordinary editable cell still opens, focuses its textarea, accepts
+typing and cancels on Escape; and the markdown editor's `gdg-focus-decoy` still holds focus, i.e.
+the new fallback correctly declines to steal it.
+
+**Rule 5, again, and it is why this was reachable at all.** The two `readonly` cells in the demo
+data (`button-cell`, `tree-view-cell`) both set `allowOverlay: false`, so **no read-only cell in this
+repo had ever opened an editor** — the entire read-only editor path was dead. `<DemoGrid>` now has a
+`Read-only cells` toggle (Salary + Notes; see `READONLY_COLUMNS` for why those two).
+
+**Worth knowing: this port already had a partial, per-editor answer to #910 and nobody had connected
+it.** `markdown-cell.ts:97-104` and `uri-cell.ts` add a hidden `gdg-focus-decoy` textarea in preview
+mode for exactly this reason — "gives the overlay host's `handle.focus()` a real focus target so
+Escape/Enter/Tab actually receives keystrokes". That is half (b), invented in Phase 4b, applied to
+two editors and never generalised. `focusOverlay` is the general form; the decoys are left in place
+(they also control *where* focus lands, not just that it lands).
 
 ### 4b.2 P2 — reproduce before scheduling
 
@@ -630,6 +646,20 @@ divergence.**
   draw left on the canvas"). This also **settles the open guess in #954's comments** that #1040 might
   have fixed the `indicatorIcon` problem: it did not. Separate bugs on adjacent lines; only the font
   one is fixed anywhere.
+
+### 4b.5 Found while fixing P1.1 — `@onHeaderIndicatorClick` is not ported
+
+Source makes the indicator icon **clickable**: `data-grid.tsx:1057-1065` hit-tests
+`indicatorIconBounds` and returns `area: "indicator"`, which `:1241` turns into
+`onHeaderIndicatorClick?.(col, bounds)` — the sibling of `onHeaderMenuClick`, which this port does
+expose. Here, `indicatorIconBounds` is computed and **only ever drawn**; there is no hit-test and no
+arg. `grid-host-controller.ts:4636` already notes the omission ("not requested for 3a"), so this is
+a known gap rather than a discovery — but it is now a *reachable* one, since `<DemoGrid>` sets
+`indicatorIcon` and a user will try clicking it.
+
+Small: one branch in the header hit-test beside the existing `menu` branch, one arg, one demo
+handler reporting into the status line. Worth doing next time the header hit-test is open anyway.
+Until then the indicator is decorative, which the demo's comment says out loud.
 
 **Standing note.** The upstream PR queue is not a shortcut: 37 open PRs, exactly one relevant fix
 (#915), unmerged for over two years. Upstream is effectively unmaintained for bug-fix purposes — do

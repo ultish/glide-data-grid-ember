@@ -9,6 +9,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Escape now closes a read-only overlay editor.** Clicking inside a read-only cell's editor left
+  it stuck open with no keyboard way out: the editor was built on a `disabled` textarea, which
+  cannot hold focus, so the keystroke reached neither the overlay (whose listener needs focus inside
+  it) nor the grid (which stands down while an overlay is open). Upstream
+  [#910](https://github.com/glideapps/glide-data-grid/issues/910), still open there. Fixed twice
+  over, because the two halves cover different editors: read-only `GrowingEntry`-based editors now
+  use `readOnly` instead of `disabled` — which also makes a read-only cell's text selectable and
+  copyable, previously impossible — and the overlay container itself is now focusable as a backstop,
+  which covers **every** editor that cannot take focus, including `dropdown`/`range`/`links` cells
+  and consumer-written ones.
+
+  Custom editors are unaffected unless they relied on `GrowingEntry`'s internal `disabled` option,
+  which is now `readOnly` (`glide-data-grid-ember/-private/growing-entry`).
+
 - **Column auto-sizing now pays for a column's `indicatorIcon`.** A column with an `indicatorIcon`
   but no explicit `width` was measured from its title, padding and `icon` only — while the header
   renderer lays the indicator out *after* the title and takes that space back. The result was a

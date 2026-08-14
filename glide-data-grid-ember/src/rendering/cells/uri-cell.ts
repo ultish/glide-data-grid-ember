@@ -215,7 +215,7 @@ function buildUriEditor(p: CellEditorProps<UriCell>): CellEditorHandle {
             // entering edit mode, regardless of `p.isHighlighted` (this is the URI text itself, not
             // the cell's general activation-highlight state).
             highlight: true,
-            disabled: readonly,
+            readOnly: readonly,
             validatedSelection: p.validatedSelection,
             // Deviation from source (`onChange={e => onChange({...value, data: e.target.value})}`,
             // `displayData` left stale): this port's `draw` above reads `cell.displayData ??

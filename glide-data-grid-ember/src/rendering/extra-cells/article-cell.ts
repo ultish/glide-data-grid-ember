@@ -60,7 +60,7 @@ function buildArticleEditor(p: CellEditorProps<ArticleCell>): CellEditorHandle {
         value: currentMarkdown,
         theme: p.theme,
         highlight: false,
-        disabled: readonly,
+        readOnly: readonly,
         altNewline: true,
         validatedSelection: p.validatedSelection,
         onChange: value => {
