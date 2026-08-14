@@ -19,12 +19,12 @@ directly**; every item below cites file:line in it.
 is also what deploys to GitHub Pages. pnpm workspace.
 
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 949 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
+GitHub Pages. 954 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
 **Published vs unpublished.** **v0.5.0 is on npm** (tagged 2026-08-14). Everything below marked DONE
 ships in it **except §4b's two P1 fixes** (`indicatorIcon` auto-sizing, and Escape on a read-only
-overlay), which are committed and unreleased — see `CHANGELOG.md`'s Unreleased section. §5.3 has the
-release procedure.
+overlay) **and the `tags-cell` fix §4b found along the way** (§4b.6) — all three are committed and
+unreleased, see `CHANGELOG.md`'s Unreleased section. §5.3 has the release procedure.
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
@@ -45,7 +45,7 @@ small gap P1.1 surfaced.
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 949 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 954 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -473,6 +473,11 @@ reproduce is a fix you cannot verify.
 [PR #1197](https://github.com/glideapps/glide-data-grid/pull/1197),
 [PR #1199](https://github.com/glideapps/glide-data-grid/pull/1199) — reasons in §4b.4.
 
+**§4b.5 and §4b.6 aren't from the audit above** — they're what fixing P1.1/P1.2 turned up along the
+way (an unported arg) and what a follow-up sweep of this port's own code for the same *shape* of
+miss (a local fix whose comment names a general rule, never checked against sibling code) turned up
+(a second stale-`p.value` bug). Both DONE, both unreleased.
+
 ### 4b.1 P1 — both DONE (2026-08-14)
 
 **P1.1 — `#954`: auto-size ignores `indicatorIcon` — DONE (2026-08-14).**
@@ -660,6 +665,51 @@ a known gap rather than a discovery — but it is now a *reachable* one, since `
 Small: one branch in the header hit-test beside the existing `menu` branch, one arg, one demo
 handler reporting into the status line. Worth doing next time the header hit-test is open anyway.
 Until then the indicator is decorative, which the demo's comment says out loud.
+
+### 4b.6 Found while sweeping for more instances of the `focus-decoy` pattern — `tags-cell` drops
+### earlier checkbox toggles — DONE (2026-08-14)
+
+Not an upstream bug and not part of the §4b audit proper — the user asked for a sweep of this
+port's own codebase for other one-off workarounds shaped like the `#910` decoy fix (a narrow local
+patch whose comment describes a general defect that was never generalised). The sweep's other
+finding was negative and worth recording as such: no other editor still has the pre-`focusOverlay`
+focus-decoy pattern (`grep -rn "focus target\|autoFocus\|decoy"` across `rendering/cells/` and
+`rendering/extra-cells/` turns up only the two already-known sites). This one was positive.
+
+**The bug.** `tags-cell.ts`'s checkbox editor read `p.value.data.tags` fresh inside every `change`
+handler. `p.value` is frozen for the life of the editor (`openOverlay`'s `onChange` only ever writes
+`state.currentCell`, never rebuilds the editor-props object) — a fact `links-cell.ts`'s own comment
+already states as a general rule ("any stateful editor that re-renders itself needs this same
+working copy"). Checking two tags in one session therefore computed the second toggle against the
+*original* list, not the first toggle's result: open with `["urgent"]`, check "bug", check
+"feature" → commits `["urgent", "feature"]`, "bug" silently dropped. **This is the same defect
+class as the `#910` decoy** (a narrow local fix whose comment named the general rule, and a second
+site nobody checked against it) — not the same bug, but the same *shape* of miss.
+
+**Confirmed as a genuine porting defect, not a repro of anything upstream has.** Source's editor is
+a React component; its `value` prop is `tempValue ?? content` from a `useState` that source's own
+overlay host updates via `setTempValue` on every `onChange` (`data-grid-overlay-editor.tsx:78-118`)
+— so each checkbox's closure captures a fresh `tags` on every re-render. This port's one-shot
+imperative DOM factory has no equivalent; `links-cell`/`date-picker-cell`/`article-cell`/
+`markdown-cell`/`uri-cell` all built an explicit working copy for exactly this reason, and
+`tags-cell` didn't.
+
+**Fixed** with the same working-copy idiom (`currentTags`, mutated and read locally, never through
+`p.value`), plus a second bug fixed alongside it: the checked pill's own colour/selected class was
+computed once at build time and never updated after a toggle, so — even setting the data bug aside —
+the pill visually lagged the checkbox by one edit. The toggle arithmetic itself
+(`toggleTag(tags, tag)`) is pulled out into an exported, unit-tested pure function
+(`tags-cell.test.ts`), since the DOM wiring around it can't be tested (the controller can't be
+imported by vitest) — the tests chain calls the way the editor does, one per `change` event, because
+a test that only checks one toggle in isolation would not have caught this.
+
+**Browser-verified with the same three-way discipline as #954/#910**: opened row 0 (`["urgent"]`),
+checked "bug" then "feature" in one session, committed with Enter, reopened the cell — pre-fix
+committed `["urgent", "feature"]` (reproduced live before fixing), post-fix committed
+`["urgent", "bug", "feature"]`. Rule 5 again: `<DemoGrid>`'s Labels column (`col === 12`) was already
+wired in and already reachable — the bug had simply never been tried with two checks in one session,
+because nothing ever drove the editor that way. No demo change was needed to reach it, unlike 4b.1/
+4b.5.
 
 **Standing note.** The upstream PR queue is not a shortcut: 37 open PRs, exactly one relevant fix
 (#915), unmerged for over two years. Upstream is effectively unmaintained for bug-fix purposes — do

@@ -21,6 +21,14 @@ export interface TagsCellProps {
 
 export type TagsCell = CustomCell<TagsCellProps>;
 
+/** Toggles `tag` in `tags`, returning a new array either way (never mutates `tags`). Pulled out of
+ *  `buildTagsEditor` purely so the one piece of real logic in this file -- as opposed to DOM
+ *  wiring, which cannot be unit-tested here (the controller cannot be imported by vitest) -- has a
+ *  test next to it. See `tags-cell.test.ts`. */
+export function toggleTag(tags: readonly string[], tag: string): readonly string[] {
+    return tags.includes(tag) ? tags.filter(t => t !== tag) : [...tags, tag];
+}
+
 export const tagsCellRenderer: CustomRenderer<TagsCell> = {
     kind: GridCellKind.Custom,
     isMatch: (c): c is TagsCell => (c.data as { kind?: unknown }).kind === "tags-cell",
@@ -92,43 +100,67 @@ export const tagsCellRenderer: CustomRenderer<TagsCell> = {
 // `gdg-pill`/`gdg-selected`/`gdg-unselected`/`gdg-readonly` class names.
 function buildTagsEditor(p: CellEditorProps<TagsCell>): CellEditorHandle {
     const readonly = p.value.readonly === true;
-    const { possibleTags, tags } = p.value.data;
+    const { possibleTags } = p.value.data;
 
     const container = document.createElement("div");
     // `gdg-readonly` is source's own marker class; it is what switches the rows' cursor off.
     container.className = readonly ? "gdg-tags-editor gdg-readonly" : "gdg-tags-editor";
 
+    // The editor's working copy of the cell's tags. **Must NOT be read back through `p.value`** --
+    // same rule as `links-cell.ts`'s `currentValue`, and the same defect for not following it: the
+    // overlay host builds the editor-props object once (`openOverlay` in `grid-host-controller.ts`)
+    // and `onChange` only ever writes the host's own `state.currentCell`, so `p.value` stays frozen
+    // at whatever the cell held when the editor opened. Checking a *second* box used to read
+    // `p.value.data.tags` fresh -- still the frozen original -- so the second toggle was computed
+    // against the pre-edit list and silently discarded the first: check `bug` then `feature` and the
+    // commit was `["urgent", "feature"]`, not `["urgent", "bug", "feature"]`.
+    //
+    // Source does not have this bug: its editor is a React component re-rendered by `useState` on
+    // every `onChange` (`data-grid-overlay-editor.tsx:78-118`), so each checkbox's closure captures
+    // a fresh `tags` on every render. This port's one-shot imperative DOM factory has no equivalent
+    // and needs the working copy explicitly -- exactly the case `links-cell.ts`'s comment already
+    // named ("any stateful editor that re-renders itself needs this same working copy") and this
+    // file hadn't followed. Browser-confirmed 2026-08-14: reproduced with the sequence above, fixed
+    // with this copy, re-verified the same sequence commits all three tags.
+    let currentTags: readonly string[] = [...p.value.data.tags];
+
     let firstInput: HTMLInputElement | undefined;
 
     for (const t of possibleTags) {
-        const selected = tags.includes(t.tag);
-
         const label = document.createElement("label");
+
+        const pill = document.createElement("div");
+        pill.textContent = t.tag;
+
+        // Reflects `currentTags`, not the tag's state when the editor opened -- a second bug this
+        // port also had: the pill's own selected/color styling was computed once at build time and
+        // never updated after a toggle, so the DOM checkbox and the pill it sits beside visibly
+        // disagreed the moment you checked a second box.
+        const syncPill = (): void => {
+            const selected = currentTags.includes(t.tag);
+            pill.className = selected ? "gdg-pill gdg-selected" : "gdg-pill gdg-unselected";
+            // The ONE thing here CSS cannot express: a selected pill is painted in the colour
+            // carried by the cell's own `possibleTags[].color` data, not by anything in the theme.
+            // The unselected colour (`--gdg-bg-bubble`) and the 0.8 dimming both live in the
+            // stylesheet.
+            pill.style.backgroundColor = selected ? t.color : "";
+        };
+        syncPill();
 
         if (!readonly) {
             const input = document.createElement("input");
             input.type = "checkbox";
-            input.checked = selected;
+            input.checked = currentTags.includes(t.tag);
             input.addEventListener("change", () => {
-                const currentTags = p.value.data.tags;
-                const newTags = currentTags.includes(t.tag)
-                    ? currentTags.filter(x => x !== t.tag)
-                    : [...currentTags, t.tag];
-                p.onChange({ ...p.value, data: { ...p.value.data, tags: newTags } });
+                currentTags = toggleTag(currentTags, t.tag);
+                syncPill();
+                p.onChange({ ...p.value, data: { ...p.value.data, tags: currentTags } });
             });
             label.appendChild(input);
             if (firstInput === undefined) firstInput = input;
         }
 
-        const pill = document.createElement("div");
-        pill.className = selected ? "gdg-pill gdg-selected" : "gdg-pill gdg-unselected";
-        pill.textContent = t.tag;
-        // The ONE thing here that CSS cannot express: a selected pill is painted in the colour
-        // carried by the cell's own `possibleTags[].color` data, not by anything in the theme. The
-        // unselected colour (`--gdg-bg-bubble`) and the 0.8 dimming both live in the stylesheet.
-        if (selected) pill.style.backgroundColor = t.color;
         label.appendChild(pill);
-
         container.appendChild(label);
     }
 

@@ -5931,3 +5931,62 @@ bug happen on purpose once, or you have only tested that your code runs.**
 Rule 5 note: no read-only cell in this repo had ever opened an editor — the demo's two `readonly`
 cells both set `allowOverlay: false` — so the whole path was dead code. `<DemoGrid>`'s `Read-only
 cells` toggle exists now so it is not dead again.
+
+## Sweep for other instances of the `#910` decoy pattern — found one, in `tags-cell` (COMPLETE, browser-verified, 2026-08-14)
+
+Requested explicitly, separate from the upstream-bug audit in `TODO.md` §4b: after fixing #910, its
+own write-up flagged that `markdown-cell`/`uri-cell` had a *local* precursor to `focusOverlay` (the
+`gdg-focus-decoy` textarea, since Phase 4b) with a comment that named the general defect and was
+never checked against the rest of the editor files. That flag was, itself, exactly the kind of
+observation this file exists to act on rather than just record — so it was swept.
+
+**Method.** Grepped `rendering/cells/` and `rendering/extra-cells/` (28 files) for the two shapes a
+"local fix, general cause" comment tends to take: explicit self-aware language (`workaround`, `same
+rationale`, `same reason`, `class of bug`, `would also`, ...) and, more productively, every editor
+that maintains its own re-render/accumulation state and checking each one for whether it reads back
+through `p.value` (frozen for the editor's life, per `openOverlay`) or an explicit working copy.
+
+**Two results, one confirming nothing, one confirming something:**
+
+- **The focus-decoy sweep was negative** — `markdown-cell`/`uri-cell` remain the only two sites, now
+  subsumed by `focusOverlay`'s general fallback (kept, not deleted; see the #910 section above for
+  why). Worth recording precisely because a negative sweep result is otherwise indistinguishable from
+  a sweep that was never run.
+- **The working-copy sweep found a live bug**: `tags-cell.ts`'s checkbox editor read
+  `p.value.data.tags` fresh in every `change` handler rather than accumulating locally. Checking two
+  tags in one session committed only the second toggle on top of the *original* list — `["urgent"]`
+  → check "bug" → check "feature" → commits `["urgent", "feature"]`, "bug" silently dropped. Same
+  defect class as the bug `links-cell.ts`'s own comment already generalised ("any stateful editor
+  that re-renders itself needs this same working copy") — a second, unaudited instance of exactly
+  the rule the first instance's comment stated.
+
+**Confirmed as a genuine porting defect** (not a source parity gap) by reading source's own editor:
+`packages/cells/src/cells/tags-cell.tsx`'s `provideEditor` is a React function component whose
+`value` prop is `tempValue ?? content`, refreshed by `useState`/`setTempValue` on every `onChange`
+(`data-grid-overlay-editor.tsx:78-118`) — so every checkbox's `onChange` closure captures a *fresh*
+`tags` on each render. This port's one-shot imperative `buildTagsEditor` has no equivalent
+re-render, and needed the explicit working copy `links-cell`/`date-picker-cell`/`article-cell`/
+`markdown-cell`/`uri-cell` all already have.
+
+**Fixed** with the same idiom (`currentTags`, mutated locally, read locally, written to `p.onChange`
+— never re-read from `p.value`), plus a second, related defect fixed alongside it: the checked
+pill's own colour/`gdg-selected` class was computed once at initial build and never updated after a
+toggle, so the pill visually lagged the checkbox by one edit even independent of the data bug. The
+toggle arithmetic (`toggleTag`) is pulled out as an exported pure function with its own test file
+(`tags-cell.test.ts`) — the DOM wiring around it still can't be tested (the controller can't be
+imported by vitest), but the one piece of real logic now can be, and the tests **chain** calls the
+way the editor does rather than testing one toggle in isolation, because a test that didn't chain
+would not have caught this.
+
+**Browser-verified with the same before/after discipline as #954/#910**, not just unit tests: opened
+row 0 of `<DemoGrid>`'s Labels column (`["urgent"]`, already wired in from Phase 5b — no demo change
+needed, unlike 4b.1/4b.5), checked "bug" then "feature" in one session, committed, reopened —
+reproduced `["urgent", "feature"]` pre-fix, confirmed `["urgent", "bug", "feature"]` post-fix.
+
+**The standing lesson, stated once so it doesn't need re-deriving:** a workaround comment that names
+a general rule is a to-do list with one item checked off, not a closed loop. `links-cell.ts`'s
+comment was written correctly and completely, and the port still shipped a second instance of the
+bug it described, because "I fixed this and left a comment" and "I checked every sibling against
+that comment" are different amounts of work, and only the first one happened. When you write a
+comment of this shape, either sweep immediately or leave a note in `TODO.md` that a sweep is owed —
+don't trust that the comment itself will get re-read at the right moment.

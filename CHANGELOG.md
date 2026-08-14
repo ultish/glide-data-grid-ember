@@ -23,6 +23,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Custom editors are unaffected unless they relied on `GrowingEntry`'s internal `disabled` option,
   which is now `readOnly` (`glide-data-grid-ember/-private/growing-entry`).
 
+- **The tags cell's editor no longer drops earlier checkbox toggles.** Checking two or more tags in
+  a single editor session (e.g. "bug" then "feature") committed only the last one on top of the tags
+  the cell started with — `["urgent"]` → check "bug" → check "feature" → committed
+  `["urgent", "feature"]`, silently discarding "bug". Each checkbox read the cell's *original* tag
+  list instead of an accumulating working copy, so a later toggle in the same session recomputed
+  against stale data. A second, related defect is fixed alongside it: a checked pill's colour and
+  selected styling now update immediately, rather than only reflecting the tag list as it was when
+  the editor opened. Not an upstream bug — source's editor is a React component whose props refresh
+  on every keystroke, which has no equivalent in this port's imperative editors.
+
 - **Column auto-sizing now pays for a column's `indicatorIcon`.** A column with an `indicatorIcon`
   but no explicit `width` was measured from its title, padding and `icon` only — while the header
   renderer lays the indicator out *after* the title and takes that space back. The result was a
