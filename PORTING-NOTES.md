@@ -5806,3 +5806,73 @@ Two harness notes, both re-earned: a `javascript_tool` loop that calls `document
 iteration times the renderer out at ~70 iterations on this page (scope the readout to the status
 element), and hover-probing is the only non-destructive way to bisect row boundaries here — clicking
 to probe fires `@onCellClicked` and collapses the group you are measuring.
+
+## Upstream bug parity, and #954 (`indicatorIcon` auto-sizing) (COMPLETE, browser-verified, 2026-08-14)
+
+**The audit itself is in `TODO.md` §4b** — all 10 open upstream `type:bug` issues and all 37 open PRs
+checked against this tree, with per-item verdicts and citations. Not duplicated here. What belongs in
+this file is the two durable lessons and the one fix that landed.
+
+### Auditing *upstream's issue tracker* finds a class of bug auditing source cannot
+
+The Phase 9 audit (2026-08-08) established that auditing our own notes only finds what we already
+knew we skipped, so it audited the **source tree** instead and found seven unrecorded groups. This
+audit adds the next rung: reading source tells you what upstream *wrote*, but not what upstream
+*knows is wrong with what it wrote*. Six inherited bugs came out of the issue tracker, and **not one
+of them was findable by reading source** — the code looks correct in every case; it is the reported
+symptom that makes it wrong. A faithful port inherits faithful bugs.
+
+The corollary for effort: **six inherited, three worth doing.** Most were correctly triaged down —
+Safari-only paint artifacts whose fixes live in the blit path (rule 1 territory), a cosmetic WebKit
+quirk upstream has no fix for. Finding an inherited bug is not the same as it being worth fixing, and
+§4b's ranking is (certainty × consequence) ÷ risk rather than issue order.
+
+Also worth knowing before anyone plans around it: **upstream is effectively unmaintained for
+bug-fix purposes.** 37 open PRs; exactly one fixes any of the six ([#915](
+https://github.com/glideapps/glide-data-grid/pull/915), for #910), open and unmerged since 2024-03.
+Do not defer work here expecting a fix to arrive upstream to port.
+
+### The fix: `headerAffordanceWidth` in `column-sizer.ts`
+
+Upstream [#954](https://github.com/glideapps/glide-data-grid/issues/954). `measureColumn` allowed for
+`column.icon` and nothing else, while `computeHeaderLayout`
+(`render/data-grid-render.header.ts:369-383`) lays an `indicatorIcon` out **after** the title
+(`drawX += textWidth + xPad`, then `headerIconSize`) and takes that width back. An auto-sized (or
+`remeasureColumns()`-ed) indicator column therefore came out ~26px too narrow.
+
+**The general shape, which is the reusable part:** this is a *two-sided contract with no compiler
+between the sides* — one module decides how wide a column should be, a different module decides what
+to draw in it, and nothing makes them agree. `headerAffordanceWidth` exists as a named function
+mostly so the contract has somewhere to be documented; grep for it before changing header layout.
+
+Three decisions, all argued in that function's doc comment and pinned by tests:
+
+- `icon` keeps upstream's magic `28` even though the real cost is `ceil(headerIconSize * 1.3)` = 24.
+  It is slack, not a shortfall, and re-deriving it would re-size every icon column for no defect.
+- The indicator allowance **is** derived from `theme.headerIconSize`, because that is a theme field a
+  consumer can raise — a constant would under-allow exactly for whoever raised it.
+- `hasMenu` allows **nothing**, deliberately: the menu overlays and fades the title
+  (`data-grid-render.header.ts:474-493`) rather than sitting beside it. There is a test asserting the
+  delta is `0`, specifically so a future reader does not "fix" this.
+
+### Rule 5 again, and the before/after that made it stick
+
+**Nothing in this repo had ever set `indicatorIcon`** — it has been in `GridColumn` and laid out by
+`computeHeaderLayout` since Phase 1. That is the fifth or sixth instance of the same shape
+(`GridColumn.grow`, the 28 header-icon glyphs, `getGroupDetails`, the fill handle, `highlightRegions`
++ row markers). `<DemoGrid>` now sets it on columns 1, 3 and 13 via `INDICATOR_ICONS`.
+
+**The verification worth copying:** unit tests were written first and passed, which proves the
+arithmetic but not that anything was ever *wrong*. The decisive check was reverting the one
+expression, rebuilding `dist/`, and reloading — the indicator renders **clipped to a ~2px sliver at
+the column edge**, then fully with the fix restored. Same shape as §6b's subscription check in
+`TODO.md`: a test that passes both before and after your change has told you nothing, so make the
+bug happen on purpose once.
+
+### Found on the way: `@onHeaderIndicatorClick` is not ported
+
+Source hit-tests `indicatorIconBounds` (`data-grid.tsx:1057-1065`, `area: "indicator"`) and fires
+`onHeaderIndicatorClick` (`:1241`) — the sibling of `onHeaderMenuClick`, which this port *does*
+expose. Here the bounds are computed and only ever drawn. `grid-host-controller.ts:4636` already
+noted the omission, but it was unreachable until now; with `<DemoGrid>` setting `indicatorIcon`, a
+user will try clicking one. `TODO.md` §4b.5.

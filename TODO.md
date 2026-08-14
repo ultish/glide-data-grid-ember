@@ -19,23 +19,30 @@ directly**; every item below cites file:line in it.
 is also what deploys to GitHub Pages. pnpm workspace.
 
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 941 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
+GitHub Pages. 945 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
-**Published vs unpublished.** **v0.5.0 is on npm** (tagged 2026-08-14), and everything below marked
-DONE ships in it. **Nothing is currently unreleased.** §5.3 has the release procedure for next time.
+**Published vs unpublished.** **v0.5.0 is on npm** (tagged 2026-08-14). Everything below marked DONE
+ships in it **except §4b's P1.1** (the `indicatorIcon` auto-size fix), which is committed and
+unreleased — see `CHANGELOG.md`'s Unreleased section. §5.3 has the release procedure.
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
 *rendering* existing first — no cell type in this port sets `GridCell.span`, so building it now would
 add a feature no demo can switch on, which rule 5 says is unverified code by construction.
 
-**There is no other outstanding work in this file.** §3.1 was decided on 2026-08-13 (smooth scrolling
-stays, documented). Everything else below is marked DONE and is kept for its source citations.
+**The other outstanding work is §4b — upstream bug parity (added 2026-08-14).** All 10 open
+`type:bug` issues and all 37 open PRs upstream were audited against this tree: six bugs are
+inherited, three are worth doing. **P1.1 (#954) is DONE and unreleased**; **P1.2 (#910, Escape
+cannot close a read-only overlay) is now the best next work in this file.** §4b.4 lists what was
+checked and dismissed, so it does not get re-audited; §4b.5 is a small gap P1.1 surfaced.
+
+**Everything else below is marked DONE** and is kept for its source citations. §3.1 was decided on
+2026-08-13 (smooth scrolling stays, documented).
 
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 941 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 945 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -133,6 +140,10 @@ a rollup/babel requirement `tsc` alone will not catch.
 ---
 
 ## 2. Quick wins — diagnosed, small, do these first
+
+**Every item in this section is DONE**, as is §4b's P1.1 (`#954`) which briefly lived here. The
+nearest thing to a quick win left is **§4b.5** — wiring up `@onHeaderIndicatorClick`, one branch in
+the header hit-test.
 
 ### 2.1 `withMovableColumns` memoizes on the wrong key — DONE (2026-08-09)
 
@@ -431,6 +442,201 @@ looked up by column `id` rather than position.
 
 ---
 
+## 4b. Upstream bug parity — prioritized (audited 2026-08-14)
+
+All 10 open `type:bug` issues and all 37 open PRs on `glideapps/glide-data-grid` were checked against
+this tree. **Six bugs are inherited; three are worth doing.** Ordered by (certainty of diagnosis ×
+consequence) ÷ risk, not by upstream issue number.
+
+Verdicts below come from **code inspection against the local source checkout, not browser repro.**
+That distinction is the whole reason for the P1/P2 split: P1 items are provable from the source text
+alone, P2 items have a confirmed-identical code path but an unconfirmed symptom *here*. Rule 5's
+corollary applies — do not schedule a P2 fix before reproducing it, because a bug you cannot
+reproduce is a fix you cannot verify.
+
+| # | Item | Effort | Why this rank |
+|---|------|--------|---------------|
+| ~~**P1.1**~~ | [#954](https://github.com/glideapps/glide-data-grid/issues/954) auto-size ignores `indicatorIcon` | S | **DONE 2026-08-14** — fixed, 4 tests, browser-verified |
+| **P1.2** | [#910](https://github.com/glideapps/glide-data-grid/issues/910) Escape cannot close a read-only overlay | M | Certain; user-visible dead end; [PR #915](https://github.com/glideapps/glide-data-grid/pull/915) is a blueprint |
+| **P2.1** | [#1034](https://github.com/glideapps/glide-data-grid/issues/1034) Firefox scrollbar click-through | M | Only inherited bug whose consequence is a **mutation**, not a paint artifact |
+| **P2.2** | [#998](https://github.com/glideapps/glide-data-grid/issues/998) column `bgCell` misses the blank strip | M | Visual; likely cause already located |
+| **P2.3** | [#989](https://github.com/glideapps/glide-data-grid/issues/989) Safari frozen-column flicker | L | Visual, Safari-only, and the fix lives in the blit path — high risk, low reward |
+| **P2.4** | [#983](https://github.com/glideapps/glide-data-grid/issues/983) Safari emoji header color | S | Cosmetic, narrow trigger, upstream thinks it is a WebKit bug |
+| **P3** | [PR #1193](https://github.com/glideapps/glide-data-grid/pull/1193) frozen trailing band | — | Gated: unreachable until `trailingRowOptions.sticky` exists |
+| **P3** | Scroll ceiling past 33.5M px | — | Not a bug report; an untested limit. Decide, don't fix |
+| **P3** | [#791](https://github.com/glideapps/glide-data-grid/issues/791) `scrollOffsetX/Y` re-apply | — | A **decision**, not a defect. Do not "fix" blind |
+
+**No action, settled:** [#740](https://github.com/glideapps/glide-data-grid/issues/740),
+[#773](https://github.com/glideapps/glide-data-grid/issues/773),
+[PR #1197](https://github.com/glideapps/glide-data-grid/pull/1197),
+[PR #1199](https://github.com/glideapps/glide-data-grid/pull/1199) — reasons in §4b.4.
+
+### 4b.1 P1 — do these first
+
+**P1.1 — `#954`: auto-size ignores `indicatorIcon` — DONE (2026-08-14).**
+`rendering/column-sizer.ts` measured the header as title + padding + an `icon` allowance only, a
+transliteration of upstream's `use-column-sizer.ts:67`, while `computeHeaderLayout`
+(`data-grid-render.header.ts:369-383`) lays the indicator out *after* the title and takes that space
+back. Fixed by extracting `headerAffordanceWidth`, which now also allows
+`theme.headerIconSize + theme.cellHorizontalPadding` for `indicatorIcon`.
+
+Three decisions worth not re-litigating, all argued in that function's doc comment:
+
+- **The `icon` allowance stays at upstream's magic `28`.** The real layout cost is
+  `ceil(headerIconSize * 1.3)` = 24 at the default 18, so the constant is slack rather than a
+  shortfall. Re-deriving it would silently re-size every icon-bearing column with no defect behind
+  it.
+- **The indicator allowance *is* derived**, because `headerIconSize` is a theme field a consumer can
+  raise, and a constant would under-allow exactly for the consumers who raised it.
+- **`hasMenu` adds nothing, deliberately.** The menu button overlays the title and fades it
+  (`data-grid-render.header.ts:474-493`) rather than being laid out beside it. Counting it would
+  widen every menu-bearing column by 30px. There is a test pinning this to `0` so a future reader
+  does not "fix" it.
+
+**Verified three ways**, because the unit tests alone would not have caught a wrong *sign* of the
+problem: 4 new tests in `column-sizer.test.ts` (945 total, and the 3 behavioural ones were confirmed
+to fail against the pre-fix expression); `<DemoGrid>` now sets `indicatorIcon` on columns 1, 3 and 13
+via `INDICATOR_ICONS` — **nothing in this repo had ever set one**, the exact rule-5 shape; and a
+before/after browser check where "Auto-size" on those columns renders the indicator **clipped to a
+2px sliver at the column edge without the fix** and fully with it.
+
+### 4b.5 Found while fixing P1.1 — `@onHeaderIndicatorClick` is not ported
+
+Source makes the indicator icon **clickable**: `data-grid.tsx:1057-1065` hit-tests
+`indicatorIconBounds` and returns `area: "indicator"`, which `:1241` turns into
+`onHeaderIndicatorClick?.(col, bounds)` — the sibling of `onHeaderMenuClick`, which this port does
+expose. Here, `indicatorIconBounds` is computed and **only ever drawn**; there is no hit-test and no
+arg. `grid-host-controller.ts:4636` already notes the omission ("not requested for 3a"), so this is
+a known gap rather than a discovery — but it is now a *reachable* one, since `<DemoGrid>` sets
+`indicatorIcon` and a user will try clicking it.
+
+Small: one branch in the header hit-test beside the existing `menu` branch, one arg, one demo
+handler reporting into the status line. Worth doing next time the header hit-test is open anyway.
+Until then the indicator is decorative, which the demo's comment says out loud.
+
+**P1.2 — `#910`: Escape cannot close a read-only overlay.** `growing-entry.ts:71` sets
+`textarea.disabled = true` for `cell.readonly`, mirroring `text-cell.tsx:45` / `number-cell.tsx:39`.
+Clicking that disabled textarea moves focus to `<body>`; the overlay's `keydown` listener is on the
+overlay container (`grid-host-controller.ts:5831`) so it never fires, and `onKeyDown` early-returns
+on `this.overlayState !== undefined` (`:6186`) so the grid handler will not catch it either. The
+container has no `tabIndex`, so nothing else holds focus. **The user is stranded in an editor with no
+keyboard way out** — that is what earns it P1 over the paint bugs.
+
+[PR #915](https://github.com/glideapps/glide-data-grid/pull/915) ("Keep focus in overlay editor",
+open and unmerged since 2024-03) is the blueprint, in two halves, both of which apply here:
+
+- (a) use the `readonly` attribute instead of `disabled`, keeping the element focusable but not
+  editable — and, as the PR notes, this also lets the user select and copy a read-only cell's text,
+  which they cannot do today. Also drop the `if (this.textareaEl.disabled) return` focus bail at
+  `growing-entry.ts:107`.
+- (b) make the overlay element itself focusable and autofocus it, so editors with **no** focusable
+  child still hold focus. This is the more valuable half here: every editor's `handle.focus()`
+  (`:5863`) is trusted to put focus *somewhere*, and a disabled textarea is exactly the case that
+  breaks that assumption silently.
+
+**Do not port PR #915's diff.** It is entangled with source's React portal and
+`data-grid-overlay-editor-style.tsx`, neither of which exists here (this port appends the overlay
+straight into `this.root`, `:5607-5609`). Port the two ideas. Verify against *every* editor kind, not
+just text — the PR's own author flags that as the missing test coverage.
+
+### 4b.2 P2 — reproduce before scheduling
+
+**P2.1 — `#1034`: Firefox clicks pass through the scrollbar.**
+`grid-host-controller.ts:4585` computes `scrollbarWidth` as `offsetWidth - clientWidth`, and the
+comment beside it says overlay scrollbars give 0 and have "nothing to guard against" — which is
+exactly the wrong assumption in Firefox, where an overlay scrollbar expands on hover and still lets
+the press reach the content. `isMaybeScrollbar` comes out `false` and the press lands on whatever is
+underneath. **Ranked top of P2 because its consequence is a data mutation, not a smudge**: with the
+trailing blank row on, the reporter's symptom is that grabbing the scrollbar *appends a row*. Repro
+is cheap — Firefox, `<DemoGrid>`, scroll to the bottom, drag the scrollbar thumb.
+
+**P2.2 — `#998`: column `bgCell` override does not fill the blank strip after a horizontal scroll.**
+`drawBlanks` (`data-grid-render.lines.ts:11-101`) is a faithful port including the
+`drawRegions.some(intersect)` skip at `:66-72`, which is the likely cause: the blank strip right of
+the last column is only repainted when a draw region covers it, and the blit path does not always
+produce one. Repro needs a column `themeOverride.bgCell`, fewer rows than fit, and a horizontal
+scrollbar.
+
+**P2.3 — `#989`: Safari frozen-column flicker on horizontal scroll.** `data-grid-render.blit.ts` is
+a faithful 288-line port of upstream's 291, sticky carve-out at `:158-165` included; a Safari
+self-`drawImage` artifact, so it should reproduce. **Rank it last of the real bugs anyway** — the
+fix would live in the blit path, which rule 1 already marks as the place where changes do damage
+with no visible symptom, and the payoff is a Safari-only shimmer.
+
+**P2.4 — `#983`: Safari emoji header titles take the menu-fade gradient's color.**
+`data-grid-render.header.ts:474-493` is byte-identical to upstream's `:493-512`. Needs `hasMenu` +
+`width > 35` + an emoji in the title, Safari only. Upstream has no fix and the reporter believes it
+is a WebKit bug — so the realistic outcome is a documented limitation, not a patch.
+
+### 4b.3 P3 — gated, or a decision rather than a fix
+
+**[PR #1193](https://github.com/glideapps/glide-data-grid/pull/1193) — scrolling rows bleed into the
+frozen trailing band.** Real bug, real fix, **unreachable in this port today**: `freezeTrailingRows`
+is hardcoded to `0` (`grid-host-controller.ts:3088`). It becomes reachable the moment 9g's deferred
+`trailingRowOptions.sticky` lands, since source implements `sticky` by adding 1 to
+`freezeTrailingRows` — the same coupling that made it "not the one-line passthrough it looks like"
+(`:200-203`). The PR clamps `walkRowsInCol`'s scrollable loop at
+`height - getFreezeTrailingHeight(...)` instead of the raw `height`, plus a straddling-row clip in
+`drawCells` with a carve-out for sticky spans. Ours is still the pre-PR
+`while (y < height && row < rowEnd)` (`data-grid-render.walk.ts:36`), and our `drawCells` has only
+the damage-path clamp the PR describes as its counterpart (`data-grid-render.cells.ts:338-340`).
+**Fold it into that work, not before it** — and re-read the PR then, because it also moves an
+observable (a row-count expectation changes to
+`Math.ceil((height - rowHeight - headerHeight) / rowHeight)`).
+
+**The scroll ceiling past `BROWSER_MAX_DIV_HEIGHT`.**
+[#705](https://github.com/glideapps/glide-data-grid/issues/705) does *not* apply, because the
+mechanism causing it was never ported: upstream's `infinite-scroller.tsx:245-264` maps `scrollTop`
+onto a virtual Y with a coarse/fine split (percentage remap for jumps > 2000px, 1:1 delta
+otherwise), and its `scroll-to` math then disagrees with that mapping. This port has **no such
+mapping** — `syncScrollOffsets` (`:3538-3550`) reads `scrollerEl.scrollTop` straight. But we do
+clamp the padder stack to `BROWSER_MAX_DIV_HEIGHT` (`:3460`), so the failure mode here is different
+and arguably worse: past ~33.5M px of content (**≈1.08M rows at 31px**) the remaining rows are
+simply **unreachable by scrolling** rather than reachable-but-inaccurate. Nothing has ever tested
+this port near that row count — `<AsyncDemo>` tops out at 100k rows, two orders of magnitude short.
+**Decide what the contract is and document it** (the Performance rules chapter is the place) before
+considering the ~250 lines of virtual-Y mapping that would lift it.
+
+**[#791](https://github.com/glideapps/glide-data-grid/issues/791) — `scrollOffsetX/Y` do not
+re-apply when the value is unchanged.** Behavioural parity with upstream by different means:
+`applyScrollOffsets` (`:2939-2949`) applies once per *change* against a remembered
+`lastAppliedScrollOffsetX/Y`; upstream's layout effect is keyed on the same value, so it also does
+not re-run. Both are "scroll here once", not a scroll lock. Upstream never confirmed it as a bug (the
+maintainer asked for a demo and never got one), and our doc comment at `:2896` states the semantic
+deliberately. **This is a decision, not a defect — do not "fix" it without first deciding it is a
+divergence.**
+
+### 4b.4 Settled — no action, do not re-audit
+
+- **[#740](https://github.com/glideapps/glide-data-grid/issues/740)** (popups leave the viewport in
+  fullscreen) — upstream portals its overlay into a `#portal` node outside the fullscreened element
+  and blames `react-laag`. This port appends the overlay directly into `this.root` (`:5607-5609`), so
+  it goes fullscreen with the grid. Context menus are consumer-rendered here regardless.
+- **[#773](https://github.com/glideapps/glide-data-grid/issues/773)** — an unreproduced consumer
+  usage question about custom-cell writes; no library defect was ever identified.
+- **[PR #1197](https://github.com/glideapps/glide-data-grid/pull/1197)** (`editOnType` blocked in
+  frozen regions) fixes a bug **this port does not have**, because it never ported the mechanism:
+  upstream's type-to-overwrite consults `visibleRegionRef` (`data-editor.tsx:3518`), which excludes
+  frozen regions by design, so `vr.x > col` rejects any column with `index < freezeColumns`. Our
+  equivalent (`grid-host-controller.ts:6364-6379`) has **no visible-region gate at all**.
+- **[PR #1199](https://github.com/glideapps/glide-data-grid/pull/1199)** ("feat:版本1") is an
+  accidental PR, not a fix: #1197's diff, plus a committed copy of `pr1197.diff` as a file, an
+  8,199-line `yarn.lock`, `"private": true` in the root `package.json`, a React-19 `useRef` shim, and
+  a story with `{...defaultProps}` and its edit handlers commented out.
+- **[PR #1040](https://github.com/glideapps/glide-data-grid/pull/1040)** (merged 2025-06) — **already
+  have it.** It fixed `measureColumn` measuring the header title in the *base* font rather than
+  `headerFontFull`; `column-sizer.ts:81-86` already measures in `theme.headerFontFull` and saves and
+  restores `ctx.font` around it, found independently during 9i ("measuring in whatever font the last
+  draw left on the canvas"). This also **settles the open guess in #954's comments** that #1040 might
+  have fixed the `indicatorIcon` problem: it did not. Separate bugs on adjacent lines; only the font
+  one is fixed anywhere.
+
+**Standing note.** The upstream PR queue is not a shortcut: 37 open PRs, exactly one relevant fix
+(#915), unmerged for over two years. Upstream is effectively unmaintained for bug-fix purposes — do
+not schedule work here on the expectation that a fix will arrive to port.
+
+---
+
 ## 5. Release path
 
 ### 5.1 Make CI green — DONE (2026-08-09)
@@ -526,8 +732,6 @@ Browser-checked on a clean build, so this needs no re-verification:
   fresh, confirm the counters are *absent*, then run **only** the subscription and confirm they
   appear. Reading the same numbers before and after a subscription proves nothing, because a
   per-tick counter left over from a click reads identically to one that never updated.
-
----
 
 ## 7. Where the deep history lives, if you need it
 

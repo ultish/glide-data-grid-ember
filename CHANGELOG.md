@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Column auto-sizing now pays for a column's `indicatorIcon`.** A column with an `indicatorIcon`
+  but no explicit `width` was measured from its title, padding and `icon` only — while the header
+  renderer lays the indicator out *after* the title and takes that space back. The result was a
+  title clipped by exactly the icon's width, or the icon itself clipped to a sliver at the column
+  edge. Also applies to `remeasureColumns()`. This is upstream
+  [#954](https://github.com/glideapps/glide-data-grid/issues/954), still open there; the allowance
+  is derived from `theme.headerIconSize` rather than hardcoded, so raising it in a theme stays
+  correct. `hasMenu` deliberately adds nothing — the menu button overlays and fades the title rather
+  than being laid out beside it, so it reserves no width.
+
 ## [0.5.0] - 2026-08-14
 
 ### Added

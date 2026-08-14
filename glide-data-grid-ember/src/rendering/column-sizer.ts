@@ -45,14 +45,44 @@ export interface MeasureColumnOptions {
 }
 
 /**
+ * Header width the title does *not* get to use, because an affordance is laid out beside it.
+ *
+ * Must stay in step with `computeHeaderLayout` (`render/data-grid-render.header.ts:323-394`), which
+ * is what actually reserves this space at draw time. The two disagreeing is upstream's
+ * [#954](https://github.com/glideapps/glide-data-grid/issues/954): its `measureColumn` allows for
+ * `icon` and nothing else, so a column carrying an `indicatorIcon` is auto-sized to a width the
+ * header renderer then takes a bite out of, clipping the title by exactly the icon's width. Ported
+ * in with 9i rather than found here -- no column in this repo set `indicatorIcon` until now.
+ *
+ * - **`icon`** advances `drawX` by `ceil(headerIconSize * 1.3)` before the text. The `28` is
+ *   upstream's own constant (`use-column-sizer.ts:67`), left alone deliberately: at the default
+ *   `headerIconSize` of 18 the real cost is 24, so the constant is slack, not a shortfall, and
+ *   re-deriving it would silently re-size every icon-bearing column with no defect to justify it.
+ * - **`indicatorIcon`** is laid out *after* the title -- `drawX += textWidth + xPad`, then the icon
+ *   occupies `headerIconSize`. Derived rather than hardcoded because `headerIconSize` is a theme
+ *   field a consumer can raise, and a constant would under-allow exactly for the consumers who did.
+ * - **`hasMenu` is deliberately not counted.** The menu button overlays the title and fades it out
+ *   (`data-grid-render.header.ts:474-493`) rather than being laid out beside it, so it reserves no
+ *   width. Adding an allowance would widen every menu-bearing column by 30px and diverge from
+ *   upstream for a case upstream treats as working as intended.
+ */
+function headerAffordanceWidth(column: GridColumn, theme: FullTheme): number {
+    const iconAllowance = column.icon === undefined ? 0 : 28;
+    const indicatorAllowance =
+        column.indicatorIcon === undefined ? 0 : theme.headerIconSize + theme.cellHorizontalPadding;
+    return iconAllowance + indicatorAllowance;
+}
+
+/**
  * The measured width for one column, given a sample of its cells.
  *
  * `sample` is row-major and must be indexed by `colIndex` -- i.e. it is a slice of the grid, not of
  * the column. That is source's shape and it matters, because the caller fetches one rectangle
  * covering every auto column rather than one per column.
  *
- * The header is always measured too, in the header font, plus padding and an icon allowance -- a
- * column whose title is wider than any of its values still has to fit its own title.
+ * The header is always measured too, in the header font, plus padding and whatever its affordances
+ * reserve (see `headerAffordanceWidth`) -- a column whose title is wider than any of its values
+ * still has to fit its own title.
  */
 export function measureColumn(
     ctx: MeasureContext,
@@ -82,8 +112,10 @@ export function measureColumn(
     // render context -- leaving the header font set would silently mis-measure the next caller.
     const previousFont = ctx.font;
     ctx.font = theme.headerFontFull;
-    const iconAllowance = column.icon === undefined ? 0 : 28;
-    max = Math.max(max, ctx.measureText(column.title).width + theme.cellHorizontalPadding * 2 + iconAllowance);
+    max = Math.max(
+        max,
+        ctx.measureText(column.title).width + theme.cellHorizontalPadding * 2 + headerAffordanceWidth(column, theme)
+    );
     ctx.font = previousFont;
 
     return Math.max(Math.ceil(options.minColumnWidth), Math.min(Math.floor(options.maxColumnWidth), Math.ceil(max)));

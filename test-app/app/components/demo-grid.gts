@@ -212,6 +212,29 @@ function groupFor(index: number): string | undefined {
 // works through each renderer's own `measure()` and most custom renderers don't have one.
 const AUTO_SIZED_COLUMN = 3;
 
+// The columns carrying an `indicatorIcon`: a second glyph drawn *after* the title, where `icon` is
+// drawn before it. Typically a per-column status ("this column is filtered / synced / protected").
+//
+// **Nothing in this repo set one until 2026-08-14**, which is the exact shape rule 5 warns about:
+// `indicatorIcon` has been in `GridColumn` and laid out by `computeHeaderLayout` since Phase 1, and
+// it took upstream's issue #954 to notice that auto-sizing never paid for the space it reserves --
+// so an auto-sized indicator column had its title clipped by exactly the icon's width. The live
+// check is the header menu's **"Auto-size this column"** on any column below: the title must still
+// fit with the indicator beside it. `column-sizer.test.ts` pins the arithmetic.
+//
+// Column 3 is included deliberately because it is `AUTO_SIZED_COLUMN` -- that is the one whose width
+// is *computed*, so it is the one where a wrong allowance would show up on load rather than only
+// after using the menu. Note its width is content-bound (long profile URLs), so the eye-catching
+// case is auto-sizing one of the others.
+//
+// The indicator is decorative here: source makes it clickable via `onHeaderIndicatorClick`, which
+// this port does not expose (see §4b.5 in TODO.md and `grid-host-controller.ts:4636`).
+const INDICATOR_ICONS: Readonly<Record<number, string>> = {
+    1: "headerMath", // Salary -- "this is a computed column"
+    3: "headerLookup", // Profile -- the auto-sized column
+    13: "headerIfThenElse", // Status -- "this column is rule-driven"
+};
+
 // N1: the two columns that share leftover container width. `grow` is orthogonal to `width` -- these
 // keep their fixed widths as a *floor* and split whatever space is left over 2:1, so widening the
 // window widens column 1 twice as fast as column 2. Nothing demoed `grow` before, which is precisely
@@ -257,6 +280,7 @@ function buildDemoColumns(): readonly GridColumn[] {
             // the custom glyph below purely to prove `@headerIcons` merges over the built-in set.
             icon: i === 0 ? "demoStar" : column.icon,
             ...(GROW_COLUMNS[i] === undefined ? {} : { grow: GROW_COLUMNS[i] }),
+            ...(INDICATOR_ICONS[i] === undefined ? {} : { indicatorIcon: INDICATOR_ICONS[i] }),
         };
         // The distinction is exactly this: a column WITH `width` is a `SizedGridColumn`, one
         // WITHOUT is an `AutoGridColumn` that the grid measures. There is no `width: "auto"`.

@@ -100,6 +100,48 @@ describe("measureColumn", () => {
         expect(b - a).toBe(28);
     });
 
+    // Upstream #954: `measureColumn` allowed for `icon` and nothing else, so a column carrying an
+    // `indicatorIcon` was auto-sized to a width `computeHeaderLayout` then took a bite out of --
+    // clipping the title by exactly the icon's width. These assertions are the contract between the
+    // two: whatever the header renderer lays out beside the title, the sizer has to pay for.
+    test("an indicatorIcon adds an allowance to the header measurement", () => {
+        const plain: GridColumn = { title: "title", width: 0 };
+        const withIndicator: GridColumn = { title: "title", width: 0, indicatorIcon: "headerString" };
+        const a = measureColumn(stubCtx(), theme, plain, 0, sample(["a"]), renderer, opts);
+        const b = measureColumn(stubCtx(), theme, withIndicator, 0, sample(["a"]), renderer, opts);
+        // `computeHeaderLayout` puts the indicator after the title: `drawX += textWidth + xPad`,
+        // then the icon occupies `headerIconSize`.
+        expect(b - a).toBe(theme.headerIconSize + theme.cellHorizontalPadding);
+    });
+
+    test("the indicatorIcon allowance follows the theme's headerIconSize", () => {
+        // Derived, not hardcoded -- a consumer who raises `headerIconSize` must not get a title
+        // clipped by the difference.
+        const big = mergeAndRealizeTheme(getDataEditorTheme(), { headerIconSize: 40 });
+        const withIndicator: GridColumn = { title: "title", width: 0, indicatorIcon: "headerString" };
+        const a = measureColumn(stubCtx(), theme, withIndicator, 0, sample(["a"]), renderer, opts);
+        const b = measureColumn(stubCtx(), big, withIndicator, 0, sample(["a"]), renderer, opts);
+        expect(b - a).toBe(40 - theme.headerIconSize);
+    });
+
+    test("icon and indicatorIcon both apply -- they sit on opposite sides of the title", () => {
+        const plain: GridColumn = { title: "title", width: 0 };
+        const both: GridColumn = { title: "title", width: 0, icon: "headerString", indicatorIcon: "headerString" };
+        const a = measureColumn(stubCtx(), theme, plain, 0, sample(["a"]), renderer, opts);
+        const b = measureColumn(stubCtx(), theme, both, 0, sample(["a"]), renderer, opts);
+        expect(b - a).toBe(28 + theme.headerIconSize + theme.cellHorizontalPadding);
+    });
+
+    test("hasMenu adds nothing -- the menu overlays the title rather than being laid out beside it", () => {
+        // Deliberate divergence-avoidance, not an oversight: counting it would widen every
+        // menu-bearing column by 30px. The header renderer fades the title under the button.
+        const plain: GridColumn = { title: "title", width: 0 };
+        const withMenu: GridColumn = { title: "title", width: 0, hasMenu: true };
+        const a = measureColumn(stubCtx(), theme, plain, 0, sample(["a"]), renderer, opts);
+        const b = measureColumn(stubCtx(), theme, withMenu, 0, sample(["a"]), renderer, opts);
+        expect(b).toBe(a);
+    });
+
     test("restores ctx.font after measuring the header", () => {
         // Load-bearing: the caller's ctx is the live render context, so leaving the header font set
         // would silently mis-measure whatever draws next.
