@@ -21,9 +21,8 @@ is also what deploys to GitHub Pages. pnpm workspace.
 **State as of 2026-08-13:** everything is on **`main`**, which is pushed, green in CI, and deployed to
 GitHub Pages. 941 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
 
-**Published vs unpublished.** **v0.4.0 is on npm** (tagged 2026-08-13), and everything below marked
-DONE ships in it — including §4.1 row grouping. **Nothing is currently unreleased.** §5.3 has the
-release procedure for next time.
+**Published vs unpublished.** **v0.5.0 is on npm** (tagged 2026-08-14), and everything below marked
+DONE ships in it. **Nothing is currently unreleased.** §5.3 has the release procedure for next time.
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
@@ -470,9 +469,9 @@ violations.)
 - Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
   character.
 
-### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0 — latest 2026-08-13)
+### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0, 0.5.0 — latest 2026-08-14)
 
-- Current version is `0.4.0`, tagged `v0.4.0`.
+- Current version is `0.5.0`, tagged `v0.5.0`.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.
