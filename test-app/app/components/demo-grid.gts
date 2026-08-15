@@ -227,8 +227,10 @@ const AUTO_SIZED_COLUMN = 3;
 // after using the menu. Note its width is content-bound (long profile URLs), so the eye-catching
 // case is auto-sizing one of the others.
 //
-// The indicator is decorative here: source makes it clickable via `onHeaderIndicatorClick`, which
-// this port does not expose (see §4b.5 in TODO.md and `grid-host-controller.ts:4636`).
+// The indicator is clickable as of 4b.5: `@onHeaderIndicatorClick` fires on the glyph and nowhere
+// else, the same precise hit test `@onHeaderMenuClick` gets. `handleHeaderIndicatorClick` reports
+// into the status line.
+
 // Which columns the `Read-only cells` toggle applies to. Both are on screen without scrolling, and
 // between them they cover the two shapes a read-only editor comes in — which is the distinction that
 // matters, not the cell kinds:
@@ -1654,6 +1656,30 @@ export default class DemoGrid extends Component {
         this.headerMenu = undefined;
     };
 
+    /** Both header-glyph callbacks report the grid's *internal* column space -- the one that
+     *  includes the row-marker column -- unlike every other callback this component handles. This is
+     *  the only place the demo has to know that, so it is also the only place to change if the
+     *  addon ever brings them in line with the rest (see TODO.md). */
+    headerGlyphColumnIndex(col: number): number {
+        return col - (this.rowMarkers === "none" ? 0 : 1);
+    }
+
+    /** `@onHeaderIndicatorClick` is the indicator icon's answer to `@onHeaderMenuClick`: a precise
+     *  hit test on the header's *second* glyph, which this port only ever drew until 4b.5. Columns
+     *  1, 3 and 13 carry one -- see `INDICATOR_ICONS`.
+     *
+     *  The readout names the column and the glyph rect rather than the raw index on purpose: an
+     *  index alone cannot show that the hit test landed on the column under the pointer, and
+     *  `bounds` is half the callback. */
+    @tracked lastHeaderIndicatorClick: string | undefined;
+
+    handleHeaderIndicatorClick = (col: number, bounds: Rectangle): void => {
+        const title = this.columns[this.headerGlyphColumnIndex(col)]?.title ?? `column ${col}`;
+        this.lastHeaderIndicatorClick =
+            `${title}, ${Math.round(bounds.width)}x${Math.round(bounds.height)}px ` +
+            `at ${Math.round(bounds.x)},${Math.round(bounds.y)}`;
+    };
+
     // --- 4.5b: the header menu's real items -------------------------------------------------------
     // The menu used to hold nothing but "Close", which read as a broken callback. Both items below
     // are deliberately *grid* concerns — auto-sizing and column visibility — because <DemoGrid> demos
@@ -1667,7 +1693,8 @@ export default class DemoGrid extends Component {
     get headerMenuColumnTitle(): string {
         const menu = this.headerMenu;
         if (menu === undefined) return "";
-        return this.columns[menu.col]?.title ?? `Column ${menu.col}`;
+        const col = this.headerGlyphColumnIndex(menu.col);
+        return this.columns[col]?.title ?? `Column ${col}`;
     }
 
     get hiddenColumnTitles(): string {
@@ -1677,18 +1704,23 @@ export default class DemoGrid extends Component {
     autoSizeMenuColumn = (): void => {
         const menu = this.headerMenu;
         if (menu === undefined) return;
-        // `remeasureColumns` takes displayed indices, which is what `@onHeaderMenuClick` reports.
-        this.gridApi?.remeasureColumns([menu.col]);
-        this.lastApiResult = `remeasureColumns([${menu.col}]) from the header menu`;
+        // `remeasureColumns` takes consumer-space indices; `@onHeaderMenuClick` does not report
+        // them. Measuring the column *next to* the one whose menu you opened is invisible until you
+        // look at which title moved, which is how this survived the toggle being on by default.
+        const col = this.headerGlyphColumnIndex(menu.col);
+        this.gridApi?.remeasureColumns([col]);
+        this.lastApiResult = `remeasureColumns([${col}]) from the header menu`;
         this.closeHeaderMenu();
     };
 
     hideMenuColumn = (): void => {
         const menu = this.headerMenu;
-        const column = this.columns[menu?.col ?? -1];
-        if (menu === undefined || column === undefined) return;
+        if (menu === undefined) return;
+        const col = this.headerGlyphColumnIndex(menu.col);
+        const column = this.columns[col];
+        if (column === undefined) return;
         this.hiddenColumns = [...this.hiddenColumns, column];
-        this.columns = this.columns.filter((_, i) => i !== menu.col);
+        this.columns = this.columns.filter((_, i) => i !== col);
         this.closeHeaderMenu();
     };
 
@@ -2253,6 +2285,10 @@ export default class DemoGrid extends Component {
                 {{#if this.lastGuard}}<span>Guard: <b data-test-last-guard>{{this.lastGuard}}</b></span>{{/if}}
                 {{! 4.4: drops are always live; dragging out needs the toggle. }}
                 {{#if this.lastDrag}}<span>Drag: <b data-test-last-drag>{{this.lastDrag}}</b></span>{{/if}}
+                {{! 4b.5: the indicator icon has no UI of its own, so the status line is the only
+                    place a click on it can show up. }}
+                {{#if this.lastHeaderIndicatorClick}}<span>Indicator:
+                        <b data-test-last-indicator-click>{{this.lastHeaderIndicatorClick}}</b></span>{{/if}}
                 {{#if this.lastApiResult}}<span>API:
                         <b data-test-last-api-result>{{this.lastApiResult}}</b></span>{{/if}}
                 <span>Click: <b data-test-last-click>{{this.lastClick}}</b></span>
@@ -2449,6 +2485,7 @@ export default class DemoGrid extends Component {
                     @onItemHovered={{this.handleItemHovered}}
                     @onVisibleRegionChanged={{this.handleVisibleRegionChanged}}
                     @onHeaderMenuClick={{this.handleHeaderMenuClick}}
+                    @onHeaderIndicatorClick={{this.handleHeaderIndicatorClick}}
                     @onCellContextMenu={{this.handleCellContextMenu}}
                     @onHeaderContextMenu={{this.handleHeaderContextMenu}}
                     @onGroupHeaderContextMenu={{this.handleGroupHeaderContextMenu}}

@@ -398,6 +398,7 @@ export interface GlideDataGridSignature {
          */
         onSelectionCleared?: () => void;
         onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
+        onHeaderIndicatorClick?: (col: number, bounds: Rectangle) => void;
         onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
         onColumnResizeStart?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
         onColumnResize?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;
@@ -733,6 +734,7 @@ export default class GlideDataGrid extends Component<GlideDataGridSignature> {
         onSelectionChanged: this.args.onSelectionChanged,
         onSelectionCleared: this.args.onSelectionCleared,
         onHeaderMenuClick: this.args.onHeaderMenuClick,
+        onHeaderIndicatorClick: this.args.onHeaderIndicatorClick,
         onCellsEdited: this.args.onCellsEdited,
         onColumnResizeStart: this.args.onColumnResizeStart,
         onColumnResize: this.args.onColumnResize,

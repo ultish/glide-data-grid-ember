@@ -549,6 +549,18 @@ export interface GridHostArgs {
      * only: no menu UI or sort logic is built by the grid itself (see PORTING-NOTES.md).
      */
     readonly onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
+    /**
+     * The same gesture, for a header's *indicator* icon -- the second glyph a column can carry
+     * (`column.indicatorIcon !== undefined` only), drawn immediately after the title. Fires on a
+     * genuine click precisely inside that glyph's hit region, and like `onHeaderMenuClick` it is
+     * hit-test + notification only: the grid attaches no meaning to the indicator beyond drawing it.
+     *
+     * A press cannot satisfy both, and the menu wins: it is tested first, mirroring source's
+     * `else if` (`data-grid.tsx:1057-1065`, `:1241`). That is not academic -- the menu's rect is
+     * right-aligned to the column while the indicator's follows the measured title, so on a column
+     * narrow enough for the two to overlap the indicator is unreachable, upstream included.
+     */
+    readonly onHeaderIndicatorClick?: (col: number, bounds: Rectangle) => void;
 
     // --- Phase 3c: copy/cut/paste -------------------------------------------------------------
     /**
@@ -1336,6 +1348,7 @@ interface ResolvedGridHostArgs {
     readonly onSelectionCleared: (() => void) | undefined;
     readonly onSelectionChanged: ((selection: GridSelection) => void) | undefined;
     readonly onHeaderMenuClick: ((col: number, bounds: Rectangle) => void) | undefined;
+    readonly onHeaderIndicatorClick: ((col: number, bounds: Rectangle) => void) | undefined;
     readonly onCellsEdited: ((edits: readonly { location: Item; value: GridCell }[]) => void) | undefined;
     readonly onColumnResizeStart:
         ((column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void) | undefined;
@@ -1606,6 +1619,10 @@ interface MouseDownState {
     readonly previousSelection: MangledSelection;
 }
 
+/** The two clickable glyphs a column header can carry, in the order source tests them
+ *  (`isOverHeaderElement`, `data-grid.tsx:1036-1066`). */
+type HeaderElementArea = "menu" | "indicator";
+
 interface OverlayState {
     readonly realLocation: Item;
     readonly mangledLocation: Item;
@@ -1805,10 +1822,13 @@ export class GridHostController {
     // activation decision. Source keeps them in the same two places (`mouseDownData.current` and
     // `mouseState.previousSelection`) and reads them from `onMouseUp` for the same two reasons.
     private mouseDownState: MouseDownState | undefined = undefined;
-    // Column a header-menu-glyph mousedown landed on, if any -- mouseup re-checks the same column
-    // is still under the menu bounds before firing `onHeaderMenuClick` (mirrors source's
-    // down/up-position match in `onPointerUp`/`onClickImpl`, `data-grid.tsx:1176-1244`).
-    private pendingHeaderMenuClick: number | undefined = undefined;
+    // Header glyph a mousedown landed on, if any -- mouseup re-checks the same column is still under
+    // the same glyph before firing (mirrors source's down/up-position match in
+    // `onPointerUp`/`onClickImpl`, `data-grid.tsx:1176-1244`). `col` is MANGLED, like every
+    // `hit.location`. One field rather than one per glyph, matching source's single
+    // `{ area, bounds }` result: a press lands on at most one glyph, so nothing can go stale.
+    private pendingHeaderElementClick: { readonly col: number; readonly area: HeaderElementArea } | undefined =
+        undefined;
     // Shift-extend anchors for row-marker / header column-selection clicks specifically (distinct
     // from `selection.current.cell`, which anchors ordinary cell shift-extend). Mirrors source's
     // `lastSelectedRowRef`/`lastSelectedColRef` (`data-editor.tsx:1885,2009`).
@@ -1818,7 +1838,7 @@ export class GridHostController {
     // Column resize drag state (Phase 3d). Set on mousedown over a header's resize-edge, cleared on
     // mouseup. Mirrors source's `resizeCol`/`resizeColStartX`/`lastResizeWidthRef`
     // (`data-grid-dnd.tsx`). `col` is in MANGLED (row-marker-space) coordinates throughout, same
-    // space as `this.selection`/`hitTestHeaderMenu`; converted to real column space only at the
+    // space as `this.selection`/`hitTestHeaderElement`; converted to real column space only at the
     // `GridColumn`/callback boundary.
     private resizeState: { col: number; startClientX: number; startWidth: number; lastWidth: number } | undefined =
         undefined;
@@ -2023,7 +2043,7 @@ export class GridHostController {
         this.root.addEventListener("dragleave", this.onDragLeaveExternal);
         // Mouseup listens on `windowEventTarget`, not `root` -- a drag-extend can end with the
         // pointer outside the grid (mirrors source's `onPointerUp` listening on `windowEventTarget`,
-        // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderMenuClick`
+        // `data-grid.tsx:1198`), and we still need to clear `mouseDownState`/`pendingHeaderElementClick`
         // in that case. `windowEventTarget` is `window` unless `@eventTarget` or a shadow root says
         // otherwise; see its field comment.
         this.addWindowListener("mouseup", this.onMouseUp);
@@ -2367,6 +2387,7 @@ export class GridHostController {
             onSelectionCleared: args.onSelectionCleared,
             onSelectionChanged: args.onSelectionChanged,
             onHeaderMenuClick: args.onHeaderMenuClick,
+            onHeaderIndicatorClick: args.onHeaderIndicatorClick,
             onCellsEdited: args.onCellsEdited,
             onColumnResizeStart: args.onColumnResizeStart,
             onColumnResize: args.onColumnResize,
@@ -4631,13 +4652,6 @@ export class GridHostController {
         };
     }
 
-    // Precise hit-test for a header column's menu glyph specifically (`column.hasMenu === true`
-    // only) -- distinct from a general header click. Mirrors source's `isOverHeaderElement`'s
-    // "menu" branch (`data-grid.tsx:1021-1069`), minus the "indicator" icon branch (no
-    // `onHeaderIndicatorClick` equivalent exposed yet -- not requested for 3a) and the
-    // `isDragging`/`isResizing`/`hoveredOnEdge` guards (column resize/reorder is Phase 3d, so those
-    // states never exist here). Returns the menu's bounds (canvas-space, for positioning a floating
-    // menu) when `localX`/`localY` land inside them, else `undefined`.
     // `DrawGridArg.dragAndDropState` for the ported render engine's drag-visual drawing. `undefined`
     // both when no reorder drag is active AND when the current drop candidate was vetoed by
     // `onColumnProposeMove` -- mirrors source's `dragOffset` memo (`data-grid-dnd.tsx`) returning
@@ -4648,15 +4662,30 @@ export class GridHostController {
         return { src: s.srcCol, dest: s.dropCol };
     }
 
-    private hitTestHeaderMenu(
+    /**
+     * Precise hit-test for the two clickable glyphs a column header can carry -- the menu chevron
+     * (`column.hasMenu === true`) and the indicator icon (`column.indicatorIcon !== undefined`) --
+     * distinct from a general header click. Port of source's `isOverHeaderElement`
+     * (`data-grid.tsx:1036-1070`), minus its `isDragging`/`isResizing`/`hoveredOnEdge` guards: this
+     * controller tests the resize edge and the reorder drag before ever reaching here.
+     *
+     * Menu first, indicator second, as source's `else if` has it. The order matters: `menuBounds` is
+     * right-aligned to the column and `indicatorIconBounds` follows the measured title, so the two
+     * genuinely overlap once a column is narrow enough, and the indicator is then unreachable.
+     *
+     * Returns the glyph's bounds in canvas space (what a consumer positions a floating menu with)
+     * when `localX`/`localY` land inside them, else `undefined`.
+     */
+    private hitTestHeaderElement(
         args: ResolvedGridHostArgs,
         col: number,
         localX: number,
         localY: number
-    ): Rectangle | undefined {
+    ): { readonly area: HeaderElementArea; readonly bounds: Rectangle } | undefined {
         const { mappedColumns, freezeColumns } = this.computeMangledLayout(args);
         const column = mappedColumns[col];
-        if (column === undefined || column.hasMenu !== true) return undefined;
+        if (column === undefined) return undefined;
+        if (column.hasMenu !== true && column.indicatorIcon === undefined) return undefined;
 
         const bounds = computeBounds(
             col,
@@ -4690,8 +4719,15 @@ export class GridHostController {
             theme,
             false
         );
-        if (layout.menuBounds === undefined || !pointInRect(layout.menuBounds, localX, localY)) return undefined;
-        return layout.menuBounds;
+        if (column.hasMenu === true && layout.menuBounds !== undefined && pointInRect(layout.menuBounds, localX, localY))
+            return { area: "menu", bounds: layout.menuBounds };
+        if (
+            column.indicatorIcon !== undefined &&
+            layout.indicatorIconBounds !== undefined &&
+            pointInRect(layout.indicatorIconBounds, localX, localY)
+        )
+            return { area: "indicator", bounds: layout.indicatorIconBounds };
+        return undefined;
     }
 
     /**
@@ -4856,7 +4892,7 @@ export class GridHostController {
         const hit = this.resolveMouseHit(args, ev);
         const isMultiKey = browserIsOSX.value ? ev.metaKey : ev.ctrlKey;
 
-        // Header resize and menu clicks are exclusive with ordinary header-click selection
+        // Header resize and header-glyph clicks are exclusive with ordinary header-click selection
         // dispatch. Resize gets first priority, matching source's DND wrapper; otherwise a menu
         // glyph at the same right edge would consume the resize gesture.
         if (hit.kind === "header") {
@@ -4865,7 +4901,7 @@ export class GridHostController {
             // press location. Source returns from `onPointerDown` before calling any of that
             // (`data-grid.tsx:1104-1110`); the action fires on the matching pointerup.
             if (this.hitTestGroupHeaderAction(args, hit) !== undefined) {
-                this.pendingHeaderMenuClick = undefined;
+                this.pendingHeaderElementClick = undefined;
                 return;
             }
 
@@ -4899,13 +4935,13 @@ export class GridHostController {
                 return;
             }
 
-            const menuBounds = this.hitTestHeaderMenu(args, hit.location[0], hit.localX, hit.localY);
-            if (menuBounds !== undefined) {
-                this.pendingHeaderMenuClick = hit.location[0];
+            const element = this.hitTestHeaderElement(args, hit.location[0], hit.localX, hit.localY);
+            if (element !== undefined) {
+                this.pendingHeaderElementClick = { col: hit.location[0], area: element.area };
                 return;
             }
         }
-        this.pendingHeaderMenuClick = undefined;
+        this.pendingHeaderElementClick = undefined;
 
         // Mirrors source's `setMouseState({previousSelection: gridSelection, fillHandle: fh})`
         // (`data-editor.tsx:2120-2123`) -- recorded for every kind (cell/header/out-of-bounds), not
@@ -5109,16 +5145,22 @@ export class GridHostController {
             return;
         }
 
-        if (this.pendingHeaderMenuClick === undefined) return;
+        const pending = this.pendingHeaderElementClick;
+        if (pending === undefined) return;
         const args = this.resolveArgs();
-        const col = this.pendingHeaderMenuClick;
-        this.pendingHeaderMenuClick = undefined;
+        const { col, area } = pending;
+        this.pendingHeaderElementClick = undefined;
 
         const hit = this.resolveMouseHit(args, ev);
         if (hit.kind !== "header" || hit.location[0] !== col) return;
-        const bounds = this.hitTestHeaderMenu(args, col, hit.localX, hit.localY);
-        if (bounds === undefined) return;
-        args.onHeaderMenuClick?.(col, bounds);
+        // Re-testing, rather than reusing the mousedown's bounds, is what makes this a click on the
+        // *same* glyph: a scroll or resize between down and up moves the rect out from under the
+        // pointer. `area` must match too, or a press on the chevron that lifts over the indicator
+        // would fire the wrong callback.
+        const element = this.hitTestHeaderElement(args, col, hit.localX, hit.localY);
+        if (element === undefined || element.area !== area) return;
+        if (area === "menu") args.onHeaderMenuClick?.(col, element.bounds);
+        else args.onHeaderIndicatorClick?.(col, element.bounds);
     };
 
     // Port of `handleSelect`'s `args.kind === "cell"` branch (`data-editor.tsx:1848-1993`).

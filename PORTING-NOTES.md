@@ -5990,3 +5990,51 @@ bug it described, because "I fixed this and left a comment" and "I checked every
 that comment" are different amounts of work, and only the first one happened. When you write a
 comment of this shape, either sweep immediately or leave a note in `TODO.md` that a sweep is owed —
 don't trust that the comment itself will get re-read at the right moment.
+
+## §4b.5 — `@onHeaderIndicatorClick` (COMPLETE, browser-verified, 2026-08-15)
+
+The indicator icon is clickable now, the same precise hit test `@onHeaderMenuClick` already had.
+`TODO.md` §4b.5 has the source citations; what belongs here is what a later phase would re-derive.
+
+### It landed as one hit test, not two
+
+The obvious port was a `hitTestHeaderIndicator` beside `hitTestHeaderMenu`, plus a second
+`pendingHeaderIndicatorClick` field cleared everywhere the first one is. That shape has an invariant
+nothing enforces: both pending fields must be cleared by any press that is neither glyph, and a
+future branch that clears one and forgets the other leaves a stale click armed. Source does not have
+that problem because it never split them — `isOverHeaderElement` returns `{ area: "menu" |
+"indicator", bounds }`, one result for one press.
+
+So `hitTestHeaderMenu` became **`hitTestHeaderElement`**, returning source's shape, and the two
+pending fields became one `pendingHeaderElementClick: { col, area }`. A press lands on at most one
+glyph, so there is nothing to keep in sync. Mouseup compares `area` as well as `col`: a press on the
+chevron that lifts over the indicator is not a click on either.
+
+### The two glyphs overlap, and the menu wins — that is upstream behaviour, not a defect
+
+`menuBounds` is right-aligned to the column (`getHeaderMenuBounds`); `indicatorIconBounds` sits
+immediately after the *measured title*. On a narrow column the second lands inside the first, and
+because the menu is tested first the indicator is then unreachable. `<DemoGrid>`'s **Salary** column
+is exactly this case, which cost most of the verification pass — clicks that looked like they should
+hit the indicator kept opening the menu instead. **Verify an indicator on a wide column** (Profile).
+Source has the identical overlap and the identical `else if`, so this is parity.
+
+### The coordinate space, and the demo bug it was hiding
+
+Both header-glyph callbacks report the grid's **mangled** column space — the one that includes the
+row-marker column. Every other consumer-facing callback was brought into consumer space on
+2026-08-09; these two were missed, and `TODO.md` rule 3's flat "every callback reports consumer
+space" overstates the truth. Source subtracts `rowMarkerOffset` for both
+(`data-editor.tsx:2569-2580`), so this is a live divergence: `TODO.md` §4b.7.
+
+It was not theoretical. `<DemoGrid>` defaults `@rowMarkers` to `"both"`, and its header menu did
+`this.columns[menu.col]` — so **"Auto-size this column" and "Hide this column" acted on the column to
+the right of the one whose menu you opened**, and the menu's own title named that column. Shipped
+that way since 4.5b and never noticed, because the menu is *anchored to the glyph you clicked*, so
+it looks right; only the title contradicts it, and a title is easy to read past. The demo now routes
+both callbacks' `col` through one `headerGlyphColumnIndex` getter, which is also the single line to
+delete when §4b.7 lands.
+
+**The lesson is the one this file keeps re-learning, in a new place:** the wrong-column menu was
+reachable at the demo's *default* settings for months. "Browser-verified" covered the feature that
+was being built each time, never the neighbouring arg that silently changes its coordinates.

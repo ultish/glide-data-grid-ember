@@ -35,8 +35,10 @@ add a feature no demo can switch on, which rule 5 says is unverified code by con
 inherited, three are worth doing. **Both P1 items are DONE**, shipped in v0.5.1 (#954, #910). What is
 left there is **§4b.2's P2 items, none of which should be scheduled before being reproduced in a
 browser** — start with P2.1 (Firefox scrollbar click-through), the only one whose consequence is a
-data mutation. §4b.4 lists what was checked and dismissed, so it does not get re-audited; §4b.5 is a
-small gap P1.1 surfaced.
+data mutation. §4b.4 lists what was checked and dismissed, so it does not get re-audited. §4b.5 is
+done (2026-08-15); it left **§4b.7** behind, a wrong column space in the two header-glyph
+callbacks that was already producing a wrong-column header menu in `<DemoGrid>` at default
+settings.
 
 **Everything else below is marked DONE** and is kept for its source citations. §3.1 was decided on
 2026-08-13 (smooth scrolling stays, documented).
@@ -77,7 +79,11 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 3. **Coordinate space.** When row markers are on, the grid inserts a marker column at internal index
    0. **Every consumer-facing callback reports the consumer's space** (marker subtracted) — this was
-   made consistent on 2026-08-09 and browser-verified. Internally, `-private/selection-space.ts`
+   made consistent on 2026-08-09 and browser-verified, **with two exceptions found on 2026-08-15**:
+   `@onHeaderMenuClick` and `@onHeaderIndicatorClick` still report mangled indices (§4b.7). Take that
+   as the warning it is — the sweep that made this rule true missed two callbacks, and the miss was
+   producing wrong-column behaviour in `<DemoGrid>` at default settings the whole time.
+   Internally, `-private/selection-space.ts`
    brands the two spaces (`MangledSelection` vs plain `GridSelection`) so a missed conversion is a
    compile error. **Respect the brands; never cast around them.**
 
@@ -143,8 +149,10 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 ## 2. Quick wins — diagnosed, small, do these first
 
-**Every item in this section is DONE**, as are §4b's two P1 items. The nearest thing to a quick win
-left is **§4b.5** — wiring up `@onHeaderIndicatorClick`, one branch in the header hit-test.
+**Every item in this section is DONE**, as are §4b's two P1 items and §4b.5. The nearest thing to a
+quick win left is **§4b.7** — the two header-glyph callbacks report the row-marker-mangled column
+index instead of the consumer's. One subtraction in the addon, but a breaking change to a published
+API, so read the item before starting.
 
 ### 2.1 `withMovableColumns` memoizes on the wrong key — DONE (2026-08-09)
 
@@ -651,7 +659,7 @@ divergence.**
   have fixed the `indicatorIcon` problem: it did not. Separate bugs on adjacent lines; only the font
   one is fixed anywhere.
 
-### 4b.5 Found while fixing P1.1 — `@onHeaderIndicatorClick` is not ported
+### 4b.5 Found while fixing P1.1 — `@onHeaderIndicatorClick` is not ported — DONE (2026-08-15)
 
 Source makes the indicator icon **clickable**: `data-grid.tsx:1057-1065` hit-tests
 `indicatorIconBounds` and returns `area: "indicator"`, which `:1241` turns into
@@ -661,9 +669,11 @@ arg. `grid-host-controller.ts:4636` already notes the omission ("not requested f
 a known gap rather than a discovery — but it is now a *reachable* one, since `<DemoGrid>` sets
 `indicatorIcon` and a user will try clicking it.
 
-Small: one branch in the header hit-test beside the existing `menu` branch, one arg, one demo
-handler reporting into the status line. Worth doing next time the header hit-test is open anyway.
-Until then the indicator is decorative, which the demo's comment says out loud.
+Shipped as **one** hit test rather than two: `hitTestHeaderMenu` became `hitTestHeaderElement` and
+returns source's own `{ area: "menu" | "indicator", bounds }`, and the two pending-click fields
+mouseup would otherwise have to keep in sync became one `pendingHeaderElementClick`. See
+PORTING-NOTES.md's §4b.5 section for that, for the menu/indicator bounds **overlap** on narrow
+columns (verify on a wide one), and for the demo bug this turned up.
 
 ### 4b.6 Found while sweeping for more instances of the `focus-decoy` pattern — `tags-cell` drops
 ### earlier checkbox toggles — DONE (2026-08-14)
@@ -709,6 +719,29 @@ committed `["urgent", "feature"]` (reproduced live before fixing), post-fix comm
 wired in and already reachable — the bug had simply never been tried with two checks in one session,
 because nothing ever drove the editor that way. No demo change was needed to reach it, unlike 4b.1/
 4b.5.
+
+### 4b.7 Found while doing 4b.5 — the two header-glyph callbacks report the wrong column space
+
+`@onHeaderMenuClick` and `@onHeaderIndicatorClick` hand the consumer a **mangled** column index —
+the one that includes the row-marker column. Source subtracts `rowMarkerOffset` from both before the
+consumer sees them (`data-editor.tsx:2569-2580`). Every other consumer-facing callback here was
+brought into consumer space on 2026-08-09; these two were missed, so **rule 3 above is currently a
+half-truth** and PORTING-NOTES.md's Phase 8 note recording the divergence as deliberate is the only
+place it is written down.
+
+It is not theoretical. `<DemoGrid>` defaults `@rowMarkers` to `"both"`, and its header menu indexed
+`this.columns[menu.col]` directly, so **"Auto-size this column" and "Hide this column" acted on the
+neighbouring column** and the menu titled itself with that column's name. Shipped in 4.5b, live at
+default settings, unnoticed until 4b.5 forced the space to be pinned down. The demo is fixed
+(`headerGlyphColumnIndex`); the addon is not.
+
+**Fix:** subtract `args.rowMarkerOffset` at the single fire site in `onMouseUp`, delete
+`<DemoGrid>`'s `headerGlyphColumnIndex` and its four call sites, and drop `<GlideDemo>`'s manual
+`ROW_MARKER_OFFSET` subtraction (PORTING-NOTES.md's Phase 7c menu note). **This is a breaking change
+to a published API** (v0.5.1 exposes `@onHeaderMenuClick`), so it wants a minor bump and a line in
+the release notes rather than being slipped in — which is why it was not done as part of 4b.5.
+
+---
 
 **Standing note.** The upstream PR queue is not a shortcut: 37 open PRs, exactly one relevant fix
 (#915), unmerged for over two years. Upstream is effectively unmaintained for bug-fix purposes — do
