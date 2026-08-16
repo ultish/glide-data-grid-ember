@@ -4719,7 +4719,11 @@ export class GridHostController {
             theme,
             false
         );
-        if (column.hasMenu === true && layout.menuBounds !== undefined && pointInRect(layout.menuBounds, localX, localY))
+        if (
+            column.hasMenu === true &&
+            layout.menuBounds !== undefined &&
+            pointInRect(layout.menuBounds, localX, localY)
+        )
             return { area: "menu", bounds: layout.menuBounds };
         if (
             column.indicatorIcon !== undefined &&
