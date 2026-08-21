@@ -1656,14 +1656,6 @@ export default class DemoGrid extends Component {
         this.headerMenu = undefined;
     };
 
-    /** Both header-glyph callbacks report the grid's *internal* column space -- the one that
-     *  includes the row-marker column -- unlike every other callback this component handles. This is
-     *  the only place the demo has to know that, so it is also the only place to change if the
-     *  addon ever brings them in line with the rest (see TODO.md). */
-    headerGlyphColumnIndex(col: number): number {
-        return col - (this.rowMarkers === "none" ? 0 : 1);
-    }
-
     /** `@onHeaderIndicatorClick` is the indicator icon's answer to `@onHeaderMenuClick`: a precise
      *  hit test on the header's *second* glyph, which this port only ever drew until 4b.5. Columns
      *  1, 3 and 13 carry one -- see `INDICATOR_ICONS`.
@@ -1674,7 +1666,7 @@ export default class DemoGrid extends Component {
     @tracked lastHeaderIndicatorClick: string | undefined;
 
     handleHeaderIndicatorClick = (col: number, bounds: Rectangle): void => {
-        const title = this.columns[this.headerGlyphColumnIndex(col)]?.title ?? `column ${col}`;
+        const title = this.columns[col]?.title ?? `column ${col}`;
         this.lastHeaderIndicatorClick =
             `${title}, ${Math.round(bounds.width)}x${Math.round(bounds.height)}px ` +
             `at ${Math.round(bounds.x)},${Math.round(bounds.y)}`;
@@ -1693,8 +1685,7 @@ export default class DemoGrid extends Component {
     get headerMenuColumnTitle(): string {
         const menu = this.headerMenu;
         if (menu === undefined) return "";
-        const col = this.headerGlyphColumnIndex(menu.col);
-        return this.columns[col]?.title ?? `Column ${col}`;
+        return this.columns[menu.col]?.title ?? `Column ${menu.col}`;
     }
 
     get hiddenColumnTitles(): string {
@@ -1704,10 +1695,7 @@ export default class DemoGrid extends Component {
     autoSizeMenuColumn = (): void => {
         const menu = this.headerMenu;
         if (menu === undefined) return;
-        // `remeasureColumns` takes consumer-space indices; `@onHeaderMenuClick` does not report
-        // them. Measuring the column *next to* the one whose menu you opened is invisible until you
-        // look at which title moved, which is how this survived the toggle being on by default.
-        const col = this.headerGlyphColumnIndex(menu.col);
+        const col = menu.col;
         this.gridApi?.remeasureColumns([col]);
         this.lastApiResult = `remeasureColumns([${col}]) from the header menu`;
         this.closeHeaderMenu();
@@ -1716,7 +1704,7 @@ export default class DemoGrid extends Component {
     hideMenuColumn = (): void => {
         const menu = this.headerMenu;
         if (menu === undefined) return;
-        const col = this.headerGlyphColumnIndex(menu.col);
+        const col = menu.col;
         const column = this.columns[col];
         if (column === undefined) return;
         this.hiddenColumns = [...this.hiddenColumns, column];

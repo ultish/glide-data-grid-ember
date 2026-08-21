@@ -31,7 +31,7 @@ get gridArgs() {
         {
             kind: "code",
             text: `openSortMenu = (col, bounds) => {
-  // \`col\` includes the row-marker column if you have one;
+  // \`col\` is in your column space (row-marker already subtracted);
   // \`bounds\` is the chevron's rect in grid-root-relative pixels.
   this.menu = { col, bounds };
 };

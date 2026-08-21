@@ -42,11 +42,6 @@ import { GLIDE_DEMO_COLUMNS, GLIDE_DEMO_ROW_COUNT, makeGlideDemoGetCellContent }
 // a `getCellRenderer` itself. `allExtraCells` is a module-scope constant, i.e. the stable reference
 // that arg wants.
 
-// `rowMarkers: "both"` prepends one synthetic marker column inside the grid, so the `col` index
-// handed to `onHeaderMenuClick` (and every other mangled-space index) is one greater than the
-// consumer's own column index. See `grid-host-controller.ts`'s `rowMarkerOffset`.
-const ROW_MARKER_OFFSET = 1;
-
 const MENU_WIDTH_PX = 176;
 
 type SortDirection = "asc" | "desc";
@@ -62,9 +57,9 @@ export default class GlideDemo extends Component {
     @tracked sortColumnId: string | undefined = undefined;
     @tracked sortDirection: SortDirection = "asc";
 
-    // Open sort menu, if any. `col` is in the grid's mangled column space (marker column included);
-    // `bounds` is the menu glyph's rect in grid-root-relative coordinates, which is exactly the
-    // space the absolutely-positioned menu below is laid out in.
+    // Open sort menu, if any. `col` is in the consumer's column space (row-marker already
+    // subtracted); `bounds` is the menu glyph's rect in grid-root-relative coordinates, which is
+    // exactly the space the absolutely-positioned menu below is laid out in.
     @tracked menuState: { readonly col: number; readonly bounds: Rectangle } | undefined = undefined;
 
     constructor(...args: ConstructorParameters<typeof Component>) {
@@ -175,13 +170,13 @@ export default class GlideDemo extends Component {
     get menuColumnId(): string | undefined {
         const state = this.menuState;
         if (state === undefined) return undefined;
-        return this.displayColumns[state.col - ROW_MARKER_OFFSET]?.id;
+        return this.displayColumns[state.col]?.id;
     }
 
     get menuColumnTitle(): string {
         const state = this.menuState;
         if (state === undefined) return "";
-        return this.columns[state.col - ROW_MARKER_OFFSET]?.title ?? "";
+        return this.columns[state.col]?.title ?? "";
     }
 
     get menuSortAscActive(): boolean {
@@ -250,7 +245,7 @@ export default class GlideDemo extends Component {
      * as an escape hatch but is no longer the recommended shape.)
      *
      * `location[0]` is already in *real* column space -- the grid strips the row-marker column at
-     * the callback boundary -- so it indexes `this.columns` directly, with no `ROW_MARKER_OFFSET`.
+     * the callback boundary -- so it indexes `this.columns` directly.
      */
     applyEdits = (edits: readonly { location: Item; value: GridCell }[]): void => {
         const next = new Map(this.edits);

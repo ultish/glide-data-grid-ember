@@ -397,7 +397,16 @@ export interface GlideDataGridSignature {
          * route to an empty selection, matching source.
          */
         onSelectionCleared?: () => void;
+        /**
+         * Click on a column header's menu chevron (`column.hasMenu === true`). `col` is in your
+         * coordinate space -- the row-marker column is already subtracted. `bounds` is the
+         * chevron's rect in grid-root-relative pixels. The grid ships no menu UI.
+         */
         onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
+        /**
+         * Click on a column header's indicator icon (`column.indicatorIcon`). Same coordinate
+         * space and bounds convention as `@onHeaderMenuClick`.
+         */
         onHeaderIndicatorClick?: (col: number, bounds: Rectangle) => void;
         onCellsEdited?: (edits: readonly { location: Item; value: GridCell }[]) => void;
         onColumnResizeStart?: (column: GridColumn, newSize: number, colIndex: number, newSizeWithGrow: number) => void;

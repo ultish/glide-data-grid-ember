@@ -5,8 +5,9 @@
 // marker column at internal index 0, so the consumer's first column is internally index 1. Two
 // spaces therefore exist:
 //
-//   * **consumer space** -- what `getCellContent`, `onCellsEdited`, the context-menu callbacks and
-//     `onSelectionChanged` speak. Column 0 is the consumer's first column. This is the plain
+//   * **consumer space** -- what `getCellContent`, `onCellsEdited`, the context-menu callbacks,
+//     `onSelectionChanged`, and the two header-glyph callbacks (`onHeaderMenuClick` /
+//     `onHeaderIndicatorClick`) speak. Column 0 is the consumer's first column. This is the plain
 //     `GridSelection` type.
 //   * **mangled space** -- what the render engine, hit-testing, `computeCellRect` and every
 //     `hit.location` speak. Column 0 is the row-marker column when one exists.
@@ -130,4 +131,16 @@ export function mangleSelection(selection: ConsumerSelection, rowMarkerOffset: n
 /** Mangled -> consumer. The inverse of `MangledSelectionCache.get`, and the only way back. */
 export function unmangleSelection(selection: MangledSelection, rowMarkerOffset: number): ConsumerSelection {
     return asConsumerSelection(shiftSelection(selection, -rowMarkerOffset));
+}
+
+/**
+ * Mangled column index -> consumer column index. Scalar counterpart of `unmangleSelection`.
+ *
+ * The `GridSelection` brands above cannot catch a missed conversion on a `col: number` callback
+ * (`onHeaderMenuClick` / `onHeaderIndicatorClick` shipped mangled from 2026-08-09 until §4b.7).
+ * Use this at those boundaries rather than a raw subtraction, so a grep finds every scalar
+ * conversion the brands do not police.
+ */
+export function unmangleColumn(mangledCol: number, rowMarkerOffset: number): number {
+    return mangledCol - rowMarkerOffset;
 }

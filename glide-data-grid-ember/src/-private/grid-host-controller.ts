@@ -178,6 +178,7 @@ import {
     EMPTY_SELECTION,
     mangleSelection,
     MangledSelectionCache,
+    unmangleColumn,
     unmangleSelection,
     type ConsumerSelection,
     type MangledSelection,
@@ -547,6 +548,10 @@ export interface GridHostArgs {
      * column's menu-glyph hit region (`column.hasMenu === true` only) -- distinct from an ordinary
      * header click, which runs column-selection logic instead. This is hit-test + notification
      * only: no menu UI or sort logic is built by the grid itself (see PORTING-NOTES.md).
+     *
+     * `col` is in **your** coordinate space: the row-marker column is already subtracted, the same
+     * as `onHeaderContextMenu` / `onCellsEdited`. Source does this in `onHeaderMenuClickInner`
+     * (`data-editor.tsx:2569-2574`).
      */
     readonly onHeaderMenuClick?: (col: number, bounds: Rectangle) => void;
     /**
@@ -554,6 +559,9 @@ export interface GridHostArgs {
      * (`column.indicatorIcon !== undefined` only), drawn immediately after the title. Fires on a
      * genuine click precisely inside that glyph's hit region, and like `onHeaderMenuClick` it is
      * hit-test + notification only: the grid attaches no meaning to the indicator beyond drawing it.
+     *
+     * `col` is in your coordinate space, matching `onHeaderMenuClick`. Source:
+     * `onHeaderIndicatorClickInner` (`data-editor.tsx:2576-2580`).
      *
      * A press cannot satisfy both, and the menu wins: it is tested first, mirroring source's
      * `else if` (`data-grid.tsx:1057-1065`, `:1241`). That is not academic -- the menu's rect is
@@ -5163,8 +5171,12 @@ export class GridHostController {
         // would fire the wrong callback.
         const element = this.hitTestHeaderElement(args, col, hit.localX, hit.localY);
         if (element === undefined || element.area !== area) return;
-        if (area === "menu") args.onHeaderMenuClick?.(col, element.bounds);
-        else args.onHeaderIndicatorClick?.(col, element.bounds);
+        // Consumer space, matching every other callback. Source subtracts `rowMarkerOffset` in
+        // `onHeaderMenuClickInner` / `onHeaderIndicatorClickInner` (`data-editor.tsx:2569-2580`).
+        // These two were missed when the rest were converted on 2026-08-09 (TODO.md §4b.7).
+        const realCol = unmangleColumn(col, args.rowMarkerOffset);
+        if (area === "menu") args.onHeaderMenuClick?.(realCol, element.bounds);
+        else args.onHeaderIndicatorClick?.(realCol, element.bounds);
     };
 
     // Port of `handleSelect`'s `args.kind === "cell"` branch (`data-editor.tsx:1848-1993`).

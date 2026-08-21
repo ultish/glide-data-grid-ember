@@ -2487,8 +2487,10 @@ once at module scope, per standing lesson #1.
 
 Menu UI: `@onHeaderMenuClick(col, bounds)` stores `{col, bounds}` in tracked state; the menu is an
 absolutely-positioned `<div>` inside a `position: relative` wrapper that contains only the grid, so
-`bounds` (grid-root-relative) is directly usable. **`col` is in the grid's *mangled* column space**
-— it includes the row-marker column — so the demo subtracts `ROW_MARKER_OFFSET = 1`. Closes on a
+`bounds` (grid-root-relative) is directly usable. **`col` is in the consumer's column space** — the
+row-marker column is subtracted at the callback boundary, same as every other callback, as of
+§4b.7 (2026-08-22). Before that the demo subtracted `ROW_MARKER_OFFSET = 1` itself because the
+addon reported mangled indices. Closes on a
 fixed full-viewport backdrop `mousedown`, on Escape (a capture-phase `document` keydown listener
 registered in the constructor + `registerDestructor`), and after choosing an item. The active sort
 is shown twice: a ✓ on the chosen menu item and an arrow appended to the canvas header title.
@@ -3354,8 +3356,8 @@ aligned with the offsets actually painted. Two decisions worth knowing before to
 
 - **The region is in the consumer's coordinate space** — `x` excludes the synthetic row-marker
   column, `y`/`height` cover real data rows only (never the trailing blank row). This matches
-  `getCellContent`'s `Item` and `onCellsEdited`'s `location`, and deliberately *not*
-  `onHeaderMenuClick`'s `col`, which is mangled (see Phase 7c). **Frozen columns are excluded from
+  `getCellContent`'s `Item`, `onCellsEdited`'s `location`, and (as of §4b.7) `onHeaderMenuClick`'s
+  `col`. **Frozen columns are excluded from
   the range** — they are permanently visible, so folding them in would make the rect discontiguous
   the moment the grid scrolls horizontally. That is why `AsyncRecordsSource` takes its own
   `freezeColumns` option: without it, an arriving page would never repaint the frozen columns.
@@ -6021,20 +6023,34 @@ Source has the identical overlap and the identical `else if`, so this is parity.
 
 ### The coordinate space, and the demo bug it was hiding
 
-Both header-glyph callbacks report the grid's **mangled** column space — the one that includes the
-row-marker column. Every other consumer-facing callback was brought into consumer space on
-2026-08-09; these two were missed, and `TODO.md` rule 3's flat "every callback reports consumer
-space" overstates the truth. Source subtracts `rowMarkerOffset` for both
-(`data-editor.tsx:2569-2580`), so this is a live divergence: `TODO.md` §4b.7.
+Both header-glyph callbacks used to report the grid's **mangled** column space — the one that
+includes the row-marker column. Every other consumer-facing callback was brought into consumer
+space on 2026-08-09; these two were missed. Source subtracts `rowMarkerOffset` for both
+(`data-editor.tsx:2569-2580`). Closed by §4b.7 (2026-08-22): the fire site subtracts, and the
+demo's `headerGlyphColumnIndex` workaround is gone.
 
 It was not theoretical. `<DemoGrid>` defaults `@rowMarkers` to `"both"`, and its header menu did
 `this.columns[menu.col]` — so **"Auto-size this column" and "Hide this column" acted on the column to
 the right of the one whose menu you opened**, and the menu's own title named that column. Shipped
 that way since 4.5b and never noticed, because the menu is *anchored to the glyph you clicked*, so
-it looks right; only the title contradicts it, and a title is easy to read past. The demo now routes
-both callbacks' `col` through one `headerGlyphColumnIndex` getter, which is also the single line to
-delete when §4b.7 lands.
+it looks right; only the title contradicts it, and a title is easy to read past.
 
 **The lesson is the one this file keeps re-learning, in a new place:** the wrong-column menu was
 reachable at the demo's *default* settings for months. "Browser-verified" covered the feature that
-was being built each time, never the neighbouring arg that silently changes its coordinates.
+was being built each time, never the neighbouring arg that silently changes its coordinates. The
+`GridSelection` brands in `-private/selection-space.ts` also could not catch it: these callbacks
+take a scalar `col: number`.
+
+## §4b.7 — header-glyph callbacks report consumer-space columns (COMPLETE, 2026-08-22)
+
+One subtraction at the `onMouseUp` fire site (`col - args.rowMarkerOffset`), matching source's
+`onHeaderMenuClickInner` / `onHeaderIndicatorClickInner` (`data-editor.tsx:2569-2580`). The two
+callbacks now speak the same space as `onHeaderContextMenu` / `onCellsEdited` / `onSelectionChanged`.
+
+`<DemoGrid>`'s `headerGlyphColumnIndex` and `<GlideDemo>`'s `ROW_MARKER_OFFSET` are gone — keeping
+either would double-subtract. Breaking published API: addon is `0.6.0`, CHANGELOG written; tag to
+publish. Callers that already subtracted `1` themselves must stop.
+
+Verify semantically, not numerically: with `@rowMarkers="both"` (DemoGrid default), the header
+menu opened on **Notes** must title itself "Notes" and auto-size that column; the Profile
+indicator readout must start with "Profile". An index of `4` can pass by luck; the title cannot.

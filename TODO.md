@@ -18,12 +18,9 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-15:** everything is on **`main`**, which is pushed, green in CI, and deployed to
-GitHub Pages. 954 vitest tests pass. Phases 0–11 are done; what is left is the backlog below.
-
-**Published vs unpublished.** **v0.5.1 is on npm** (tagged 2026-08-15) — the three §4b fixes
-(`indicatorIcon` auto-sizing, Escape on a read-only overlay, `tags-cell`'s dropped toggles) all ship
-in it. **Nothing is currently unreleased.** §5.3 has the release procedure for next time.
+**State as of 2026-08-22:** everything is on **`main`**. 957 vitest tests pass. Phases 0–11 are done;
+what is left is the backlog below. **§4b.7 is unreleased** — addon `package.json` is `0.6.0`; tag
+`v0.6.0` to publish (see §5.3). **v0.5.1 is what is on npm.**
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
@@ -32,13 +29,11 @@ add a feature no demo can switch on, which rule 5 says is unverified code by con
 
 **The other outstanding work is §4b — upstream bug parity (added 2026-08-14).** All 10 open
 `type:bug` issues and all 37 open PRs upstream were audited against this tree: six bugs are
-inherited, three are worth doing. **Both P1 items are DONE**, shipped in v0.5.1 (#954, #910). What is
-left there is **§4b.2's P2 items, none of which should be scheduled before being reproduced in a
-browser** — start with P2.1 (Firefox scrollbar click-through), the only one whose consequence is a
-data mutation. §4b.4 lists what was checked and dismissed, so it does not get re-audited. §4b.5 is
-done (2026-08-15); it left **§4b.7** behind, a wrong column space in the two header-glyph
-callbacks that was already producing a wrong-column header menu in `<DemoGrid>` at default
-settings.
+inherited, three are worth doing. **Both P1 items are DONE**, shipped in v0.5.1 (#954, #910).
+**§4b.5 and §4b.7 are DONE** (2026-08-15 / 2026-08-22). What is left there is **§4b.2's P2 items,
+none of which should be scheduled before being reproduced in a browser** — start with P2.1 (Firefox
+scrollbar click-through), the only one whose consequence is a data mutation. §4b.4 lists what was
+checked and dismissed, so it does not get re-audited.
 
 **Everything else below is marked DONE** and is kept for its source citations. §3.1 was decided on
 2026-08-13 (smooth scrolling stays, documented).
@@ -46,7 +41,7 @@ settings.
 ### Commands
 
 ```bash
-pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 954 tests.
+pnpm --filter glide-data-grid-ember test            # vitest, bare Node, ~800ms. 957 tests.
 pnpm --filter glide-data-grid-ember lint:types      # ember-tsc --noEmit
 pnpm --filter glide-data-grid-ember lint:types:test # the vitest project's own tsconfig
 pnpm --filter glide-data-grid-ember build           # rollup -> dist/
@@ -79,13 +74,14 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 3. **Coordinate space.** When row markers are on, the grid inserts a marker column at internal index
    0. **Every consumer-facing callback reports the consumer's space** (marker subtracted) — this was
-   made consistent on 2026-08-09 and browser-verified, **with two exceptions found on 2026-08-15**:
-   `@onHeaderMenuClick` and `@onHeaderIndicatorClick` still report mangled indices (§4b.7). Take that
-   as the warning it is — the sweep that made this rule true missed two callbacks, and the miss was
-   producing wrong-column behaviour in `<DemoGrid>` at default settings the whole time.
-   Internally, `-private/selection-space.ts`
-   brands the two spaces (`MangledSelection` vs plain `GridSelection`) so a missed conversion is a
-   compile error. **Respect the brands; never cast around them.**
+   made consistent on 2026-08-09, and the two header-glyph callbacks that the sweep missed
+   (`@onHeaderMenuClick` / `@onHeaderIndicatorClick`) were brought in on 2026-08-22 (§4b.7). The
+   miss produced a wrong-column header menu in `<DemoGrid>` at default settings the whole time:
+   brands on `GridSelection` cannot catch a scalar `col: number`. Internally,
+   `-private/selection-space.ts` brands the two spaces (`MangledSelection` vs plain `GridSelection`)
+   so a missed *selection* conversion is a compile error. **Respect the brands; never cast around
+   them.** Scalar column indices are still unbranded — convert them at the callback boundary and
+   grep for siblings when you touch one.
 
 4. **The decorator write-path contract.** Any decorator remapping rows or columns for *reading* must
    also remap *writing* — take `onCellsEdited` in, hand a translated one back out. Otherwise reads
@@ -149,10 +145,9 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 ## 2. Quick wins — diagnosed, small, do these first
 
-**Every item in this section is DONE**, as are §4b's two P1 items and §4b.5. The nearest thing to a
-quick win left is **§4b.7** — the two header-glyph callbacks report the row-marker-mangled column
-index instead of the consumer's. One subtraction in the addon, but a breaking change to a published
-API, so read the item before starting.
+**Every item in this section is DONE**, as are §4b's two P1 items, §4b.5, and §4b.7. The nearest
+thing left is **§4b.2's P2.1** (Firefox scrollbar click-through) — reproduce in a browser before
+scheduling; its consequence is a data mutation.
 
 ### 2.1 `withMovableColumns` memoizes on the wrong key — DONE (2026-08-09)
 
@@ -720,26 +715,28 @@ wired in and already reachable — the bug had simply never been tried with two 
 because nothing ever drove the editor that way. No demo change was needed to reach it, unlike 4b.1/
 4b.5.
 
-### 4b.7 Found while doing 4b.5 — the two header-glyph callbacks report the wrong column space
+### 4b.7 Found while doing 4b.5 — the two header-glyph callbacks report the wrong column space — DONE (2026-08-22)
 
-`@onHeaderMenuClick` and `@onHeaderIndicatorClick` hand the consumer a **mangled** column index —
-the one that includes the row-marker column. Source subtracts `rowMarkerOffset` from both before the
-consumer sees them (`data-editor.tsx:2569-2580`). Every other consumer-facing callback here was
-brought into consumer space on 2026-08-09; these two were missed, so **rule 3 above is currently a
-half-truth** and PORTING-NOTES.md's Phase 8 note recording the divergence as deliberate is the only
-place it is written down.
+`@onHeaderMenuClick` and `@onHeaderIndicatorClick` used to hand the consumer a **mangled** column
+index — the one that includes the row-marker column. Source subtracts `rowMarkerOffset` from both
+before the consumer sees them (`data-editor.tsx:2569-2580`). Every other consumer-facing callback
+here was brought into consumer space on 2026-08-09; these two were missed, so **rule 3 was a
+half-truth** until this item.
 
-It is not theoretical. `<DemoGrid>` defaults `@rowMarkers` to `"both"`, and its header menu indexed
+It was not theoretical. `<DemoGrid>` defaults `@rowMarkers` to `"both"`, and its header menu indexed
 `this.columns[menu.col]` directly, so **"Auto-size this column" and "Hide this column" acted on the
 neighbouring column** and the menu titled itself with that column's name. Shipped in 4.5b, live at
-default settings, unnoticed until 4b.5 forced the space to be pinned down. The demo is fixed
-(`headerGlyphColumnIndex`); the addon is not.
+default settings, unnoticed until 4b.5 forced the space to be pinned down.
 
-**Fix:** subtract `args.rowMarkerOffset` at the single fire site in `onMouseUp`, delete
-`<DemoGrid>`'s `headerGlyphColumnIndex` and its four call sites, and drop `<GlideDemo>`'s manual
-`ROW_MARKER_OFFSET` subtraction (PORTING-NOTES.md's Phase 7c menu note). **This is a breaking change
-to a published API** (v0.5.1 exposes `@onHeaderMenuClick`), so it wants a minor bump and a line in
-the release notes rather than being slipped in — which is why it was not done as part of 4b.5.
+**Fix (landed):** subtract `args.rowMarkerOffset` at the single fire site in `onMouseUp`; delete
+`<DemoGrid>`'s `headerGlyphColumnIndex` and its four call sites; drop `<GlideDemo>`'s manual
+`ROW_MARKER_OFFSET` subtraction. **Breaking published API** — `0.6.0` in `package.json`, CHANGELOG
+entry written; tag `v0.6.0` to publish. Callers that already subtracted `1` themselves must stop.
+
+**The lesson, and why the brands did not catch it:** `-private/selection-space.ts` brands
+`GridSelection`, not a scalar `col: number`. A sweep that converted every *selection* still missed
+two number-typed callbacks. When you convert a scalar column at a boundary, grep for sibling
+callbacks that take `col: number` rather than trusting the brand.
 
 ---
 
@@ -789,7 +786,8 @@ violations.)
 
 ### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.5.1 — latest 2026-08-15)
 
-- Current version is `0.5.1`, tagged `v0.5.1`.
+- Current **published** version is `0.5.1`, tagged `v0.5.1`. Addon `package.json` is `0.6.0` for
+  the unreleased §4b.7 breaking change; tag `v0.6.0` to publish it.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.

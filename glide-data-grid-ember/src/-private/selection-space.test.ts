@@ -6,7 +6,8 @@
 // not, so the *same* column arrived with two different numbers depending on which callback reported
 // it. `GridHostController` now holds its selection in consumer space and converts on the way out to
 // the renderer, mirroring source's `shiftSelection(newVal, -rowMarkerOffset)`
-// (`data-editor.tsx:1009`).
+// (`data-editor.tsx:1009`). The two header-glyph callbacks were a second miss of the same shape
+// (a scalar `col: number` the brands cannot catch) and are pinned by `unmangleColumn` below.
 //
 // WHY IT NEEDS A TEST AT ALL, given the brands in `selection-space.ts` make a missed conversion a
 // compile error: the brands police *where* conversions happen, not whether the conversion itself is
@@ -22,6 +23,7 @@ import {
     EMPTY_SELECTION,
     MangledSelectionCache,
     shiftSelection,
+    unmangleColumn,
     unmangleSelection,
     type MangledSelection,
 } from "./selection-space.ts";
@@ -169,6 +171,24 @@ describe("@onSelectionChanged reports the consumer's column space", () => {
         const drawn = new MangledSelectionCache().get(consumer, 1);
         expect(drawn.columns.toArray()).toEqual([2, 3, 4, 8]);
         expect(unmangleSelection(drawn, 1).columns.toArray()).toEqual([1, 2, 3, 7]);
+    });
+});
+
+describe("unmangleColumn — header-glyph callbacks (§4b.7)", () => {
+    // `@onHeaderMenuClick` / `@onHeaderIndicatorClick` take a scalar `col: number`, so the
+    // `GridSelection` brands cannot catch a missed conversion. These two shipped mangled from
+    // 2026-08-09 until 2026-08-22. The fire site is `unmangleColumn(pending.col, rowMarkerOffset)`.
+    it.each([
+        ["row markers off", 0],
+        ["row markers on", 1],
+    ])("%s: a glyph click on consumer column 4 (Notes) reports 4", (_label, offset) => {
+        const consumerCol = 4;
+        expect(unmangleColumn(consumerCol + offset, offset)).toBe(consumerCol);
+    });
+
+    it("a click on the first consumer column is 0, not the marker", () => {
+        expect(unmangleColumn(1, 1)).toBe(0);
+        expect(unmangleColumn(0, 0)).toBe(0);
     });
 });
 
