@@ -6068,14 +6068,56 @@ without paying for a browser install, uploading the HTML report as an artifact o
 run.
 
 **Only one of PHASES.md's original two techniques shipped.** Pixel-probing (`getImageData` on the
-grid's own canvas, DPR-corrected — see `e2e/helpers.ts`'s `samplePixel`) plus the demo's existing
-`data-test-*` status readouts cover six specs: app boot / tab-switch console-error smoke test, a
-non-blank-canvas paint check, click-to-select plus arrow-key nav (verified against
-`data-test-last-click` / `data-test-selection-summary`, not screenshot), a light/dark theme
-pixel-diff, and two edit-commit tests (below). `toHaveScreenshot()` visual baselines were **not**
-added — they need to be generated *on* whatever CI will compare against (font rasterisation, GPU, dpr
-all differ from this dev machine), which is real follow-up work, not something to fake with
+grid's own canvas, DPR-corrected — see `e2e/helpers.ts`'s `samplePixel` and, for demos whose cells are
+plain text-on-white rather than colourful, the denser `sampleGridColors`) plus the demo's existing
+`data-test-*` status readouts cover **30 specs** across 9 files: app boot / tab-switch console-error
+smoke test; a non-blank-canvas paint check on `<DemoGrid>` plus one per *other* demo tab
+(`demo-tabs-render.spec.ts` — Glide demo, Tracking, Streaming, Composed hooks, Async paging, Apollo
+faked, DaisyUI theming, Shadow DOM); click-to-select, Tab/Shift+Tab, `primary+A` select-all, shift-click
+range-select and Escape-clears-selection (verified against `data-test-last-click` /
+`data-test-selection-summary` / `data-test-selection-cleared`, not screenshot); a light/dark theme
+pixel-diff; two edit-commit tests (below); every one of `<DemoGrid>`'s seven imperative-API buttons;
+right-click context menus on a cell and on the group-header band; and both values of
+`cellActivationBehavior` (second-click vs single-click actually produce different editor-opening
+behaviour, not just a different label). `toHaveScreenshot()` visual baselines were **not** added —
+they need to be generated *on* whatever CI will compare against (font rasterisation, GPU, dpr all
+differ from this dev machine), which is real follow-up work, not something to fake with
 locally-generated baselines that would just fail on the first CI run.
+
+### Two coordinate traps this expansion re-earned
+
+**Row-marker offset shifts what a fixed x lands on.** With `@rowMarkers="both"` (`<DemoGrid>`'s
+default), a click at a small x offset from the canvas's left edge can land in the row-marker gutter,
+then column 0 (`RowID`, `allowOverlay: false`), before it reaches column 1 (`Salary`,
+`allowOverlay: true`) — probed empirically (`box.x + 60` → column 0, `box.x + 180` → column 1), not
+derived from theme constants, because the actual pixel boundary depends on rendered column widths.
+`activation-behavior.spec.ts` needs an editable column specifically, so it uses `+180`; specs that only
+need *some* cell (`selection.spec.ts`, `context-menu.spec.ts`'s cell case) don't care and stay at `+60`.
+
+**The plain per-column header band's own y-boundary was too narrow and unstable to hit by fixed pixel
+offset — the group-header band above it was not.** `<DemoGrid>` stacks a group-header band (the
+"Identity" / "Content" strip) on top of the ordinary column-header row. Probing for the *plain* header
+row's y-range gave different answers across otherwise-identical repeated runs (`box.y + 85` resolved
+to the header in one run and to a data cell in the next, with no config difference found) — plausibly
+a rounding-sensitive layout boundary a couple of CSS px wide. Not worth chasing: `context-menu.spec.ts`
+targets the group-header band instead (`box.y + 30`, stable across every run tried), which still
+exercises a distinct callback (`@onGroupHeaderContextMenu`) rather than duplicating the cell-click
+case. A real per-column-header-specific test (right-clicking to hit `@onHeaderContextMenu` itself, or
+clicking the menu chevron for `@onHeaderMenuClick`) is left as a gap — the chevron in particular is a
+`menuButtonSize`-wide target that is right-aligned *within* a column's own cell rect
+(`getHeaderMenuBounds`, `data-grid-render.header.ts:291-299`), so hitting it reliably would need either
+reading that geometry back from the app (nothing currently exposes it to a test) or hardcoding it
+against a specific column's known width, which is exactly the kind of coupling this suite has
+otherwise avoided.
+
+**A related, general lesson for pixel-based canvas assertions**: prefer computing an offset from a
+demo's own imperative API or a semantic readout over a hardcoded pixel constant wherever one exists
+(`imperative-api.spec.ts`'s `scrollTo`/`getBounds` tests do this), and where a fixed offset is
+unavoidable, probe it directly against the real `playwright test` runner and its exact device/viewport
+config — a hand-rolled `chromium.launch()` script without the project's `devices["Desktop Chrome"]`
+preset gave different, misleading answers for the header-boundary probe above, for reasons never fully
+pinned down (viewport was identical; only the device preset's extra fields — UA string, explicit
+`deviceScaleFactor: 1`, `screen` — differed).
 
 ### The point of the two editing specs
 
