@@ -57,6 +57,12 @@ export default ts.config(
             // ember-eslint-parser currently crashes while transforming this large GTS template
             // (Invalid count value: -13); template-lint and TypeScript still validate it.
             "app/components/demo-grid.gts",
+            // 9p: Playwright is deliberately kept out of the app's own tsconfig/Glint project (it
+            // is plain Node/browser TS, no Ember types) -- see `e2e/tsconfig.json` and the
+            // `lint:types:e2e` script, which typecheck it instead. Without this, typescript-eslint's
+            // `projectService` can't place these files in any project and errors on every run.
+            "playwright.config.ts",
+            "e2e/",
         ],
     },
     /**

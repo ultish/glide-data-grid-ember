@@ -31,8 +31,9 @@ add a feature no demo can switch on, which rule 5 says is unverified code by con
 `type:bug` issues and all 37 open PRs upstream were audited against this tree: six bugs are
 inherited, three are worth doing. **Both P1 items are DONE**, shipped in v0.5.1 (#954, #910).
 **§4b.5 and §4b.7 are DONE** (2026-08-15 / 2026-08-22). What is left there is **§4b.2's P2 items,
-none of which should be scheduled before being reproduced in a browser** — start with P2.1 (Firefox
-scrollbar click-through), the only one whose consequence is a data mutation. §4b.4 lists what was
+none of which should be scheduled before being reproduced in a browser** — P2.1 (Firefox scrollbar
+click-through) was attempted 2026-08-23 via automated Firefox and came back unreproduced (see §4b.2),
+so it stays open rather than scheduled; P2.2–P2.4 haven't been attempted at all. §4b.4 lists what was
 checked and dismissed, so it does not get re-audited.
 
 **Everything else below is marked DONE** and is kept for its source citations. §3.1 was decided on
@@ -48,6 +49,8 @@ pnpm --filter glide-data-grid-ember build           # rollup -> dist/
 pnpm --filter test-app run lint:types               # ember-tsc --noEmit
 pnpm --filter test-app exec vite build              # the real end-to-end check
 pnpm --filter test-app run start                    # dev server on :4200
+pnpm test:e2e                                       # Playwright, chromium only (9p). Not part of
+                                                      # `pnpm test` -- see PORTING-NOTES.md "9p".
 ```
 
 **Use `ember-tsc`, never bare `tsc`.** Since the Glint v2 upgrade, plain `tsc` silently *ignores*
@@ -135,7 +138,9 @@ a rollup/babel requirement `tsc` alone will not catch.
 - **Accessibility (9b)** — deferred. No ARIA/DOM tree at all. The item most likely to become urgent
   if a consumer ever needs it, and it cannot be added from outside the addon.
 - **Touch/mobile (9c)** — deferred. Not needed for the intended consumers.
-- **Playwright (9p)** — deferred.
+- **Playwright (9p)** — **DONE 2026-08-23**, at explicit user request, CI-wired. No longer deferred;
+  see PORTING-NOTES.md's "9p — Playwright" section. `toHaveScreenshot()` visual baselines are the one
+  piece still not built (needs CI-generated baselines, not local ones).
 - **The demo is the data grid and nothing else.** The 6 "feature cards" from the original brief were
   dropped deliberately. Do not restore them.
 - **`object-scan` / `glimmer-apollo` / DaisyUI / Tailwind are test-app-only.** The addon depends on
@@ -145,9 +150,9 @@ a rollup/babel requirement `tsc` alone will not catch.
 
 ## 2. Quick wins — diagnosed, small, do these first
 
-**Every item in this section is DONE**, as are §4b's two P1 items, §4b.5, and §4b.7. The nearest
-thing left is **§4b.2's P2.1** (Firefox scrollbar click-through) — reproduce in a browser before
-scheduling; its consequence is a data mutation.
+**Every item in this section is DONE**, as are §4b's two P1 items, §4b.5, and §4b.7. §4b.2's P2.1
+(Firefox scrollbar click-through) was attempted 2026-08-23 and came back unreproduced — see §4b.2 for
+the full write-up. Nothing in §2 or §4b is actionable right now without a new repro.
 
 ### 2.1 `withMovableColumns` memoizes on the wrong key — DONE (2026-08-09)
 
@@ -462,7 +467,7 @@ reproduce is a fix you cannot verify.
 |---|------|--------|---------------|
 | ~~**P1.1**~~ | [#954](https://github.com/glideapps/glide-data-grid/issues/954) auto-size ignores `indicatorIcon` | S | **DONE 2026-08-14** — fixed, 4 tests, browser-verified |
 | ~~**P1.2**~~ | [#910](https://github.com/glideapps/glide-data-grid/issues/910) Escape cannot close a read-only overlay | M | **DONE 2026-08-14** — both halves, 4 tests, browser-verified three ways |
-| **P2.1** | [#1034](https://github.com/glideapps/glide-data-grid/issues/1034) Firefox scrollbar click-through | M | Only inherited bug whose consequence is a **mutation**, not a paint artifact |
+| **P2.1** | [#1034](https://github.com/glideapps/glide-data-grid/issues/1034) Firefox scrollbar click-through — attempted, unreproduced (2026-08-23) | M | Only inherited bug whose consequence is a **mutation**, not a paint artifact |
 | **P2.2** | [#998](https://github.com/glideapps/glide-data-grid/issues/998) column `bgCell` misses the blank strip | M | Visual; likely cause already located |
 | **P2.3** | [#989](https://github.com/glideapps/glide-data-grid/issues/989) Safari frozen-column flicker | L | Visual, Safari-only, and the fix lives in the blit path — high risk, low reward |
 | **P2.4** | [#983](https://github.com/glideapps/glide-data-grid/issues/983) Safari emoji header color | S | Cosmetic, narrow trigger, upstream thinks it is a WebKit bug |
@@ -564,7 +569,7 @@ two editors and never generalised. `focusOverlay` is the general form; the decoy
 
 ### 4b.2 P2 — reproduce before scheduling
 
-**P2.1 — `#1034`: Firefox clicks pass through the scrollbar.**
+**P2.1 — `#1034`: Firefox clicks pass through the scrollbar — ATTEMPTED, UNREPRODUCED (2026-08-23).**
 `grid-host-controller.ts:4585` computes `scrollbarWidth` as `offsetWidth - clientWidth`, and the
 comment beside it says overlay scrollbars give 0 and have "nothing to guard against" — which is
 exactly the wrong assumption in Firefox, where an overlay scrollbar expands on hover and still lets
@@ -572,6 +577,19 @@ the press reach the content. `isMaybeScrollbar` comes out `false` and the press 
 underneath. **Ranked top of P2 because its consequence is a data mutation, not a smudge**: with the
 trailing blank row on, the reporter's symptom is that grabbing the scrollbar *appends a row*. Repro
 is cheap — Firefox, `<DemoGrid>`, scroll to the bottom, drag the scrollbar thumb.
+
+**Repro attempt (2026-08-23), came back negative.** Headed Playwright-driven Firefox 153 (macOS;
+claude-in-chrome only automates Chrome, so this was the only way to drive real Firefox) against
+`<DemoGrid>`: confirmed `scrollerEl.offsetWidth - clientWidth === 0` in this environment on **both**
+Firefox and Chromium (real overlay scrollbars, matching the code comment's precondition), then swept
+mousedown+drag across the full vertical scrollbar track near the bottom (10 positions) and the
+horizontal track (5 positions), each timed right after a fresh scroll so the auto-hiding bar was
+actually visible. Every attempt was correctly consumed by the native scrollbar — no row ever
+appended, no `Click:` readout change. **Not proof the bug is absent** — Playwright's synthetic
+pointer dispatch may not replicate the exact hover-timing race a real trackpad/mouse gesture hits, and
+this was one Firefox build on one platform. Needs an actual human dragging a real scrollbar in a real
+Firefox window to settle either way; not worth further automated effort per rule 5's corollary (a bug
+that can't be reproduced can't be verified fixed). Left open, not scheduled.
 
 **P2.2 — `#998`: column `bgCell` override does not fill the blank strip after a horizontal scroll.**
 `drawBlanks` (`data-grid-render.lines.ts:11-101`) is a faithful port including the

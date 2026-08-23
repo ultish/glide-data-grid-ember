@@ -879,9 +879,13 @@ place a consumer might reasonably want more, and each is independently upgradeab
 - Styling throughout uses inline style objects rather than source's `@linaria/react` CSS-in-JS —
   intentional and not worth revisiting.
 
-### 9p — Playwright: repeatable browser tests **(NEW — added at user request 2026-08-08)**
+### 9p — Playwright: repeatable browser tests **(DONE 2026-08-23, at user request)**
 
-> **Priority: to be set by the user after 9e (search) and the DaisyUI theming work land.**
+> **Landed narrower than the original brief on purpose.** Only the deterministic technique below
+> (pixel-probing + DOM status-readout assertions) shipped; `toHaveScreenshot()` visual baselines were
+> considered and explicitly deferred (see the "CI-forward-compatible" bullet, now actually exercised
+> rather than hypothetical). Full writeup, including the real defect this surfaced, in
+> PORTING-NOTES.md's "9p — Playwright" section.
 
 Every browser check in this project so far has been driven by hand through the Chrome MCP tool —
 ephemeral, unrepeatable, and leaving nothing behind. Playwright makes that class of verification
@@ -1185,8 +1189,11 @@ Queue items 1–6, Phase 11, and backlog items 9f, 9g, 9j, 9k, plus N1/N2 from `
   inapplicable to a Vite v2 app. CI covers ember-source **6.4 → 7.3-canary**. See TODO.md §5.1 and
   PORTING-NOTES.md's "The ember-try matrix" section. **npm publishing is no longer CI-blocked.**
 
-**Deferred by explicit user decision — do not propose these:** 9b (accessibility), 9c (touch), 9p
-(Playwright).
+**Deferred by explicit user decision — do not propose these:** 9b (accessibility), 9c (touch).
+
+**9p (Playwright) landed 2026-08-23**, at explicit user request. See its section above (now updated)
+and PORTING-NOTES.md's "9p — Playwright" for the full writeup, including the local-only `vite
+preview` boot bug it surfaced along the way.
 
 ### How to work on this repo, learned the hard way today
 

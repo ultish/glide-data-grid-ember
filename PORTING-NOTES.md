@@ -6054,3 +6054,88 @@ publish. Callers that already subtracted `1` themselves must stop.
 Verify semantically, not numerically: with `@rowMarkers="both"` (DemoGrid default), the header
 menu opened on **Notes** must title itself "Notes" and auto-size that column; the Profile
 indicator readout must start with "Profile". An index of `4` can pass by luck; the title cannot.
+
+## 9p — Playwright (COMPLETE, 2026-08-23, at explicit user request)
+
+`@playwright/test` in `test-app/`, config at `test-app/playwright.config.ts`, specs in
+`test-app/e2e/*.spec.ts`. Deliberately **optional and separate from `pnpm test`** — a new `e2e` npm
+script (not `test:e2e`, on purpose: `test-app`'s own `test` script is
+`concurrently "pnpm:lint" "pnpm:test:*"`, and naming it `test:e2e` would have pulled it into that glob
+and made the ~150MB Chromium download and browser run part of every `pnpm test`). The root's own
+`test:e2e` script (`pnpm --filter test-app e2e`) is the one entry point that runs it. CI wires it as
+its own job (`.github/workflows/ci.yml`'s `e2e`), `needs: 'test'` so a broken unit-test run fails fast
+without paying for a browser install, uploading the HTML report as an artifact on any non-cancelled
+run.
+
+**Only one of PHASES.md's original two techniques shipped.** Pixel-probing (`getImageData` on the
+grid's own canvas, DPR-corrected — see `e2e/helpers.ts`'s `samplePixel`) plus the demo's existing
+`data-test-*` status readouts cover six specs: app boot / tab-switch console-error smoke test, a
+non-blank-canvas paint check, click-to-select plus arrow-key nav (verified against
+`data-test-last-click` / `data-test-selection-summary`, not screenshot), a light/dark theme
+pixel-diff, and two edit-commit tests (below). `toHaveScreenshot()` visual baselines were **not**
+added — they need to be generated *on* whatever CI will compare against (font rasterisation, GPU, dpr
+all differ from this dev machine), which is real follow-up work, not something to fake with
+locally-generated baselines that would just fail on the first CI run.
+
+### The point of the two editing specs
+
+CLAUDE.md's browser-testing notes record that raw DOM-dispatched `keydown`/`paste` events (the
+claude-in-chrome extension's `javascript_tool` technique) reach the controller but never land a write
+— confirmed identical on untouched `main`, filed as a harness artifact rather than a product bug.
+That gap was the whole reason 9p was proposed in the first place ("what it would close permanently
+... real clipboard interaction"). It does **not** apply to Playwright: Playwright drives real input
+through the browser's own input pipeline (CDP for Chromium), a materially different mechanism, and
+`e2e/editing.spec.ts` proves the difference rather than assuming it — `gridApi.appendRow(1)`
+(`data-test-api-append-row`) opens and focuses column 1's editor (sidesteps computing canvas-relative
+pixel coordinates for an arbitrary column), then real `page.keyboard` input into the
+`GrowingEntry`-backed `<textarea class="gdg-input">` under `.gdg-overlay-editor`, `Enter` to commit
+and `Escape` to cancel, both verified against `data-test-last-edit-finish`
+(`"committed, moved ..."` / `"cancelled, moved ..."`). **Both pass.** Playwright input does land
+writes; the gap is specific to the Chrome-extension harness, not to synthetic browser automation in
+general.
+
+### A real defect this surfaced: a served production build doesn't boot
+
+Not part of 9p's brief, found while choosing how Playwright's `webServer` should serve the app.
+`vite build && vite preview` (the natural choice — CLAUDE.md already treats `vite build` as "the real
+end-to-end check") produces a page that crashes on load: `Uncaught TypeError: window.require is not a
+function`, traced to `<script src="/@embroider/virtual/vendor.js">` being emitted without
+`type="module"` — the build's own warning names exactly this
+(`` <script src="/@embroider/virtual/vendor.js"> in "/index.html" can't be bundled without
+type="module" attribute ``). **The same failure reproduces from `test-app`'s existing
+`test:ember` script** (`vite build --mode test && ember test --path dist`) on a clean `main`
+checkout with the committed lockfile — confirmed by `git stash -u` back to a pristine tree before
+touching anything for 9p. So this predates 9p entirely and nothing about Playwright caused it.
+
+**Not a live-site defect.** The actual deployed demo (`https://ultish.github.io/glide-data-grid-ember/`)
+was loaded headless in real Chromium during this investigation and boots clean — no console errors,
+every tab present. GitHub's own last CI run on `main` (2026-08-16, commit `a96e676`) was green too,
+`test:ember` included. The failure is specific to serving the build via **`vite preview` (and
+testem's own dist server, which `test:ember` uses) locally** — some MIME-type or script-execution-order
+difference from whatever static hosting GitHub Pages and (apparently) GitHub Actions' runner both get
+right. Filed here rather than chased down, since it's orthogonal to what 9p was asked to do and
+doesn't affect any real user or the actual CI pipeline as last observed — but if `pnpm test` or
+`vite preview` starts failing in CI, this is where to look first, and re-check whether it's a Chrome-
+version-sensitive script-loading behavior (a very recent local Chrome hit it; GitHub's runner Chrome
+at the time of the last green run may simply have been older).
+
+**Consequence for 9p's own config:** `playwright.config.ts`'s `webServer` runs the plain dev server
+(`vite --port 4173 --strictPort`), not `vite build && vite preview` — the same server every other
+piece of browser verification in this project has always used, and unaffected by the above.
+
+### Type-checking, without coupling to the Ember/Glint project
+
+`e2e/tsconfig.json` is a standalone plain-TS config (`allowImportingTsExtensions`, `types: ["node",
+"@playwright/test"]`) — deliberately **not** an extension of `test-app/tsconfig.json`, which pulls in
+`ember-source/types` globals that have no business in a Node/Playwright script. Checked by
+`lint:types:e2e` (`tsc --noEmit -p e2e/tsconfig.json`), which — because `test-app`'s own `lint` script
+is `concurrently "pnpm:lint:*(!fix)"` — is automatically picked up by `pnpm lint` for free. The
+browser-requiring `e2e` script stays opt-in; the type-check does not need browsers and costs nothing
+to run every time.
+
+`eslint.config.mjs`'s `ignores` also excludes `playwright.config.ts` and `e2e/`: typescript-eslint's
+`projectService: true` needs every linted `.ts` file to belong to some tsconfig it can find via
+directory walk-up, and neither file belongs to `test-app/tsconfig.json`'s `include`. Same shape as the
+existing `app/components/demo-grid.gts` exclusion just above it in that file (a parser limitation,
+there; a deliberate project boundary, here) — both documented inline rather than silently left to be
+rediscovered.
