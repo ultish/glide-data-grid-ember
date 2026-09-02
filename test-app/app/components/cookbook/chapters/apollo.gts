@@ -52,7 +52,7 @@ export default class PeopleTable extends Component {
 
   onEdit = (person: { id: string }, col: number, value: GridCell): void => {
     if (value.kind !== GridCellKind.Text) return;
-    const field = (["name", "email", "role"] as const)[col];
+    const field = COLUMNS[col]?.id;
     if (field === undefined) return;
     void this.updatePerson.mutate({ variables: { id: person.id, patch: { [field]: value.data } } });
   };

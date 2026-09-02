@@ -77,8 +77,10 @@ export default class InteractionsChapter extends Component {
             <code>onCellsEdited</code>
             — with
             <code>recordsSource</code>, that is your
-            <code>onCellEdited(person, col, value)</code>. Assign the tracked field. That is the
-            whole handler:
+            <code>onCellEdited(person, col, value)</code>. The grid only ever hands you a column
+            index; look up
+            <code>COLUMNS[col].id</code>
+            so a freeze or reorder does not retarget the write. Assign the tracked field:
         </p>
         <pre class="gdg-cookbook__code"><code>{{this.booleanEdit}}</code></pre>
         <p>
@@ -141,13 +143,14 @@ export default class InteractionsChapter extends Component {
     </template>
 
     booleanEdit = `onEdit = (person: Person, col: number, value: GridCell): void => {
-  if (value.kind === GridCellKind.Boolean && col === 2) {
+  const field = COLUMNS[col]?.id;
+  if (field === "active" && value.kind === GridCellKind.Boolean) {
     person.active = value.data === true;
     return;
   }
   if (value.kind !== GridCellKind.Text) return;
-  if (col === 0) person.name = value.data;
-  else person.role = value.data;
+  if (field === "name") person.name = value.data;
+  else if (field === "role") person.role = value.data;
 };`;
 
     addRow = `addRow = (): void => {

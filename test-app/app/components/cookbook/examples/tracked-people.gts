@@ -40,9 +40,10 @@ export default class TrackedPeople extends Component {
 
     onEdit = (person: Person, col: number, value: GridCell): void => {
         if (value.kind !== GridCellKind.Text) return;
-        if (col === 0) person.name = value.data;
-        else if (col === 1) person.email = value.data;
-        else person.role = value.data;
+        const field = COLUMNS[col]?.id;
+        if (field === "name") person.name = value.data;
+        else if (field === "email") person.email = value.data;
+        else if (field === "role") person.role = value.data;
     };
 
     addRow = (): void => {
@@ -120,9 +121,10 @@ export default class PeopleTable extends Component {
   // and an arrow field is identity-stable per instance.
   onEdit = (person: Person, col: number, value: GridCell): void => {
     if (value.kind !== GridCellKind.Text) return;
-    if (col === 0) person.name = value.data;
-    else if (col === 1) person.email = value.data;
-    else person.role = value.data;
+    const field = COLUMNS[col]?.id;
+    if (field === "name") person.name = value.data;
+    else if (field === "email") person.email = value.data;
+    else if (field === "role") person.role = value.data;
   };
 
   addRow = (): void => {
