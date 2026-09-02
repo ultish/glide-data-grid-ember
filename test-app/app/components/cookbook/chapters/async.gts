@@ -75,11 +75,10 @@ export default class AsyncChapter extends Component {
 
     <template>
         <p>
-            100,000 rows that do not exist in memory. Rows arrive a page at a time as you scroll;
-            everything not yet loaded draws as a
+            100,000 rows that do not exist in memory. Rows arrive a page at a time as you scroll; everything not yet
+            loaded draws as a
             <code>Loading</code>
-            cell, and each page that lands repaints exactly its own rows via damage, not a full
-            redraw.
+            cell, and each page that lands repaints exactly its own rows via damage, not a full redraw.
         </p>
 
         <p>
@@ -88,8 +87,7 @@ export default class AsyncChapter extends Component {
             <code>recordsSource</code>
             for data you hold.
             <code>AsyncRecordsSource</code>
-            for data you don't. The deciding fact is whether the rows exist in memory, not how many
-            there are.
+            for data you don't. The deciding fact is whether the rows exist in memory, not how many there are.
         </p>
 
         <CookbookSection
@@ -105,8 +103,8 @@ export default class AsyncChapter extends Component {
         <p class="gdg-cookbook__note">
             Without
             <code>@onReady</code>
-            the pages still load, but nothing would show them until some unrelated event happened to
-            repaint. Both args are load-bearing.
+            the pages still load, but nothing would show them until some unrelated event happened to repaint. Both args
+            are load-bearing.
         </p>
     </template>
 }

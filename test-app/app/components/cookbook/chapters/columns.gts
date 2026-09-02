@@ -28,8 +28,7 @@ export default class ColumnsChapter extends Component {
                 <code>width</code>
                 is fixed. A column
                 <strong>without</strong>
-                one is auto-sized: the grid measures a sample of its cells plus its title, clamped
-                by
+                one is auto-sized: the grid measures a sample of its cells plus its title, clamped by
                 <code>@minColumnWidth</code>
                 /
                 <code>@maxColumnWidth</code>
@@ -45,8 +44,7 @@ export default class ColumnsChapter extends Component {
             </li>
             <li>
                 <code>group</code>
-                turns on the second header row automatically. Set it on any column and the band
-                appears.
+                turns on the second header row automatically. Set it on any column and the band appears.
             </li>
             <li>
                 <code>hasMenu</code>

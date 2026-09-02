@@ -18,11 +18,7 @@ export default class CookbookPage extends Component<CookbookPageSignature> {
                 {{#each this.parts as |part|}}
                     <div class="gdg-cookbook__toc-part">{{part.title}}</div>
                     {{#each part.chapters as |chapter|}}
-                        <LinkTo
-                            @route="cookbook.chapter"
-                            @model={{chapter.id}}
-                            @activeClass="gdg-cookbook__toc-active"
-                        >
+                        <LinkTo @route="cookbook.chapter" @model={{chapter.id}} @activeClass="gdg-cookbook__toc-active">
                             {{chapter.title}}
                         </LinkTo>
                     {{/each}}

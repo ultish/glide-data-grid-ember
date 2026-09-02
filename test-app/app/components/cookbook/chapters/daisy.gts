@@ -137,8 +137,8 @@ export default class DaisyChapter extends Component {
     <template>
         <p>
             The grid draws itself onto a
-            <code>&lt;canvas&gt;</code>, so CSS cannot style cells. DaisyUI (or any design system)
-            reaches the canvas through
+            <code>&lt;canvas&gt;</code>, so CSS cannot style cells. DaisyUI (or any design system) reaches the canvas
+            through
             <code>CssThemeWatcher</code>: you map CSS custom properties onto
             <code>Theme</code>
             fields, and a
@@ -149,15 +149,11 @@ export default class DaisyChapter extends Component {
         </p>
 
         <p>
-            The addon has no DaisyUI dependency. Tailwind 4 and DaisyUI 5 are this app's. A
-            different design system is a different mapping.
+            The addon has no DaisyUI dependency. Tailwind 4 and DaisyUI 5 are this app's. A different design system is a
+            different mapping.
         </p>
 
-        <CookbookSection
-            @title="DaisyUI 5 driving the canvas"
-            @blurb={{this.liveBlurb}}
-            @code={{this.recipe}}
-        >
+        <CookbookSection @title="DaisyUI 5 driving the canvas" @blurb={{this.liveBlurb}} @code={{this.recipe}}>
             <div style="height: 560px;">
                 <DaisyDemo />
             </div>
@@ -168,16 +164,15 @@ export default class DaisyChapter extends Component {
                 DaisyUI 5 stores its palette in
                 <code>oklch()</code>.
                 <code>getComputedStyle</code>
-                hands that back unconverted in Chrome. The addon's colour parser understands it; if
-                this grid ever renders in wrong colours, suspect that parser first.
+                hands that back unconverted in Chrome. The addon's colour parser understands it; if this grid ever
+                renders in wrong colours, suspect that parser first.
             </li>
             <li>
                 <code>theme</code>
                 is identity-compared.
                 <code>CssThemeWatcher</code>
-                publishes a new object only when a resolved value actually changed — re-deriving a
-                theme object on every observer callback would silently disable the scroll blit fast
-                path.
+                publishes a new object only when a resolved value actually changed — re-deriving a theme object on every
+                observer callback would silently disable the scroll blit fast path.
             </li>
             <li>
                 <code>accentLight</code>
@@ -189,8 +184,8 @@ export default class DaisyChapter extends Component {
                 blacks out selected cells.
             </li>
             <li>
-                Name every Daisy theme you offer in your Tailwind config. A theme with no emitted
-                CSS resolves to the previous theme's values.
+                Name every Daisy theme you offer in your Tailwind config. A theme with no emitted CSS resolves to the
+                previous theme's values.
             </li>
         </ul>
     </template>

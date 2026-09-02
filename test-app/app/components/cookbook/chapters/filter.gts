@@ -12,8 +12,8 @@ export default class FilterChapter extends Component {
             records and pass a new
             <code>@rows</code>
             /
-            <code>getCellContent</code>. Controls live outside the grid: chips, a text field, a
-            slider, a date range — anything that produces a subset.
+            <code>getCellContent</code>. Controls live outside the grid: chips, a text field, a slider, a date range —
+            anything that produces a subset.
         </p>
 
         <p>
@@ -44,16 +44,14 @@ export default class FilterChapter extends Component {
             <strong>The wrong <code>.filter()</code>.</strong>
             Putting
             <code>this.people.filter(...)</code>
-            inside a getter that also runs when you edit a single field — because the getter reads
-            both the filter state
+            inside a getter that also runs when you edit a single field — because the getter reads both the filter state
             <em>and</em>
-            a tracked field on a person — busts every per-row cache on every keystroke. Keep the
-            source array (
+            a tracked field on a person — busts every per-row cache on every keystroke. Keep the source array (
             <code>ALL</code>
             here) identity-stable forever. Filter in its own
             <code>@cached</code>
-            getter that only reads filter state plus the source array. Edit fields on the records,
-            not by mapping a new array of clones.
+            getter that only reads filter state plus the source array. Edit fields on the records, not by mapping a new
+            array of clones.
         </p>
     </template>
 }

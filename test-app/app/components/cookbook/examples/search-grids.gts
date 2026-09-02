@@ -95,6 +95,7 @@ export class ExternalSearchGrid extends Component {
                 type="search"
                 value={{this.query}}
                 placeholder="Find in grid"
+                aria-label="Find in grid"
                 {{on "input" this.onInput}}
                 style="padding: 4px 8px; font: inherit; border: 1px solid #e1e2e5; border-radius: 4px;"
             />

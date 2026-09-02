@@ -81,19 +81,37 @@ export default class FilterGrid extends Component {
 
     <template>
         <div class="gdg-cookbook__controls">
-            <button type="button" class="btn btn-xs {{if (this.isTeam 'All') 'btn-active'}}" {{on "click" (fn this.setTeam "All")}}>All</button>
-            <button type="button" class="btn btn-xs {{if (this.isTeam 'Eng') 'btn-active'}}" {{on "click" (fn this.setTeam "Eng")}}>Eng</button>
-            <button type="button" class="btn btn-xs {{if (this.isTeam 'Design') 'btn-active'}}" {{on "click" (fn this.setTeam "Design")}}>Design</button>
-            <button type="button" class="btn btn-xs {{if (this.isTeam 'PM') 'btn-active'}}" {{on "click" (fn this.setTeam "PM")}}>PM</button>
+            <button
+                type="button"
+                class="btn btn-xs {{if (this.isTeam 'All') 'btn-active'}}"
+                {{on "click" (fn this.setTeam "All")}}
+            >All</button>
+            <button
+                type="button"
+                class="btn btn-xs {{if (this.isTeam 'Eng') 'btn-active'}}"
+                {{on "click" (fn this.setTeam "Eng")}}
+            >Eng</button>
+            <button
+                type="button"
+                class="btn btn-xs {{if (this.isTeam 'Design') 'btn-active'}}"
+                {{on "click" (fn this.setTeam "Design")}}
+            >Design</button>
+            <button
+                type="button"
+                class="btn btn-xs {{if (this.isTeam 'PM') 'btn-active'}}"
+                {{on "click" (fn this.setTeam "PM")}}
+            >PM</button>
             <input
                 type="search"
                 value={{this.query}}
                 placeholder="Filter by name"
+                aria-label="Filter by name"
                 {{on "input" this.onQuery}}
                 style="padding: 4px 8px; font: inherit; border: 1px solid #e1e2e5; border-radius: 4px;"
             />
             <label style="display: flex; gap: 6px; align-items: center;">
-                Score ≥ {{this.minScore}}
+                Score ≥
+                {{this.minScore}}
                 <input type="range" min="40" max="100" value={{this.minScore}} {{on "input" this.onScore}} />
             </label>
             <span class="gdg-cookbook__caption">{{this.filtered.length}} of {{ALL.length}}</span>

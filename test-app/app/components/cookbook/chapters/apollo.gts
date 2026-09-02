@@ -185,15 +185,15 @@ export default class ApolloChapter extends Component {
             <code>glimmer-apollo</code>
             are not dependencies of this workspace. What you
             <strong>copy</strong>
-            is the glimmer-apollo file below. The fake exists so the identity lesson is observable
-            without installing those packages.
+            is the glimmer-apollo file below. The fake exists so the identity lesson is observable without installing
+            those packages.
         </p>
 
         <p>
             Ember Data mutates in place; Apollo hands you a new object and a new containing array.
             <code>recordsSource</code>
-            keys per-row caches on the array identity, so a one-field subscription update
-            re-projects every row if you feed it
+            keys per-row caches on the array identity, so a one-field subscription update re-projects every row if you
+            feed it
             <code>query.data.people</code>
             directly. That is a trade-off, not a defect, and it is off the paint path.
         </p>
@@ -211,13 +211,12 @@ export default class ApolloChapter extends Component {
             At a few hundred rows, stop at the file above — pass
             <code>query.data.people</code>
             straight into
-            <code>recordsSource</code>. At large row counts with a high-frequency subscription,
-            don't. Keep the query; on each result, fold the payload into tracked view models keyed
-            by
+            <code>recordsSource</code>. At large row counts with a high-frequency subscription, don't. Keep the query;
+            on each result, fold the payload into tracked view models keyed by
             <code>id</code>, and hand
             <code>recordsSource</code>
-            <em>those</em>, not the Apollo array. Keep the same array identity when membership and
-            order do not change. That is the right-hand grid in the live example.
+            <em>those</em>, not the Apollo array. Keep the same array identity when membership and order do not change.
+            That is the right-hand grid in the live example.
         </p>
 
         <pre class="gdg-cookbook__code"><code>{{this.reconcile}}</code></pre>

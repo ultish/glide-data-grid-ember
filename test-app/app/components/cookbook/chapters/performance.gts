@@ -5,9 +5,8 @@ export default class PerformanceChapter extends Component {
     <template>
         <p>
             <strong>Row count is not a performance problem.</strong>
-            The grid is virtualised and pulls cells as it paints them, so 200,000 rows cost about
-            what 20 do. If something feels slow, it is one of three things, and none of them is the
-            row count.
+            The grid is virtualised and pulls cells as it paints them, so 200,000 rows cost about what 20 do. If
+            something feels slow, it is one of three things, and none of them is the row count.
         </p>
 
         <ul>
@@ -37,9 +36,8 @@ export default class PerformanceChapter extends Component {
         </ul>
 
         <p>
-            How to tell them apart: take a Performance profile while scrolling with nothing else
-            happening. A healthy grid does very little per scroll frame. A full paint on every
-            frame is the first item; a paint that is slow
+            How to tell them apart: take a Performance profile while scrolling with nothing else happening. A healthy
+            grid does very little per scroll frame. A full paint on every frame is the first item; a paint that is slow
             <em>once</em>
             is the second; a full re-projection on every keystroke is the third.
         </p>
@@ -48,8 +46,8 @@ export default class PerformanceChapter extends Component {
         <p>
             Each must be a
             <code>@cached</code>
-            getter, a module-scope constant, or a stable instance field — never an inline arrow or
-            object literal in the template, and never a plain (uncached) getter that reallocates:
+            getter, a module-scope constant, or a stable instance field — never an inline arrow or object literal in the
+            template, and never a plain (uncached) getter that reallocates:
         </p>
 
         <table class="gdg-cookbook__table">
@@ -77,7 +75,7 @@ export default class PerformanceChapter extends Component {
                 <tr>
                     <td><code>@getRowThemeOverride</code></td>
                     <td>A plain function reference.
-                        <code>\{{fn this.x ...}}</code>
+                        <code>{{this.fnSnippet}}</code>
                         allocates a new one per render</td>
                 </tr>
                 <tr>
@@ -99,8 +97,7 @@ export default class PerformanceChapter extends Component {
                 </tr>
                 <tr>
                     <td><code>@columns</code></td>
-                    <td>Replaced wholesale on resize/reorder, which is correct — just don't rebuild
-                        it per render</td>
+                    <td>Replaced wholesale on resize/reorder, which is correct — just don't rebuild it per render</td>
                 </tr>
             </tbody>
         </table>
@@ -113,23 +110,22 @@ export default class PerformanceChapter extends Component {
             <code>updateCells()</code>
             from
             <code>@onReady</code>. That is the
-            <LinkTo @route="cookbook.chapter" @model="streaming">streaming chapter</LinkTo>.
-            It is not a fallback for a tracked grid that is not repainting.
+            <LinkTo @route="cookbook.chapter" @model="streaming">streaming chapter</LinkTo>. It is not a fallback for a
+            tracked grid that is not repainting.
         </p>
 
         <h2>Hi-DPI, wide grids</h2>
         <p>
-            The canvas is painted at up to 5× device pixel ratio. On a Retina or 4K screen that is
-            the per-frame fill cost —
+            The canvas is painted at up to 5× device pixel ratio. On a Retina or 4K screen that is the per-frame fill
+            cost —
             <code>@enableFirefoxRescaling</code>,
             <code>@enableSafariRescaling</code>
             and
             <code>@enableChromeRescaling</code>
             drop it
             <strong>while scrolling</strong>
-            (to 1×, 2× and 1× respectively) and restore full resolution 200ms after the last
-            scroll. Each only applies on its own browser, so switching all three on is the normal
-            thing to do. The
+            (to 1×, 2× and 1× respectively) and restore full resolution 200ms after the last scroll. Each only applies
+            on its own browser, so switching all three on is the normal thing to do. The
             <LinkTo @route="full-grid">Full grid</LinkTo>
             has a toggle that drives all three.
         </p>
@@ -142,13 +138,14 @@ export default class PerformanceChapter extends Component {
             <code>"single-buffer"</code>
             elsewhere. Setting
             <code>"direct"</code>
-            disables the scroll blit fast path and repaints every frame — useful for exactly one
-            thing: if
+            disables the scroll blit fast path and repaints every frame — useful for exactly one thing: if
             <code>"direct"</code>
-            feels no slower than the default, the fast path was already disabled, and the cause is
-            the first item in the list above.
+            feels no slower than the default, the fast path was already disabled, and the cause is the first item in the
+            list above.
         </p>
     </template>
+
+    fnSnippet = "{{fn this.x ...}}";
 
     identityCode = `// ✗ a fresh closure on every read — the blit path is silently off, forever
 get getCellContent() {

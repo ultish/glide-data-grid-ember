@@ -3,7 +3,12 @@ import { cached, tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 import { recordsSource } from "glide-data-grid-ember/data-source/index";
-import { GridCellKind, type GridCell, type GridColumn, type GridSelection } from "glide-data-grid-ember/rendering/index";
+import {
+    GridCellKind,
+    type GridCell,
+    type GridColumn,
+    type GridSelection,
+} from "glide-data-grid-ember/rendering/index";
 
 class Person {
     @tracked name: string;
@@ -107,9 +112,12 @@ export default class InteractionsGrid extends Component {
                 Delete selected rows
             </button>
             <span class="gdg-cookbook__caption">
-                focused {{this.focused}}
-                · rows {{this.selectedRows.length}}
-                · columns {{this.selectedColumns.length}}
+                focused
+                {{this.focused}}
+                · rows
+                {{this.selectedRows.length}}
+                · columns
+                {{this.selectedColumns.length}}
             </span>
         </div>
         <div class="gdg-cookbook__live" style="height: 280px;">

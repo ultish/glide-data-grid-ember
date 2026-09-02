@@ -357,11 +357,19 @@
     color: #63636b;
 }
 
+.gdg-cookbook__note {
+    padding: 10px 14px;
+    margin: 0 0 14px !important;
+    background: #fff8e6;
+    border-left: 3px solid #f0a202;
+    border-radius: 0 6px 6px 0;
+}
+
 .gdg-cookbook__intro .gdg-cookbook__note {
     margin-top: 4px;
 }
 
-.gdg-cookbook__note a {
+.gdg-cookbook__body .gdg-cookbook__note a {
     color: inherit;
     font-weight: 650;
 }
@@ -417,14 +425,6 @@
     padding: 0;
     font-size: inherit;
     background: none;
-}
-
-.gdg-cookbook__note {
-    padding: 10px 14px;
-    margin: 0 0 14px !important;
-    background: #fff8e6;
-    border-left: 3px solid #f0a202;
-    border-radius: 0 6px 6px 0;
 }
 
 .gdg-cookbook__table {
@@ -549,7 +549,7 @@
     letter-spacing: 0.04em;
 }
 
-.gdg-cookbook__index-part a {
+.gdg-cookbook__body .gdg-cookbook__index-part a {
     display: block;
     padding: 8px 0;
     color: inherit;
@@ -557,7 +557,7 @@
     border-bottom: 1px solid #ececf0;
 }
 
-.gdg-cookbook__index-part a:hover {
+.gdg-cookbook__body .gdg-cookbook__index-part a:hover {
     color: #4f5dff;
 }
 
@@ -578,7 +578,9 @@
     gap: 8px;
     align-items: center;
     padding: 10px 12px;
-    font: 13px system-ui, sans-serif;
+    font:
+        13px system-ui,
+        sans-serif;
     border-bottom: 1px solid #ececf0;
 }
 

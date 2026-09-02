@@ -64,7 +64,8 @@ export default class TrackedPeople extends Component {
     <template>
         <div class="gdg-cookbook__controls">
             <button type="button" class="btn btn-xs" {{on "click" this.addRow}}>Add row</button>
-            <span class="gdg-cookbook__caption">{{this.people.length}} rows. Edit a cell, or add one — both repaint with no imperative redraw.</span>
+            <span class="gdg-cookbook__caption">{{this.people.length}}
+                rows. Edit a cell, or add one — both repaint with no imperative redraw.</span>
         </div>
         <div class="gdg-cookbook__live">
             <GlideDataGrid

@@ -7,8 +7,7 @@ export default class InteractionsChapter extends Component {
 
     <template>
         <p>
-            The grid never mutates your data. Clicks, Delete, the trailing "add row" row — every
-            one of them is a
+            The grid never mutates your data. Clicks, Delete, the trailing "add row" row — every one of them is a
             <strong>notification</strong>. You write to a
             <code>@tracked</code>
             field or replace the array; the canvas follows because
@@ -55,8 +54,8 @@ export default class InteractionsChapter extends Component {
         </ul>
         <p>
             <code>@rowMarkers="both"</code>
-            is the checkbox + number column. It is a native grid feature: tri-state select-all,
-            shift-to-extend, drag-to-extend. Pair it with
+            is the checkbox + number column. It is a native grid feature: tri-state select-all, shift-to-extend,
+            drag-to-extend. Pair it with
             <code>@rowSelect="multi"</code>
             and
             <code>@columnSelect="multi"</code>.
@@ -67,8 +66,8 @@ export default class InteractionsChapter extends Component {
             the selection and the callback is a notification. Pass
             <code>@selection</code>
             as well and it flips: every gesture reports a
-            <em>request</em>, and nothing moves until you write a new value back. That is how you
-            refuse a selection, snap it to whole rows, or keep it in step with a sidebar.
+            <em>request</em>, and nothing moves until you write a new value back. That is how you refuse a selection,
+            snap it to whole rows, or keep it in step with a sidebar.
         </p>
 
         <h2>Click a checkbox (or edit a cell)</h2>
@@ -77,8 +76,7 @@ export default class InteractionsChapter extends Component {
             <code>onCellsEdited</code>
             — with
             <code>recordsSource</code>, that is your
-            <code>onCellEdited(person, col, value)</code>. The grid only ever hands you a column
-            index; look up
+            <code>onCellEdited(person, col, value)</code>. The grid only ever hands you a column index; look up
             <code>COLUMNS[col].id</code>
             so a freeze or reorder does not retarget the write. Assign the tracked field:
         </p>
@@ -88,8 +86,7 @@ export default class InteractionsChapter extends Component {
             <em>not</em>
             an edit —
             <code>@onCellClicked</code>
-            — is for things like opening a URI. Don't put mutations there if the cell already
-            reports them through
+            — is for things like opening a URI. Don't put mutations there if the cell already reports them through
             <code>onCellsEdited</code>.
         </p>
 
@@ -97,8 +94,8 @@ export default class InteractionsChapter extends Component {
         <p>
             Replace the array.
             <code>push</code>
-            keeps the identity and the grid never sees the row — that is the single most common
-            "my new row doesn't show up".
+            keeps the identity and the grid never sees the row — that is the single most common "my new row doesn't show
+            up".
         </p>
         <pre class="gdg-cookbook__code"><code>{{this.addRow}}</code></pre>
         <p>

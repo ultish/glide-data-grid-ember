@@ -15,8 +15,8 @@ export default class SearchChapter extends Component {
 
     <template>
         <p>
-            Find-in-grid highlights matching cells and walks them. It does not hide rows — that is
-            the previous chapter. Two shapes, both driving the same engine.
+            Find-in-grid highlights matching cells and walks them. It does not hide rows — that is the previous chapter.
+            Two shapes, both driving the same engine.
         </p>
 
         <CookbookSection
@@ -27,11 +27,7 @@ export default class SearchChapter extends Component {
             <AddonSearchGrid />
         </CookbookSection>
 
-        <CookbookSection
-            @title="Your own input, anywhere"
-            @blurb={{this.externalBlurb}}
-            @code={{this.externalRecipe}}
-        >
+        <CookbookSection @title="Your own input, anywhere" @blurb={{this.externalBlurb}} @code={{this.externalRecipe}}>
             <ExternalSearchGrid />
         </CookbookSection>
 

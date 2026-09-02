@@ -73,13 +73,13 @@ export default class StreamingChapter extends Component {
         <p>
             A genuine firehose: thousands of cells a second, a non-tracked buffer, and
             <code>updateCells()</code>
-            naming exactly the cells that changed. The grid does a damage-based partial repaint
-            instead of a full redraw. Autotracking is the wrong tool here.
+            naming exactly the cells that changed. The grid does a damage-based partial repaint instead of a full
+            redraw. Autotracking is the wrong tool here.
         </p>
 
         <p>
-            What is running includes measurements (cells/sec, frame time). What you copy is the
-            pattern: mutate a plain buffer, tell the grid which cells changed.
+            What is running includes measurements (cells/sec, frame time). What you copy is the pattern: mutate a plain
+            buffer, tell the grid which cells changed.
         </p>
 
         <CookbookSection
