@@ -6,7 +6,10 @@ A fast, canvas-rendered data grid for Ember — an Ember v2 addon port of
 It stays smooth at hundreds of thousands of rows because it never renders cells as DOM: it paints
 only what's on screen, to a canvas, and asks you for those cells one at a time.
 
-**[▶ Live demos and the full cookbook](https://ultish.github.io/glide-data-grid-ember/)** — every option, switched on, in a real grid.
+**[▶ Live demos](https://ultish.github.io/glide-data-grid-ember/)** ·
+**[Cookbook](https://ultish.github.io/glide-data-grid-ember/cookbook)**
+— every option, switched on, in a real grid. The cookbook is the guide: basics to advanced, each
+chapter a live example plus the complete file that produced it.
 
 ## What you get
 

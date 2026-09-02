@@ -6181,3 +6181,43 @@ directory walk-up, and neither file belongs to `test-app/tsconfig.json`'s `inclu
 existing `app/components/demo-grid.gts` exclusion just above it in that file (a parser limitation,
 there; a deliberate project boundary, here) — both documented inline rather than silently left to be
 rediscovered.
+
+## Test-app URL routing (2026-09-02)
+
+The demo pages used to be `@tracked tab` inside `demo-switcher.gts`, so the address bar stayed on
+`/` no matter which page you were looking at. They are now Ember routes, same shape as
+`floating-ember/demo-app`: `LinkTo` in the shared chrome, `{{outlet}}` for the page.
+
+| path | page |
+|---|---|
+| `/` | `<GlideDemo>` (landing) |
+| `/full-grid` | `<DemoGrid>` |
+| `/tracking` | `<TrackingDemo>` |
+| `/streaming` | `<StreamingDemo>` |
+| `/composed` | `<ComposedDemo>` |
+| `/async` | `<AsyncDemo>` |
+| `/apollo` | `<ApolloDemo>` |
+| `/daisy` | `<DaisyDemo>` |
+| `/shadow` | `<ShadowDomDemo>` |
+| `/guide` | `<GuidePage>` |
+| `/cookbook` | `<CookbookPage>` |
+
+Unknown paths (`/*path`) `replaceWith` index. GitHub Pages already copies `index.html` → `404.html`
+for history location.
+
+## Cookbook rewrite (2026-09-02)
+
+The Guide/Cookbook split is gone. There is one document, routed per chapter:
+
+- `/` Glide demo, `/full-grid` kitchen sink, `/cookbook` TOC, `/cookbook/:chapter` one chapter
+- Each chapter is a `.gts` component: live example + the complete file that produced it (`CookbookSection`)
+- Old demo-tab URLs (`/daisy`, `/async`, `/guide`, …) `replaceWith` the matching chapter
+- Nav is three links. Tracking, streaming, async, Apollo, DaisyUI live inside the book
+
+Shipped in the first cut: install, pull model, reactivity, `recordsSource`, columns, **filter from
+outside**, find (addon bar and external input), async, streaming, glimmer-apollo (fake live + real
+recipe), DaisyUI, performance. Remaining planned chapters (editing, Ember Data, selection, sort,
+menus, composed, theme reference, custom cells, shadow, gotchas) still to lift — same format.
+
+The old `app/utils/cookbook/*.ts` data-block tree and `app/utils/guide/*.ts` are still on disk until
+those remaining chapters consume them; `docs-page.gts` is unused.

@@ -17,6 +17,7 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { htmlSafe } from "@ember/template";
+import { modifier } from "ember-modifier";
 import GlideDataGrid from "glide-data-grid-ember/components/glide-data-grid";
 import { GridCellKind, type GridCell, type GridColumn, type Item } from "glide-data-grid-ember/rendering/index";
 import type { Block, Section } from "../utils/cookbook/types.ts";
@@ -74,6 +75,36 @@ interface RenderBlock {
     readonly head: readonly string[];
     readonly htmlRows: readonly (readonly ReturnType<typeof htmlSafe>[])[];
 }
+
+// Ember paints after the browser has already tried (and failed) to honour the URL hash — the
+// target `<section id>` did not exist yet. Scroll once the chapters are in the DOM, and again
+// after the live example grid in chapter 1 sizes itself (that first layout shift would otherwise
+// push the target back down). Native in-page `#id` clicks keep working on their own; this is
+// only for a cold load of `/cookbook#columns` or `/guide#reactivity`.
+const scrollToHash = modifier((element: Element) => {
+    const raw = globalThis.location.hash;
+    if (raw.length < 2) return;
+    const id = decodeURIComponent(raw.slice(1));
+
+    let cancelled = false;
+    const timers: ReturnType<typeof globalThis.setTimeout>[] = [];
+
+    const scroll = (): void => {
+        if (cancelled) return;
+        const target = document.getElementById(id);
+        if (target === null || !element.contains(target)) return;
+        target.scrollIntoView({ block: "start" });
+    };
+
+    for (const delay of [0, 50, 200]) {
+        timers.push(globalThis.setTimeout(scroll, delay));
+    }
+
+    return () => {
+        cancelled = true;
+        for (const timer of timers) globalThis.clearTimeout(timer);
+    };
+});
 
 function toRenderBlock(block: Block): RenderBlock {
     return {
@@ -153,7 +184,7 @@ export default class DocsPage extends Component<DocsPageSignature> {
     };
 
     <template>
-        <div class="gdg-cookbook" data-test-docs-page={{@testId}}>
+        <div class="gdg-cookbook" data-test-docs-page={{@testId}} {{scrollToHash}}>
             <nav class="gdg-cookbook__toc">
                 <div class="gdg-cookbook__toc-title">{{@tocTitle}}</div>
                 {{#each this.sections as |chapter|}}

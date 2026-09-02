@@ -7,7 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-08-22
+## [0.6.0] - 2026-09-02
 
 ### Changed
 
@@ -16,6 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   they reported the grid's internal index, so with `@rowMarkers` on a handler that indexed
   `columns[col]` acted on the neighbouring column. Callers that already subtracted `1` themselves
   must stop.
+
+### Docs
+
+- The test-app cookbook is now the consumer guide: routed chapters (`/cookbook/:chapter`), each a
+  live example plus the complete `.gts` file that produced it. Demo tabs (tracking, streaming,
+  async, Apollo, DaisyUI) fold into those chapters. The old Guide tab is gone.
 
 ## [0.5.1] - 2026-08-15
 

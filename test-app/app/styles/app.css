@@ -267,7 +267,7 @@
 
 .gdg-cookbook__toc {
     display: flex;
-    flex: 0 0 208px;
+    flex: 0 0 240px;
     flex-direction: column;
     gap: 2px;
     padding-right: 16px;
@@ -295,6 +295,24 @@
     background: #f1f2f6;
 }
 
+.gdg-cookbook__toc a.gdg-cookbook__toc-active {
+    background: #f1f2f6;
+    font-weight: 600;
+}
+
+.gdg-cookbook__toc-part {
+    padding: 12px 6px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #97979d;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.gdg-cookbook__toc-part:first-child {
+    padding-top: 0;
+}
+
 .gdg-cookbook__toc-note {
     padding: 10px 6px 0;
     margin-top: 10px;
@@ -307,10 +325,25 @@
 .gdg-cookbook__body {
     flex: 1 1 auto;
     min-width: 0;
-    max-width: 860px;
-    padding-right: 24px;
+    padding-right: 8px;
     padding-bottom: 64px;
     overflow-y: auto;
+}
+
+.gdg-cookbook__body > h2 {
+    margin: 28px 0 8px;
+    font-size: 17px;
+    font-weight: 650;
+}
+
+.gdg-cookbook__body > p,
+.gdg-cookbook__body > ul {
+    margin: 0 0 12px;
+}
+
+.gdg-cookbook__body > ul {
+    padding-left: 22px;
+    list-style: disc outside;
 }
 
 .gdg-cookbook__intro h1 {
@@ -320,8 +353,17 @@
 }
 
 .gdg-cookbook__intro p {
-    margin: 0;
+    margin: 0 0 14px;
     color: #63636b;
+}
+
+.gdg-cookbook__intro .gdg-cookbook__note {
+    margin-top: 4px;
+}
+
+.gdg-cookbook__note a {
+    color: inherit;
+    font-weight: 650;
 }
 
 .gdg-cookbook__section {
@@ -417,6 +459,127 @@
 .gdg-cookbook__caption {
     font-size: 12px;
     color: #97979d;
+}
+
+.gdg-cookbook__section-head h2 {
+    margin: 0 0 6px;
+}
+
+.gdg-cookbook__blurb {
+    margin: 0 0 14px;
+    color: #63636b;
+}
+
+.gdg-cookbook__live-wrap {
+    margin: 0 0 14px;
+    overflow: hidden;
+    border: 1px solid #e1e2e5;
+    border-radius: 7px;
+}
+
+.gdg-cookbook__live-label {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #97979d;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #f7f7fa;
+    border-bottom: 1px solid #ececf0;
+}
+
+.gdg-cookbook__live-body {
+    min-height: 220px;
+    padding: 14px 16px 16px;
+}
+
+.gdg-cookbook__live-body > .gdg-cookbook__live {
+    height: 220px;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+}
+
+.gdg-cookbook__recipe {
+    margin: 0 0 14px;
+    background: #f7f7fa;
+    border: 1px solid #e8e8ee;
+    border-radius: 7px;
+}
+
+.gdg-cookbook__recipe summary {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.gdg-cookbook__recipe summary::-webkit-details-marker {
+    display: none;
+}
+
+.gdg-cookbook__recipe-hint {
+    font-size: 11px;
+    font-weight: 400;
+    color: #97979d;
+}
+
+.gdg-cookbook__recipe .gdg-cookbook__code {
+    margin: 0;
+    border: 0;
+    border-top: 1px solid #e8e8ee;
+    border-radius: 0 0 7px 7px;
+}
+
+.gdg-cookbook__index-part {
+    margin: 28px 0 0;
+}
+
+.gdg-cookbook__index-part h2 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 650;
+    color: #97979d;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.gdg-cookbook__index-part a {
+    display: block;
+    padding: 8px 0;
+    color: inherit;
+    text-decoration: none;
+    border-bottom: 1px solid #ececf0;
+}
+
+.gdg-cookbook__index-part a:hover {
+    color: #4f5dff;
+}
+
+.gdg-cookbook__index-part strong {
+    display: block;
+    font-size: 15px;
+}
+
+.gdg-cookbook__index-part span {
+    display: block;
+    font-size: 13px;
+    color: #63636b;
+}
+
+.gdg-cookbook__controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    font: 13px system-ui, sans-serif;
+    border-bottom: 1px solid #ececf0;
 }
 
 /* 4.3: the `<:rightElement>` panel. Deliberately plain — the point of the demo is *where* the block

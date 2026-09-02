@@ -18,9 +18,8 @@ directly**; every item below cites file:line in it.
 **Layout.** `glide-data-grid-ember/` is the addon; `test-app/` is the Vite/Embroider demo app, which
 is also what deploys to GitHub Pages. pnpm workspace.
 
-**State as of 2026-08-22:** everything is on **`main`**. 957 vitest tests pass. Phases 0–11 are done;
-what is left is the backlog below. **§4b.7 is unreleased** — addon `package.json` is `0.6.0`; tag
-`v0.6.0` to publish (see §5.3). **v0.5.1 is what is on npm.**
+**State as of 2026-09-02:** everything is on **`main`**. 957 vitest tests pass. Phases 0–11 are done;
+what is left is the backlog below. Addon `package.json` is `0.6.0` (see §5.3).
 
 **The `experimental` bag is now fully closed, and so is row grouping (§4.1, 2026-08-13).** The only
 substantial parity item left is **span/merged-cell selection (§4.6)**, which is blocked on span
@@ -748,8 +747,8 @@ default settings, unnoticed until 4b.5 forced the space to be pinned down.
 
 **Fix (landed):** subtract `args.rowMarkerOffset` at the single fire site in `onMouseUp`; delete
 `<DemoGrid>`'s `headerGlyphColumnIndex` and its four call sites; drop `<GlideDemo>`'s manual
-`ROW_MARKER_OFFSET` subtraction. **Breaking published API** — `0.6.0` in `package.json`, CHANGELOG
-entry written; tag `v0.6.0` to publish. Callers that already subtracted `1` themselves must stop.
+`ROW_MARKER_OFFSET` subtraction. **Breaking published API** — shipped in `0.6.0`. Callers that
+already subtracted `1` themselves must stop.
 
 **The lesson, and why the brands did not catch it:** `-private/selection-space.ts` brands
 `GridSelection`, not a scalar `col: number`. A sweep that converted every *selection* still missed
@@ -802,10 +801,10 @@ violations.)
 - Edit-on-type keeps the full typed value in the Notes column instead of stopping after the first
   character.
 
-### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.5.1 — latest 2026-08-15)
+### 5.3 npm publish — DONE (0.1.7, 0.2.0, 0.2.1, 0.3.0, 0.4.0, 0.5.0, 0.5.1, 0.6.0 — latest 2026-09-02)
 
-- Current **published** version is `0.5.1`, tagged `v0.5.1`. Addon `package.json` is `0.6.0` for
-  the unreleased §4b.7 breaking change; tag `v0.6.0` to publish it.
+- Current **published** version is `0.6.0`, tagged `v0.6.0`. Includes the §4b.7 breaking change to
+  header-glyph callback coordinates.
 - One-time npm Trusted Publisher setup on npmjs.com: org `ultish`, repo `glide-data-grid-ember`,
   workflow filename `release.yml`. **Full checklist is in that file's header comment.**
 - Publishing uses OIDC — no `NPM_TOKEN`, no OTP in CI.
@@ -818,20 +817,13 @@ violations.)
 ## 6. Docs to keep in sync
 
 There is **exactly one** consumer guide, and it is not a markdown file. `DATA.md` and `THEMING.md`
-were deleted on 2026-08-09; their content lives in the test-app as two tabs:
+were deleted on 2026-08-09. As of 2026-09-02 the Guide/Cookbook split is gone: the **Cookbook** is
+the guide (`test-app/app/components/cookbook/chapters/`, ordered by `app/utils/cookbook/chapters.ts`).
+Each chapter is a `.gts` component: a live example plus the complete source that produced it
+(`CookbookSection`). Routes are `/cookbook` and `/cookbook/:chapter`. Nav is Glide demo, Full grid,
+Cookbook.
 
-- **Guide** (`test-app/app/utils/guide/`) — narrative, read in order, one running example.
-- **Cookbook** (`test-app/app/utils/cookbook/`) — task-indexed recipes, jumped into.
-
-Both are **one chapter per file**, ordered by that directory's `index.ts`, rendered by
-`test-app/app/components/docs-page.gts`. Chapter titles carry **no leading number** — the page numbers
-them from position, so inserting a chapter is a one-line edit to `index.ts`.
-
-Content is **plain data** (`Section`/`Block` in `cookbook/types.ts`), not markup, because code samples
-containing `{{ }}` would otherwise be parsed as Glimmer.
-
-**Rules:** exactly one copy of everything — the cookbook links *into* the guide rather than restating
-it. Every code sample uses **class-field arrows, never `@action`** (Ember 6+, and an arrow field is
+Every code sample uses **class-field arrows, never `@action`** (Ember 6+, and an arrow field is
 also identity-stable, which is what rule 1 wants). The workspace-root `README.md` **and
 `CHANGELOG.md`** are the files to edit; the addon's copies of *both* are build artifacts —
 `rollup.config.mjs:74-78` copies them in, and neither addon copy is tracked by git. Editing

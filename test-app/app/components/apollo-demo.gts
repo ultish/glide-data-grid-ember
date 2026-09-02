@@ -285,8 +285,8 @@ export default class ApolloDemo extends Component {
     }
 
     <template>
-        <div style="height: 100%; overflow: auto; font: 13px/1.5 system-ui;">
-            <section style="display: flex; flex-direction: column; gap: 10px; padding: 2px 2px 20px;">
+        <div style="font: 13px/1.5 system-ui;">
+            <section style="display: flex; flex-direction: column; gap: 12px;">
                 <h3 style="margin: 0; font: 600 15px system-ui;">
                     Apollo (faked) — what a one-field subscription update actually costs
                 </h3>

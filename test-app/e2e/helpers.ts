@@ -6,11 +6,19 @@ import type { Locator, Page } from "@playwright/test";
  *  Linux runner without hardcoding either. */
 export const PRIMARY = process.platform === "darwin" ? "Meta" : "Control";
 
-/** Switches to a demo tab (by its `data-test-show-*` selector) and waits for its grid's canvas to
- *  have real size. A freshly-navigated/backgrounded tab can report a 0x0 canvas for a beat -- see
- *  CLAUDE.md's occlusion-trap note -- so this waits on the canvas gaining size rather than a fixed
- *  timeout. Playwright's CSS locators pierce open shadow roots by default, so this also works
- *  unchanged for the Shadow DOM tab. */
+/** Navigates to a path and waits for its grid's canvas to have real size. A freshly-navigated
+ *  page can report a 0x0 canvas for a beat -- see CLAUDE.md's occlusion-trap note -- so this waits
+ *  on the canvas gaining size rather than a fixed timeout. Playwright's CSS locators pierce open
+ *  shadow roots by default. */
+export async function openPath(page: Page, path: string): Promise<Locator> {
+    await page.goto(path);
+    const canvas = page.locator(".dvn-underlay canvas").first();
+    await canvas.waitFor({ state: "visible" });
+    await expectNonZeroSize(canvas);
+    return canvas;
+}
+
+/** Switches to a demo tab (by its `data-test-show-*` selector) and waits for its grid's canvas. */
 export async function openDemoTab(page: Page, tabSelector: string): Promise<Locator> {
     await page.goto("/");
     await page.click(tabSelector);

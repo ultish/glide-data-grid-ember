@@ -1,45 +1,41 @@
-// The **Cookbook** tab: task-indexed recipes, each one standing alone.
-//
-// It lives in the test-app on purpose: this app is what gets deployed, so the cookbook ships with
-// the demos it describes, and the "one-line render" recipe at the top is an actual live grid rather
-// than a screenshot of one.
-//
-// Phase 11 gave it a sibling. The **Guide** tab (`app/components/guide-page.gts`) is the *narrative*
-// document — zero to a working integration, in order, one running example. This one is the *index*:
-// you arrive knowing what you want and jump to it. The rule between them, and the whole reason the
-// split happened, is **exactly one copy of everything**: where a recipe here needs the mechanism
-// explained, it links into the guide rather than restating it.
-//
-// The chapters live one-per-file in `app/utils/cookbook/`, ordered by that directory's `index.ts`.
-// Rendering is `<DocsPage>`, shared with the guide.
 import Component from "@glimmer/component";
-import DocsPage from "test-app/components/docs-page";
-import { SECTIONS } from "../utils/cookbook/index.ts";
+import { LinkTo } from "@ember/routing";
+import { chaptersByPart } from "test-app/utils/cookbook/chapters.ts";
 
-const TITLE = "Recipes for `<GlideDataGrid>`";
+export interface CookbookPageSignature {
+    Blocks: { default: [] };
+}
 
-const LEDE =
-    "Task-indexed and copy-pasteable: find the thing you want to do, take the recipe, move on. " +
-    "They are lifted from the demos in the other tabs — so if a recipe here stops working, a demo " +
-    "stops working. If you are starting from nothing, read the **Guide** tab first instead; it is " +
-    "the same material in narrative order, and these recipes assume it.";
-
-const TOC_NOTE =
-    "Reading order lives in the **Guide** tab — the pull model, the reactivity rules, wiring real " +
-    "data, and the identity rules that have no error message. This tab does not restate any of it; " +
-    "it links there. Every other tab above is a working demo of something described in one of the two.";
-
-export default class CookbookPage extends Component {
-    readonly sections = SECTIONS;
+export default class CookbookPage extends Component<CookbookPageSignature> {
+    readonly parts = chaptersByPart();
 
     <template>
-        <DocsPage
-            @title={{TITLE}}
-            @lede={{LEDE}}
-            @tocTitle="Cookbook"
-            @tocNote={{TOC_NOTE}}
-            @sections={{this.sections}}
-            @testId="cookbook"
-        />
+        <div class="gdg-cookbook" data-test-docs-page="cookbook">
+            <nav class="gdg-cookbook__toc">
+                <LinkTo @route="cookbook.index" class="gdg-cookbook__toc-title" @activeClass="gdg-cookbook__toc-active">
+                    Cookbook
+                </LinkTo>
+                {{#each this.parts as |part|}}
+                    <div class="gdg-cookbook__toc-part">{{part.title}}</div>
+                    {{#each part.chapters as |chapter|}}
+                        <LinkTo
+                            @route="cookbook.chapter"
+                            @model={{chapter.id}}
+                            @activeClass="gdg-cookbook__toc-active"
+                        >
+                            {{chapter.title}}
+                        </LinkTo>
+                    {{/each}}
+                {{/each}}
+                <div class="gdg-cookbook__toc-note">
+                    If the grid renders and then never updates, that is
+                    <LinkTo @route="cookbook.chapter" @model="reactivity">Why your grid doesn't update</LinkTo>
+                    — it fails silently. Ember 6 and 7. Every live example is the file under it.
+                </div>
+            </nav>
+            <article class="gdg-cookbook__body">
+                {{yield}}
+            </article>
+        </div>
     </template>
 }
