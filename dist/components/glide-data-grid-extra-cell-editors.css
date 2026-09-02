@@ -1,0 +1,322 @@
+/*
+ * Overlay-editor chrome for the `packages/cells` extra cell types.
+ *
+ * Companion to `glide-data-grid.css` (grid structure) and `glide-data-grid-editors.css` (the shared
+ * editor primitives + the core `packages/core` editors). This file covers exactly the seven extra
+ * cells whose editors build their own DOM: article, date-picker, dropdown, links, multi-select,
+ * range and tags.
+ *
+ * WHY A STYLESHEET RATHER THAN INLINE STYLES. Identical reasoning to `glide-data-grid.css`'s header:
+ * these editors used to be styled with `Object.assign(el.style, {...})`, which sits at the top of the
+ * cascade and so cannot be restyled by a consuming app without `!important`. Source styles all seven
+ * with `@linaria/react`, i.e. with real CSS; this port does not use Linaria (see PORTING-NOTES.md --
+ * settled, do not re-argue), so the same rules ship as a plain file.
+ *
+ * WHY EVERYTHING IS SCOPED UNDER `.gdg-root`. Same trade-off as the structural sheet: scoping keeps
+ * these rules specific enough to beat a loose global rule in the consuming app, while remaining
+ * beatable by a deliberate, equally-specific consumer rule. The overlay-editor container is appended
+ * to the grid root (`GridHostController.openOverlay` -> `this.root.appendChild(container)`), so every
+ * editor really is a descendant of `.gdg-root`.
+ *
+ * WHY THE THEME IS READ VIA `--gdg-*` VARIABLES. `openOverlay` stamps `makeCSSStyle(theme)` onto the
+ * overlay container (source's second application site, `data-grid-overlay-editor.tsx:237`), so the
+ * *fully-merged per-cell* theme is already available to CSS on the editor's own ancestor. Every
+ * `color: p.theme.textDark` that used to be set from JS is therefore just `var(--gdg-text-dark)`
+ * here, and the theme override chain keeps working unchanged. Source's own Linaria blocks read the
+ * exact same variables. `--gdg-rounding-radius` is the one variable that is only stamped when the
+ * theme actually defines `roundingRadius`, so it is always used with a fallback -- again as source
+ * does (`var(--gdg-rounding-radius, 9px)`).
+ *
+ * CLASS NAMES. Where source has a stable literal class name it is reused verbatim
+ * (`gdg-title-input`, `gdg-link-input`, `gdg-multi-select`, `gdg-pill`/`gdg-selected`/
+ * `gdg-unselected`/`gdg-readonly`, `gdg-save-button`, `gdg-close-button`). Where source only had an
+ * anonymous Linaria wrapper, a `gdg-<cell>-<part>` name is invented. Two of source's names were
+ * deliberately NOT reused because they are only safe when nested inside a scoped wrapper and this is
+ * a flat stylesheet: source's `.gdg-footer` (article) is `gdg-article-footer` here, and source's
+ * `.gdg-input` (the tags checkbox) is matched by element selector instead -- `gdg-input` is already
+ * taken in this port by `GrowingEntry`'s textarea.
+ *
+ * SHARED PRIMITIVES. `.gdg-editor-input` and `.gdg-editor-button` are defined once in
+ * `glide-data-grid-editors.css` and only *overridden* here. Overrides always use the compound form
+ * (`.gdg-root .gdg-editor-button.gdg-save-button`) so they win on specificity rather than on
+ * stylesheet order -- the two files' load order is not something this file should depend on.
+ *
+ * Imported by `glide-data-grid.gts`, so any bundler pulls it in automatically;
+ * `rollup.config.mjs`'s `addon.keepAssets(['**\/*.css'])` preserves that through the addon build.
+ */
+
+/* ---------------------------------------------------------------------------------------------
+ * article-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* The editor's outer box. `min-height` is this port's substitute for source's fixed-position
+   ~75vw x 75vh surface: the overlay host caps every editor at `max-width: 400px` regardless of what
+   a renderer passes in `styleOverride`, so this stays a normal-size box that is still comfortable
+   for a paragraph or two, with the host's `overflow: auto` handling longer content. The `+ 8px`
+   padding on top of the theme's cell padding is this port's own (`disablePadding: true` means the
+   overlay container contributes none). */
+.gdg-root .gdg-article-editor {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 260px;
+    padding: calc(var(--gdg-cell-vertical-padding) + 8px) calc(var(--gdg-cell-horizontal-padding) + 8px);
+    box-sizing: border-box;
+    color: var(--gdg-text-dark);
+}
+
+/* The `GrowingEntry` body fills whatever the box has left over. */
+.gdg-root .gdg-article-body {
+    flex-grow: 1;
+    min-height: 200px;
+}
+
+/* Source's `.gdg-footer` (`article-cell-editor.tsx`), renamed because this sheet is flat. */
+.gdg-root .gdg-article-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 12px;
+}
+
+/* Source's `.gdg-footer button` block. Both buttons are `gdg-editor-button` first, so only the
+   properties that genuinely differ from the shared primitive live here. */
+.gdg-root .gdg-editor-button.gdg-save-button,
+.gdg-root .gdg-editor-button.gdg-close-button {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: var(--gdg-rounding-radius, 9px);
+}
+
+.gdg-root .gdg-editor-button.gdg-save-button {
+    background-color: var(--gdg-accent-color);
+    color: var(--gdg-accent-fg);
+}
+
+.gdg-root .gdg-editor-button.gdg-close-button {
+    background-color: var(--gdg-bg-header);
+    color: var(--gdg-text-medium);
+    margin-right: 8px;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * date-picker-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* Port of source's `StyledInputBox` (`date-picker-cell.tsx`). The native date/time input is
+   chrome-less on purpose -- the overlay container already draws the box and the accent border, so
+   the input only contributes the text. Source additionally paints
+   `::-webkit-calendar-picker-indicator` white; this port never had that rule and it is not added
+   here, since this change is a pure refactor. */
+.gdg-root .gdg-date-picker-input {
+    min-height: 26px;
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: var(--gdg-editor-font-size);
+    font-family: var(--gdg-font-family);
+    color: var(--gdg-text-dark);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * dropdown-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* Port of source's `Wrap`. Source's editor is `react-select`; this port uses a native `<select>`
+   (see the file header in `dropdown-cell.ts` for why), but the wrapper is the same flex column. */
+.gdg-root .gdg-dropdown-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+}
+
+/* `gdg-dropdown-select` is this port's name for the native control that stands in for source's
+   `.glide-select`. `height: 100%` + the theme's horizontal cell padding make it fill the overlay
+   box exactly, since this cell sets `disablePadding: true`. */
+.gdg-root .gdg-dropdown-select {
+    width: 100%;
+    border: 0;
+    outline: none;
+    background-color: var(--gdg-bg-cell);
+    color: var(--gdg-text-dark);
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+    padding: 0 var(--gdg-cell-horizontal-padding);
+    height: 100%;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * links-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* Port of source's `LinksCellEditorStyle` wrapper: one row per link, stacked. */
+.gdg-root .gdg-links-editor {
+    display: flex;
+    flex-direction: column;
+    margin: 4px 0;
+    gap: 4px;
+}
+
+/* One link's title + URL inputs (source's `.gdg-link-title-editor`, renamed for the flat sheet).
+   `min-width` keeps the pair usable inside the overlay's 400px cap. */
+.gdg-root .gdg-links-row {
+    display: flex;
+    min-width: 250px;
+    gap: 4px;
+}
+
+/*
+ * `gdg-title-input` and `gdg-link-input` (both source names) deliberately have NO rules of their
+ * own: every property they used to set inline is exactly the shared `.gdg-editor-input` primitive
+ * in `glide-data-grid-editors.css`. The class names are still applied in `links-cell.ts` because
+ * they are source's public hooks for targeting one input or the other from consumer CSS.
+ */
+
+/* The per-row "remove this link" button. Everything but the colour comes from the shared
+   `.gdg-editor-button`. */
+.gdg-root .gdg-links-delete-button {
+    color: var(--gdg-text-medium);
+}
+
+/* The "Add link" button. Disabled state (cursor + opacity) is the shared primitive's `:disabled`
+   rule -- `links-cell.ts` only sets the `disabled` property now, which is behaviour, not style. */
+.gdg-root .gdg-links-add-button {
+    align-self: flex-end;
+    color: var(--gdg-accent-color);
+    font-weight: 600;
+    padding: 6px 8px;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * multi-select-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* Port of source's `Wrap`. */
+.gdg-root .gdg-multi-select-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 4px;
+}
+
+/* `gdg-multi-select` is source's own class name for the control. Source puts it on a `react-select`
+   instance and only sets the font there; this port's native `<select multiple>` also needs the box
+   itself, which source got from `PortalWrap > div` (same border/radius values). */
+.gdg-root .gdg-multi-select {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid var(--gdg-border-color);
+    border-radius: 4px;
+    outline: none;
+    background-color: var(--gdg-bg-cell);
+    color: var(--gdg-text-dark);
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+}
+
+/* The `allowCreation` affordance (a text input + "Add"), this port's stand-in for
+   `react-select/creatable`. Source has no equivalent DOM, so these three names are invented. */
+.gdg-root .gdg-multi-select-add-row {
+    display: flex;
+    gap: 4px;
+}
+
+/* Tighter than the shared `.gdg-editor-input` padding, because this input sits in a secondary row
+   under the main control rather than being the primary editing surface. */
+.gdg-root .gdg-editor-input.gdg-multi-select-add-input {
+    padding: 4px 6px;
+}
+
+.gdg-root .gdg-editor-button.gdg-multi-select-add-button {
+    padding: 4px 8px;
+    color: var(--gdg-accent-color);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * range-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* A `<label>` wrapping the native `<input type="range">` and its live value readout, so clicking
+   the number also focuses the slider. */
+.gdg-root .gdg-range-editor {
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+    gap: 8px;
+    width: 100%;
+    padding: 0 8px;
+}
+
+.gdg-root .gdg-range-input {
+    flex-grow: 1;
+}
+
+/* `min-width: 3ch` reserves room for the widest common readout so the slider does not visibly
+   resize as the number's digit count changes while dragging. */
+.gdg-root .gdg-range-value {
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+    color: var(--gdg-text-dark);
+    min-width: 3ch;
+    text-align: right;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * tags-cell
+ * ------------------------------------------------------------------------------------------ */
+
+/* Port of source's `EditorWrap`. This is the one extra-cell editor source itself wrote as plain
+   DOM (no `react-select`), so the rules below map onto source's almost one-for-one. */
+.gdg-root .gdg-tags-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding-top: 6px;
+    box-sizing: border-box;
+    color: var(--gdg-text-dark);
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+}
+
+/* One checkbox + pill per possible tag. */
+.gdg-root .gdg-tags-editor label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.gdg-root .gdg-tags-editor input {
+    cursor: pointer;
+}
+
+/* Source's `.gdg-readonly` marker on the wrapper: in a readonly cell the checkboxes are not
+   rendered at all, so the only thing left to signal is that the rows are not clickable. */
+.gdg-root .gdg-tags-editor.gdg-readonly label {
+    cursor: default;
+}
+
+/* Source's `.gdg-pill`, including its exact `var(--gdg-rounding-radius, <bubbleHeight>/2)` fallback
+   -- expressed here as a `calc()` over `--gdg-bubble-height` because that is what the theme's
+   `bubbleHeight` is stamped as. `background-color` is the *unselected* colour only: a selected
+   pill's colour comes from the cell's own `possibleTags[].color` data, so it stays an inline style
+   set in `tags-cell.ts` (there is no theme variable that could carry it). */
+.gdg-root .gdg-tags-editor .gdg-pill {
+    margin-left: 8px;
+    margin-right: 6px;
+    margin-bottom: 6px;
+    border-radius: var(--gdg-rounding-radius, calc(var(--gdg-bubble-height) / 2));
+    min-height: var(--gdg-bubble-height);
+    padding: 2px var(--gdg-bubble-padding);
+    display: flex;
+    align-items: center;
+    font: 12px var(--gdg-font-family);
+    background-color: var(--gdg-bg-bubble);
+}
+
+/* Source dims the unselected pills the same way. */
+.gdg-root .gdg-tags-editor .gdg-pill.gdg-unselected {
+    opacity: 0.8;
+}

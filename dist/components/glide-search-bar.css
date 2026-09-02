@@ -1,0 +1,130 @@
+/*
+ * Stylesheet for the opt-in `<GlideSearchBar>` (Phase 9e).
+ *
+ * Direct port of source's `internal/data-grid-search/data-grid-search-style.tsx`, whose
+ * `SearchWrapper` is a `@linaria/react` block containing exactly these rules -- including the
+ * slide-in/out keyframes and the `gdg-search-bar` / `gdg-search-bar-inner` / `gdg-search-status` /
+ * `gdg-search-progress` class names, which are source's own literals and are kept verbatim.
+ *
+ * Conventions are the ones settled in 9q (see `glide-data-grid-editors.css`'s header): every
+ * selector is scoped under `.gdg-root`, and every theme value is read as a `--gdg-*` custom
+ * property rather than being written from JS. Source's block already reads the same variables, so
+ * this is a faithful port rather than an adaptation.
+ *
+ * ONE DIFFERENCE FROM THE EDITOR STYLESHEETS worth stating, because it is easy to get wrong later:
+ * the editor sheets rely on the *overlay container* carrying the merged per-cell theme. The search
+ * bar is not inside an overlay -- it is a child of the grid root, which carries the *grid's* theme
+ * (`applyThemeCssVariables` stamps both). So the same variable names resolve here, just from the
+ * grid-level theme, which is correct: a search bar has no cell to inherit from.
+ *
+ * Imported by `glide-search-bar.gts`, so a consumer who never uses the bar never ships this CSS.
+ */
+
+.gdg-root .gdg-search-bar {
+    position: absolute;
+    top: 4px;
+    right: 20px;
+    z-index: 10;
+
+    background-color: var(--gdg-bg-cell);
+    color: var(--gdg-text-dark);
+
+    padding: 8px;
+    border: 1px solid var(--gdg-border-color);
+    border-radius: 6px;
+
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+
+    animation: gdg-search-fadein 0.15s forwards;
+}
+
+/* Source toggles this class instead of unmounting, so the bar can animate out. */
+.gdg-root .gdg-search-bar.gdg-search-out {
+    animation: gdg-search-fadeout 0.15s forwards;
+}
+
+.gdg-root .gdg-search-bar .gdg-search-bar-inner {
+    display: flex;
+    align-items: center;
+}
+
+.gdg-root .gdg-search-bar .gdg-search-status {
+    padding-top: 4px;
+    font-size: 11px;
+    color: var(--gdg-text-medium);
+}
+
+/* The scan-progress bar, pinned to the bottom edge of the box. Its width is the one thing set from
+   JS, because it is a live percentage rather than a state. */
+.gdg-root .gdg-search-bar .gdg-search-progress {
+    position: absolute;
+    height: 4px;
+    left: 0;
+    bottom: 0;
+
+    background-color: var(--gdg-text-light);
+}
+
+.gdg-root .gdg-search-bar input {
+    width: 220px;
+    color: var(--gdg-text-dark);
+    background-color: var(--gdg-bg-cell);
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+    border: none;
+    border-width: 0;
+    outline: none;
+}
+
+.gdg-root .gdg-search-bar button {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+
+    border: none;
+    outline: none;
+    background: none;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    color: var(--gdg-text-medium);
+}
+
+.gdg-root .gdg-search-bar button:hover {
+    color: var(--gdg-text-dark);
+}
+
+/* `pointer-events: none` as well as the dimming, so a disabled next/prev cannot swallow a click
+   aimed at the grid behind it. Source's rule, kept. */
+.gdg-root .gdg-search-bar button:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+/* Every path in the three glyphs is `stroke="currentColor"`, so the button's `color` above drives
+   them -- the same arrangement as the editors' `.gdg-icon-button`. */
+.gdg-root .gdg-search-bar button .gdg-search-icon {
+    width: 16px;
+    height: 16px;
+}
+
+@keyframes gdg-search-fadein {
+    from {
+        transform: translateX(400px);
+    }
+    to {
+        transform: translateX(0);
+    }
+}
+
+@keyframes gdg-search-fadeout {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(400px);
+    }
+}

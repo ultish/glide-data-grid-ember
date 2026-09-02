@@ -1,0 +1,1 @@
+{"version":3,"file":"number-cell.d.ts","sourceRoot":"","sources":["../../../src/rendering/cells/number-cell.ts"],"names":[],"mappings":"AAWA,OAAO,EAAgB,KAAK,UAAU,EAAE,MAAM,uBAAuB,CAAC;AACtE,OAAO,KAAK,EAAE,oBAAoB,EAAE,MAAM,kBAAkB,CAAC;AAK7D,eAAO,MAAM,kBAAkB,EAAE,oBAAoB,CAAC,UAAU,CAmD/D,CAAC"}

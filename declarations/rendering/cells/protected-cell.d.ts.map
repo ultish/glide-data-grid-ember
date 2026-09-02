@@ -1,0 +1,1 @@
+{"version":3,"file":"protected-cell.d.ts","sourceRoot":"","sources":["../../../src/rendering/cells/protected-cell.ts"],"names":[],"mappings":"AAEA,OAAO,EAAgB,KAAK,aAAa,EAAE,MAAM,uBAAuB,CAAC;AACzE,OAAO,KAAK,EAAgB,oBAAoB,EAAE,MAAM,kBAAkB,CAAC;AAM3E,eAAO,MAAM,qBAAqB,EAAE,oBAAoB,CAAC,aAAa,CAQrE,CAAC"}

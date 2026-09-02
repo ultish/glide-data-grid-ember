@@ -1,0 +1,338 @@
+/*
+ * Overlay-editor stylesheet for <GlideDataGrid>.
+ *
+ * Companion to `glide-data-grid.css`, which carries the *structural* scroll scaffolding. The split
+ * is deliberate and mirrors source's own: `infinite-scroller.tsx`'s `ScrollRegionStyle` is
+ * load-bearing layout (the grid does not scroll without it), whereas everything here is editor
+ * chrome -- the surface a consuming app is actually meant to restyle. Keeping them in separate
+ * files makes "which rules are safe to override" answerable by looking at the file name.
+ *
+ * WHY THIS EXISTS. Every rule below used to be an inline `Object.assign(el.style, {...})` in the
+ * editor factories. Inline styles sit at the top of the cascade, so a consumer could not restyle
+ * any of it without `!important` -- which is to say the overlay editors were effectively
+ * un-themeable by Tailwind/DaisyUI or any ordinary stylesheet. Source ships CSS (via Linaria) for
+ * exactly this reason. See PORTING-NOTES.md's styling section for why this port uses a plain `.css`
+ * file rather than Linaria or `ember-scoped-css` -- both were evaluated and rejected; do not
+ * re-argue either.
+ *
+ * WHY THE THEME APPEARS AS `var(--gdg-*)` AND NOT AS JS VALUES. `GridHostController.openOverlay`
+ * stamps the *fully merged per-cell* theme onto the overlay container as `--gdg-*` custom
+ * properties (`makeCSSStyle` in `src/rendering/theme.ts` -- the authoritative name list). Every
+ * element below is a descendant of that container, so a theme colour is readable straight from CSS.
+ * That is what lets these rules live in a static stylesheet at all, and it is what source does too:
+ * its `growing-entry-style.tsx` and `data-grid-overlay-editor-style.tsx` are already written against
+ * `var(--gdg-font-family)` / `var(--gdg-text-dark)` / `var(--gdg-bg-cell)`.
+ *
+ * WHAT DELIBERATELY STAYS IN JS: per-instance values CSS cannot know -- the overlay's pixel
+ * position and size (computed from the cell rect), and colours that come from a *cell's own data*
+ * rather than the theme. Those are noted at their call sites.
+ *
+ * Scoping under `.gdg-root` follows `glide-data-grid.css`; see that file's header for the rationale.
+ */
+
+/* --- shared primitives -------------------------------------------------------------------------
+ * Used by editors in BOTH this file and `glide-data-grid-extra-cell-editors.css`. Defined here
+ * once; do not duplicate them there.
+ */
+
+/* Bordered single-line text input. Per-editor classes layer on top of this and override only what
+   differs, rather than restating the border/padding/font/colour block each time. */
+.gdg-root .gdg-editor-input {
+    flex-grow: 1;
+    min-width: 0;
+    border: 1px solid var(--gdg-border-color);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: var(--gdg-font-family);
+    font-size: var(--gdg-editor-font-size);
+    color: var(--gdg-text-dark);
+    background-color: var(--gdg-bg-cell);
+}
+
+/* Chromeless button (add / delete / close / save affordances). Colour and padding are left to the
+   per-editor class, since those are what actually distinguish these buttons from each other. */
+.gdg-root .gdg-editor-button {
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    font-family: var(--gdg-font-family);
+}
+
+/* Native `:disabled` rather than a JS-set style -- the disabled appearance is now a consequence of
+   the element's own state instead of something the factory has to remember to re-apply on rerender. */
+.gdg-root .gdg-editor-button:disabled {
+    cursor: default;
+    opacity: 0.4;
+}
+
+/* Zero-size, invisible, focusable textarea. The uri and markdown editors' preview modes append one
+   of these so the overlay host's `handle.focus()` has a real focus target -- without it the host's
+   container-level Escape/Enter/Tab `keydown` listener never sees a keystroke, because nothing in the
+   preview is focusable. Mirrors source's hidden `<textarea autoFocus />` in the same two editors. */
+.gdg-root .gdg-focus-decoy {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    opacity: 0;
+}
+
+/* --- the overlay container ---------------------------------------------------------------------
+ * Source equivalent: `internal/data-grid-overlay-editor/data-grid-overlay-editor-style.tsx`.
+ * `left` / `top` / `min-width` / `min-height` / `max-height` are set inline by
+ * `GridHostController.openOverlay` because they are computed from the cell's own rect.
+ */
+.gdg-root .gdg-overlay-editor {
+    position: absolute;
+    width: max-content;
+    max-width: 400px;
+    box-sizing: border-box;
+    z-index: 20;
+    background: var(--gdg-bg-cell);
+    border: 2px solid var(--gdg-accent-color);
+    /* Paired with the inline `min-height`/`max-height`: the container grows to fit content taller
+       than one row (the markdown editor routinely is), and scrolls internally past the point where
+       it would otherwise be pushed off-screen. See `openOverlay` for the full note -- a fixed height
+       here was a real, browser-found bug in Phase 4b. */
+    overflow: auto;
+}
+
+/* Source names this same toggle `gdg-pad`. Applied unless the cell renderer's editor asked for
+   `disablePadding`. */
+.gdg-root .gdg-overlay-editor.gdg-pad {
+    padding: var(--gdg-cell-vertical-padding) var(--gdg-cell-horizontal-padding);
+}
+
+/* --- group rename ------------------------------------------------------------------------------
+ * The inline text box `@onGroupHeaderRenamed` opens over a column group's header band. Source:
+ * `data-editor/group-rename.tsx` (`RenameInput` plus the wrapper's inline block), reproduced rule
+ * for rule.
+ *
+ * Unlike the cell overlay above, this container carries no per-cell theme of its own -- it is a
+ * child of the grid root, so every `--gdg-*` below resolves to the *grid's* theme. That is source's
+ * behaviour too: a group with an `overrideTheme` does not restyle its own rename box.
+ *
+ * Position and size are set inline, from the group band's rect. Nothing else here is.
+ */
+.gdg-root .gdg-group-rename {
+    position: absolute;
+    z-index: 20;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    background-color: var(--gdg-bg-header);
+}
+
+.gdg-root .gdg-group-rename__input {
+    flex-grow: 1;
+    border: none;
+    outline: none;
+    border-radius: 9px;
+    padding: 0 8px;
+    background-color: var(--gdg-bg-header-has-focus);
+    box-shadow: 0 0 0 1px var(--gdg-border-color);
+    color: var(--gdg-text-group-header);
+    font: var(--gdg-header-font-style) var(--gdg-font-family);
+}
+
+/* --- GrowingEntry ------------------------------------------------------------------------------
+ * Source: `internal/growing-entry/growing-entry-style.tsx` (`GrowingEntryStyle`, `ShadowBox`,
+ * `InputBox`). The autosize trick is a hidden shadow box that sizes the wrapper, with the real
+ * textarea absolutely filling it -- so the two must keep identical font metrics or the textarea
+ * stops matching its own measured height.
+ */
+.gdg-root .gdg-growing-entry {
+    position: relative;
+    margin-top: 6px;
+}
+
+.gdg-root .gdg-growing-entry .gdg-shadow-box {
+    visibility: hidden;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    width: max-content;
+    max-width: 100%;
+    min-width: 100%;
+    font-size: var(--gdg-editor-font-size);
+    line-height: 16px;
+    font-family: var(--gdg-font-family);
+    color: var(--gdg-text-dark);
+    padding: 0;
+    margin: 0;
+    padding-bottom: 2px;
+}
+
+.gdg-root .gdg-growing-entry .gdg-input {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    resize: none;
+    white-space: pre-wrap;
+    min-width: 100%;
+    overflow: hidden;
+    border: 0;
+    outline: none;
+    background-color: transparent;
+    font-size: var(--gdg-editor-font-size);
+    line-height: 16px;
+    font-family: var(--gdg-font-family);
+    color: var(--gdg-text-dark);
+    padding: 0;
+    margin: 0;
+}
+
+/* `text-cell.ts` opts into this for `cell.allowWrapping`, matching source's `text-cell.tsx` passing
+   `style={{padding: "3px 8.5px"}}` to `InputBox` only. The shadow box keeps its own padding
+   regardless -- also matching source, where the `style` prop never reached `ShadowBox`. */
+.gdg-root .gdg-growing-entry .gdg-input.gdg-input-wrapping {
+    padding: 3px 8.5px;
+}
+
+/* --- markdown preview (createMarkdownDiv) ------------------------------------------------------
+ * Source: `internal/markdown-div/private/markdown-container.tsx`. These four rules previously
+ * required walking the rendered nodes in JS after every render to set `margin` per child; as CSS
+ * they apply to whatever `marked` produces, including nodes added later.
+ */
+.gdg-root .gdg-markdown-div {
+    word-break: break-word;
+    padding-top: 6px;
+}
+
+.gdg-root .gdg-markdown-div > * {
+    margin: 0;
+}
+
+.gdg-root .gdg-markdown-div > *:last-child {
+    margin-bottom: 0;
+}
+
+.gdg-root .gdg-markdown-div p img {
+    width: 100%;
+}
+
+/* --- markdown cell editor ----------------------------------------------------------------------
+ * Source: `internal/data-grid-overlay-editor/private/markdown-overlay-editor.tsx`.
+ */
+.gdg-root .gdg-markdown-editor {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    position: relative;
+    width: 100%;
+    color: var(--gdg-text-dark);
+}
+
+.gdg-root .gdg-markdown-editor > .gdg-markdown-div {
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.gdg-root .gdg-markdown-editor > .gdg-growing-entry {
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.gdg-root .gdg-markdown-editor > .gdg-markdown-spacer {
+    flex: 1;
+}
+
+/* The edit-pencil / checkmark affordance. `color` drives the SVG, whose paths are all
+   `stroke="currentColor"` -- see `-private/edit-icons.ts`. */
+.gdg-root .gdg-icon-button {
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--gdg-accent-color);
+    height: 24px;
+    width: 24px;
+    flex-shrink: 0;
+    border-radius: 6px;
+}
+
+.gdg-root .gdg-icon-button > svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* --- uri cell editor ---------------------------------------------------------------------------
+ * Source: `internal/data-grid-overlay-editor/private/uri-overlay-editor.tsx`. `gdg-link-area` is
+ * source's own literal class name and is kept.
+ */
+.gdg-root .gdg-uri-editor {
+    display: flex;
+    flex-grow: 1;
+    align-items: center;
+    min-height: 21px;
+    width: 100%;
+}
+
+.gdg-root .gdg-uri-editor .gdg-link-area {
+    flex-grow: 1;
+    flex-shrink: 1;
+    cursor: pointer;
+    margin-right: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--gdg-link-color);
+    text-decoration: underline;
+}
+
+/* Deliberately not `.gdg-icon-button`: this one is wider (32px), unrounded, and hosts a 24px glyph
+   rather than a 16px one. Kept as its own class so the two can diverge without one silently
+   restyling the other. */
+.gdg-root .gdg-uri-edit-button {
+    flex-shrink: 0;
+    width: 32px;
+    color: var(--gdg-accent-color);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.gdg-root .gdg-uri-edit-button > svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* --- image cell editor -------------------------------------------------------------------------
+ * This editor is an intentional divergence from source (see `image-cell.ts`'s header): a thumbnail
+ * row plus one comma-separated `GrowingEntry`.
+ */
+.gdg-root .gdg-image-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.gdg-root .gdg-image-editor-thumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    /* Precedence chain, expressed in CSS rather than JS: the cell's own `rounding` wins (set as an
+       inline custom property by `image-cell.ts` when present), else the theme's `roundingRadius`,
+       else 4px. `--gdg-rounding-radius` is only emitted by `makeCSSStyle` when the theme defines it,
+       so the `4px` fallback here is the theme-absent case. */
+    --gdg-image-thumb-radius: var(--gdg-rounding-radius, 4px);
+}
+
+.gdg-root .gdg-image-editor-thumbs img {
+    max-height: 80px;
+    max-width: 120px;
+    object-fit: contain;
+    border-radius: var(--gdg-image-thumb-radius);
+}

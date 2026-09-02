@@ -1,0 +1,32 @@
+class Lazy {
+  fn;
+  val;
+  constructor(fn) {
+    this.fn = fn;
+  }
+  get value() {
+    return this.val ?? (this.val = this.fn());
+  }
+}
+function lazy(fn) {
+  return new Lazy(fn);
+}
+
+// next.js apps don't have window available at import time, so this will fail if its not lazy.
+const browserIsFirefox = lazy(() => window.navigator.userAgent.includes("Firefox"));
+const browserIsSafari = lazy(() => window.navigator.userAgent.includes("Mac OS") && window.navigator.userAgent.includes("Safari") && !window.navigator.userAgent.includes("Chrome"));
+const browserIsOSX = lazy(() => window.navigator.platform.toLowerCase().startsWith("mac"));
+
+/**
+ * **Not in source.** Added for `@enableChromeRescaling`, this port's extension of source's
+ * Firefox/Safari-only scroll-time DPR cap — see `GridHostArgs.enableChromeRescaling`.
+ *
+ * Deliberately matches Chromium as a family (Edge, Brave, Opera, Arc) rather than Chrome
+ * specifically: the reason the cap helps is the canvas fill cost at high `devicePixelRatio`, which
+ * every Chromium browser shares. `Chrome` appears in the Edge and Opera user agents too, so the only
+ * exclusion needed is Safari, which carries `Safari` but not `Chrome`.
+ */
+const browserIsChromium = lazy(() => window.navigator.userAgent.includes("Chrome") && !window.navigator.userAgent.includes("Firefox"));
+
+export { browserIsChromium, browserIsFirefox, browserIsOSX, browserIsSafari };
+//# sourceMappingURL=browser-detect.js.map

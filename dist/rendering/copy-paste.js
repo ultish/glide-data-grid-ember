@@ -1,0 +1,395 @@
+import { assertNever } from './common/support.js';
+import { GridCellKind, BooleanIndeterminate } from './data-grid-types.js';
+
+// Ported from `packages/core/src/data-editor/copy-paste.ts` (the copy-buffer construction +
+// `decodeHTML` paste parser) and `packages/core/src/data-editor/data-editor-fns.ts`'s `unquote()`
+// (the plain-text TSV fallback parser). Framework-agnostic (no React/Ember), pure functions over
+// `GridCell` data plus one DOM-parsing function (`decodeHTML`, which needs the browser's HTML
+// parser -- same DOM-dependence class as this directory's canvas-context drawing code, so it's
+// consistent with the rest of `src/rendering` to keep it here rather than move it to `-private/`).
+//
+// Ported (Phase 3c) verbatim except: `convertCellToBuffer`'s `GridCellKind.Custom` branch types
+// `cell.copyData` the same way source does (source's own type narrowing there is loose -- it reads
+// `cell.copyData` off a `CustomCell` typed cell via the switch, which is fine since `CustomCell`
+// requires `copyData: string`).
+
+/** @category Copy/Paste */
+
+/** @category Copy/Paste */
+
+/** @category Copy/Paste */
+
+/** @category Copy/Paste */
+
+function convertCellToBuffer(cell) {
+  if (cell.copyData !== undefined) {
+    return {
+      formatted: cell.copyData,
+      rawValue: cell.copyData,
+      format: "string",
+      // Do not escape the copy value if it was explicitly specified via copyData:
+      doNotEscape: true
+    };
+  }
+  switch (cell.kind) {
+    case GridCellKind.Boolean:
+      return {
+        formatted: cell.data === true ? "TRUE" : cell.data === false ? "FALSE" : cell.data === BooleanIndeterminate ? "INDETERMINATE" : "",
+        rawValue: cell.data,
+        format: "boolean"
+      };
+    case GridCellKind.Custom:
+      return {
+        formatted: cell.copyData,
+        rawValue: cell.copyData,
+        format: "string"
+      };
+    case GridCellKind.Image:
+    case GridCellKind.Bubble:
+      return {
+        formatted: cell.data,
+        rawValue: cell.data,
+        format: "string-array"
+      };
+    case GridCellKind.Drilldown:
+      return {
+        formatted: cell.data.map(x => x.text),
+        rawValue: cell.data.map(x => x.text),
+        format: "string-array"
+      };
+    case GridCellKind.Text:
+      return {
+        formatted: cell.displayData ?? cell.data,
+        rawValue: cell.data,
+        format: "string"
+      };
+    case GridCellKind.Uri:
+      return {
+        formatted: cell.displayData ?? cell.data,
+        rawValue: cell.data,
+        format: "url"
+      };
+    case GridCellKind.Markdown:
+    case GridCellKind.RowID:
+      return {
+        formatted: cell.data,
+        rawValue: cell.data,
+        format: "string"
+      };
+    case GridCellKind.Number:
+      return {
+        formatted: cell.displayData,
+        rawValue: cell.data,
+        format: "number"
+      };
+    case GridCellKind.Loading:
+      return {
+        formatted: "#LOADING",
+        rawValue: "",
+        format: "string"
+      };
+    case GridCellKind.Protected:
+      return {
+        formatted: "************",
+        rawValue: "",
+        format: "string"
+      };
+    default:
+      assertNever();
+  }
+}
+function createBufferFromGridCells(cells, columnIndexes) {
+  const copyBuffer = cells.map((row, index) => {
+    const mappedIndex = columnIndexes[index];
+    return row.map(cell => {
+      if (cell.span !== undefined && cell.span[0] !== mappedIndex) return {
+        formatted: "",
+        rawValue: "",
+        format: "string"
+      };
+      return convertCellToBuffer(cell);
+    });
+  });
+  return copyBuffer;
+}
+function escapeIfNeeded(str, withComma) {
+  if ((withComma ? /[\t\n",]/ : /[\t\n"]/).test(str)) {
+    str = `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+function createTextBuffer(copyBuffer) {
+  const lines = [];
+  for (const row of copyBuffer) {
+    const line = [];
+    for (const cell of row) {
+      if (cell.format === "url") {
+        line.push(cell.rawValue?.toString() ?? "");
+      } else if (cell.format === "string-array") {
+        line.push(cell.formatted.map(x => escapeIfNeeded(x, true)).join(","));
+      } else {
+        line.push(cell.doNotEscape === true ? cell.formatted : escapeIfNeeded(cell.formatted, false));
+      }
+    }
+    lines.push(line.join("\t"));
+  }
+  return lines.join("\n");
+}
+function formatHtmlTextContent(text) {
+  // The following formatting for the `html` variable ensures that when pasting,
+  // spaces are preserved in both Google Sheets and Excel. This is done by:
+  // 1. Replacing tabs with four spaces for consistency. Also google sheets disallows any tabs.
+  // 2. Wrapping each space with a span element to prevent them from being collapsed or ignored during the
+  //    paste operation
+  return text.replace(/\t/g, "    ").replace(/ {2,}/g, match => "<span> </span>".repeat(match.length));
+}
+function formatHtmlAttributeContent(attrText) {
+  // Escape all quotes, lt, gt, and other special characters
+  return '"' + attrText.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + '"';
+}
+function restoreHtmlEntities(str) {
+  // Unescape all quotes, lt, gt, and other special characters
+  return str.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+function createHtmlBuffer(copyBuffer) {
+  const lines = [];
+  lines.push(`<style type="text/css"><!--br {mso-data-placement:same-cell;}--></style>`, "<table><tbody>");
+  for (const row of copyBuffer) {
+    lines.push("<tr>");
+    for (const cell of row) {
+      const formatStr = `gdg-format="${cell.format}"`;
+      if (cell.format === "url") {
+        lines.push(`<td ${formatStr}><a href="${cell.rawValue}">${formatHtmlTextContent(cell.formatted)}</a></td>`);
+      } else {
+        if (cell.format === "string-array") {
+          lines.push(`<td ${formatStr}><ol>${cell.formatted.map((x, ind) => `<li gdg-raw-value=${formatHtmlAttributeContent(cell.rawValue[ind])}>` + formatHtmlTextContent(x) + "</li>").join("")}</ol></td>`);
+        } else {
+          lines.push(`<td gdg-raw-value=${formatHtmlAttributeContent(cell.rawValue?.toString() ?? "")} ${formatStr}>${formatHtmlTextContent(cell.formatted)}</td>`);
+        }
+      }
+    }
+    lines.push("</tr>");
+  }
+  lines.push("</tbody></table>");
+  return lines.join("");
+}
+
+// This function encodes grid cells to a table object.
+// Each td in the table contains one of 3 things
+// - A string directly and the td has a `gdg-raw-value` attribute with the raw value
+// - An anchor tag with a href and the text is the formatted value
+// - An ordered list with each item containing a `gdg-raw-value` attribute with the raw value
+/** @category Copy/Paste */
+function getCopyBufferContents(cells, columnIndexes) {
+  const copyBuffer = createBufferFromGridCells(cells, columnIndexes);
+  const textPlain = createTextBuffer(copyBuffer);
+  const textHtml = createHtmlBuffer(copyBuffer);
+  return {
+    textPlain,
+    textHtml
+  };
+}
+
+/**
+ * The header row source prepends to the copy buffer when `copyHeaders` is on
+ * (`data-editor.tsx:3787-3796`) -- one non-overlay `Text` cell per copied column, carrying the
+ * column's `title`.
+ *
+ * `columnIndexes` is in the **consumer's** column space (no row-marker column), the same space
+ * `getCopyBufferContents` takes and the same space `columns` is indexed in. A column index with no
+ * matching column yields an empty title rather than throwing: the copied region is clamped
+ * elsewhere, and a missing header is a strictly better failure than a lost copy.
+ *
+ * @category Copy/Paste
+ */
+function copyHeaderRow(columns, columnIndexes) {
+  return columnIndexes.map(index => {
+    const title = columns[index]?.title ?? "";
+    return {
+      kind: GridCellKind.Text,
+      data: title,
+      displayData: title,
+      allowOverlay: false
+    };
+  });
+}
+
+/** @category Copy/Paste */
+function decodeHTML(html) {
+  const fragment = document.createElement("html");
+  // we dont want to retain the pasted non-breaking spaces
+  fragment.innerHTML = html.replace(/&nbsp;/g, " ");
+  const tableEl = fragment.querySelector("table");
+  if (tableEl === null) return undefined;
+  const walkEl = [tableEl];
+  const result = [];
+  let current;
+  while (walkEl.length > 0) {
+    const el = walkEl.pop();
+    if (el === undefined) break;
+    if (el instanceof HTMLTableElement || el.nodeName === "TBODY") {
+      walkEl.push(...[...el.children].reverse());
+    } else if (el instanceof HTMLTableRowElement) {
+      if (current !== undefined) {
+        result.push(current);
+      }
+      current = [];
+      walkEl.push(...[...el.children].reverse());
+    } else if (el instanceof HTMLTableCellElement) {
+      // be careful not to use innerText here as its behavior is not well defined for non DOM attached nodes
+      const clone = el.cloneNode(true);
+
+      // Apple numbers seems to always wrap the cell in a p tag and a font tag. It also puts both <br> and \n
+      // linebreak markers in the code. This is both unneeded and causes issues with the paste code.
+      const firstTagIsPara = clone.children.length === 1 && clone.children[0]?.nodeName === "P";
+      const para = firstTagIsPara ? clone.children[0] : null;
+      const isAppleNumbers = para?.children.length === 1 && para.children[0]?.nodeName === "FONT";
+      const brs = clone.querySelectorAll("br");
+      for (const br of brs) {
+        br.replaceWith("\n");
+      }
+      const attributeValue = clone.getAttribute("gdg-raw-value");
+      const formatValue = clone.getAttribute("gdg-format") ?? "string";
+      if (clone.querySelector("a") !== null) {
+        current?.push({
+          // raw value is the href
+          rawValue: clone.querySelector("a")?.getAttribute("href") ?? "",
+          formatted: clone.textContent ?? "",
+          format: formatValue
+        });
+      } else if (clone.querySelector("ol") !== null) {
+        const rawValues = clone.querySelectorAll("li");
+        current?.push({
+          rawValue: [...rawValues].map(x => x.getAttribute("gdg-raw-value") ?? ""),
+          formatted: [...rawValues].map(x => x.textContent ?? ""),
+          format: "string-array"
+        });
+      } else if (attributeValue !== null) {
+        current?.push({
+          rawValue: restoreHtmlEntities(attributeValue),
+          formatted: clone.textContent ?? "",
+          format: formatValue
+        });
+      } else {
+        let textContent = clone.textContent ?? "";
+        if (isAppleNumbers) {
+          // replace any newline not preceded by a newline
+          textContent = textContent.replace(/\n(?!\n)/g, "");
+        }
+        current?.push({
+          rawValue: textContent ?? "",
+          formatted: textContent ?? "",
+          format: formatValue
+        });
+      }
+    }
+  }
+  if (current !== undefined) {
+    result.push(current);
+  }
+  return result;
+}
+function descape(s) {
+  if (s.startsWith('"') && s.endsWith('"')) {
+    s = s.slice(1, -1).replace(/""/g, '"');
+  }
+  return s;
+}
+
+// Plain-text TSV fallback parser, ported verbatim from `data-editor/data-editor-fns.ts`'s
+// `unquote()`. A small hand-rolled tokenizer over tab/newline-separated, optionally
+// double-quote-escaped fields (Excel/Sheets/`escapeIfNeeded`-compatible quoting) -- NOT the same
+// thing as `decodeHTML` (this is the fallback used when the clipboard has no `text/html` payload,
+// e.g. pasting from a plain-text source or another app that only wrote `text/plain`).
+/** @category Copy/Paste */
+function unquote(str) {
+  let State = /*#__PURE__*/function (State) {
+    State[State["None"] = 0] = "None";
+    State[State["inString"] = 1] = "inString";
+    State[State["inStringPostQuote"] = 2] = "inStringPostQuote";
+    return State;
+  }({});
+  const result = [];
+  let current = [];
+  let start = 0;
+  let state = State.None;
+  str = str.replace(/\r\n/g, "\n");
+  let index = 0;
+  for (const char of str) {
+    switch (state) {
+      case State.None:
+        if (char === "\t" || char === "\n") {
+          current.push(str.slice(start, index));
+          start = index + 1;
+          if (char === "\n") {
+            result.push(current);
+            current = [];
+          }
+        } else if (char === `"`) {
+          state = State.inString;
+        }
+        break;
+      case State.inString:
+        if (char === `"`) {
+          state = State.inStringPostQuote;
+        }
+        break;
+      case State.inStringPostQuote:
+        if (char === '"') {
+          state = State.inString;
+        } else if (char === "\t" || char === "\n") {
+          current.push(descape(str.slice(start, index)));
+          start = index + 1;
+          if (char === "\n") {
+            result.push(current);
+            current = [];
+          }
+          state = State.None;
+        } else {
+          state = State.None;
+        }
+        break;
+    }
+    index++;
+  }
+  if (start < str.length) {
+    current.push(descape(str.slice(start, str.length)));
+  }
+  result.push(current);
+  return result.map(r => r.map(c => ({
+    rawValue: c,
+    formatted: c,
+    format: "string"
+  })));
+}
+
+/**
+ * A consumer's `@onPaste`. `target` is in the consumer's own column space (row-marker column already
+ * subtracted) and `values` is the clipboard as raw strings, *unclipped* — rows and columns past the
+ * end of the grid are still reported, exactly as source does, so a consumer can decline a paste that
+ * would not fit. Return `true` to let it through; anything else cancels it.
+ */
+
+/** `@onPaste`'s accepted shapes. See {@link shouldAcceptPaste} for what each one means. */
+
+/**
+ * Decides whether a decoded clipboard buffer may be written, and is the whole of `@onPaste`'s
+ * semantics. Source's guard is `onPaste === false || (typeof onPaste === "function" &&
+ * onPaste(...) !== true)` (`data-editor.tsx:3714-3722`) — note `!== true`, not `=== false`: a
+ * callback that forgets to return anything cancels the paste rather than allowing it, and that is
+ * deliberate upstream.
+ *
+ * **Divergence, and it is in the `undefined` case only.** Source treats an absent `onPaste` as
+ * "paste the raw clipboard text into the single target cell, no splitting" (`:3699-3707`). This port
+ * treats it as `true` — split on tabs/newlines and write the range — because that is what it has
+ * always done and what every demo and the cookbook describe. `false` and the callback form match
+ * source exactly.
+ */
+function shouldAcceptPaste(onPaste, target, buffer) {
+  if (onPaste === false) return false;
+  if (typeof onPaste !== "function") return true;
+  return onPaste(target, buffer.map(row => row.map(cell => cell.rawValue?.toString() ?? ""))) === true;
+}
+
+export { copyHeaderRow, decodeHTML, getCopyBufferContents, shouldAcceptPaste, unquote };
+//# sourceMappingURL=copy-paste.js.map

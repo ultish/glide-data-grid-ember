@@ -1,0 +1,1 @@
+{"version":3,"file":"new-row-target.d.ts","sourceRoot":"","sources":["../../src/rendering/new-row-target.ts"],"names":[],"mappings":"AAMA,OAAO,KAAK,EAAE,UAAU,EAAE,MAAM,sBAAsB,CAAC;AAEvD,sFAAsF;AACtF,MAAM,MAAM,YAAY,GAAG,MAAM,GAAG,UAAU,CAAC;AAE/C;;;;;;;;;GASG;AACH,wBAAgB,mBAAmB,CAC/B,OAAO,EAAE,SAAS,UAAU,EAAE,EAC9B,UAAU,EAAE,YAAY,GAAG,SAAS,EACpC,YAAY,EAAE,MAAM,GACrB,MAAM,CAUR"}
